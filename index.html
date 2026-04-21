@@ -1,0 +1,1804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tilt // Video Campaign Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0b0b0e; --bg2: #131318; --bg3: #1a1a22; --bg4: #25252f;
+    --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.13);
+    --text1: #f0eefc; --text2: #a09db8; --text3: #6b6880;
+    --accent: #7f77dd; --accent2: #afa9ec; --accent-dim: rgba(127,119,221,0.12);
+    --green: #1d9e75; --green-bg: #04342c; --green-text: #5dcaa5;
+    --amber-bg: #412402; --amber-text: #fac775;
+    --red: #e24b4a; --red-bg: #501313; --red-text: #f09595;
+    --blue-bg: #042c53; --blue-text: #85b7eb;
+    --gray-bg: #2c2c2a; --gray-text: #b4b2a9;
+    --pink-bg: #4b1528; --pink-text: #f4c0d1;
+  }
+  body { font-family: 'Inter Tight', system-ui, sans-serif; background: var(--bg); color: var(--text1); height: 100vh; overflow: hidden; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  .topbar { display: flex; align-items: center; gap: 20px; padding: 10px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .logo { font-size: 14px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; display: flex; align-items: center; gap: 8px; }
+  .logo-dot { width: 10px; height: 10px; background: var(--accent); border-radius: 2px; box-shadow: 0 0 8px rgba(127,119,221,0.6); }
+  .logo span { color: var(--text3); font-weight: 400; }
+  .topbar-tabs { display: flex; gap: 2px; margin-left: 16px; }
+  .tab-btn { padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500; background: transparent; color: var(--text2); transition: all 0.12s; position: relative; }
+  .tab-btn:hover { background: var(--bg3); color: var(--text1); }
+  .tab-btn.active { background: var(--bg3); color: var(--accent2); }
+  .tab-badge { display: inline-block; padding: 1px 5px; border-radius: 8px; font-size: 9.5px; font-weight: 700; background: var(--accent); color: #fff; margin-left: 4px; font-family: 'JetBrains Mono', monospace; min-width: 14px; text-align: center; }
+  .tab-badge.alert { background: var(--amber-text); color: var(--amber-bg); }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-text); box-shadow: 0 0 6px var(--green-text); }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  .sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 14px 14px 8px; display: flex; align-items: center; justify-content: space-between; }
+  .sidebar-title { font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text3); }
+
+  .country-group { margin-bottom: 4px; }
+  .country-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; transition: background 0.1s; border-radius: 6px; margin: 0 8px 2px; }
+  .country-row:hover { background: var(--bg3); }
+  .country-chevron { color: var(--text3); font-size: 10px; flex-shrink: 0; transition: transform 0.15s; width: 10px; font-family: 'JetBrains Mono', monospace; }
+  .country-flag { width: 26px; height: 18px; border-radius: 2px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
+  .flag-UK { background: linear-gradient(135deg, #012169 50%, #c8102e 50%); color: #fff; }
+  .flag-ES { background: linear-gradient(180deg, #aa151b 33%, #f1bf00 33%, #f1bf00 66%, #aa151b 66%); color: #000; }
+  .flag-IT { background: linear-gradient(90deg, #008c45 33%, #f4f5f0 33%, #f4f5f0 66%, #cd212a 66%); color: #000; }
+  .flag-PL { background: linear-gradient(180deg, #fff 50%, #dc143c 50%); color: #dc143c; }
+  .country-name { font-size: 13px; font-weight: 600; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; }
+  .country-count { font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; padding: 1px 6px; background: var(--bg4); border-radius: 3px; flex-shrink: 0; }
+
+  .subcamp-list { display: none; padding: 2px 0 4px; }
+  .subcamp-list.open { display: block; }
+  .subcamp-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 44px; cursor: pointer; transition: background 0.1s; margin: 0 8px 2px; border-radius: 6px; border: 1px solid transparent; position: relative; }
+  .subcamp-item::before { content: ''; position: absolute; left: 24px; top: 0; bottom: 0; width: 1px; background: var(--border); }
+  .subcamp-item:hover { background: var(--bg3); }
+  .subcamp-item.active { background: var(--bg3); border-color: var(--border2); box-shadow: inset 3px 0 0 var(--accent); }
+  .rank-badge { width: 20px; height: 20px; border-radius: 4px; background: var(--bg4); color: var(--text2); font-size: 10.5px; font-weight: 600; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
+  .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; }
+  .cat-Luxury { background: #3c3489; color: #d8d4ff; }
+  .cat-Essentials { background: #0f6e56; color: #9fe1cb; }
+  .cat-BTS { background: #633806; color: #fac775; }
+  .add-sub-btn { margin: 4px 16px 6px 44px; padding: 5px 8px; border-radius: 5px; border: 1px dashed var(--border2); background: transparent; color: var(--text3); cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 500; width: calc(100% - 60px); transition: all 0.12s; }
+  .add-sub-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+  .sidebar-scroll { flex: 1; overflow-y: auto; padding: 2px 0 8px; }
+  .reorder-btn { margin: 0 12px 8px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; justify-content: center; transition: all 0.12s; }
+  .reorder-btn:hover { background: var(--accent-dim); color: var(--accent2); border-color: var(--accent); }
+
+  .content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .camp-header { padding: 16px 20px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .breadcrumb { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .breadcrumb-flag-inline { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 14px; border-radius: 2px; font-size: 9px; font-weight: 700; }
+  .breadcrumb-sep { color: var(--text3); }
+  .breadcrumb-country { color: var(--text2); }
+  .camp-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .camp-title { font-size: 18px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; }
+  .camp-brief { font-size: 13px; color: var(--text2); line-height: 1.5; max-width: 640px; }
+  .camp-meta { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+  .meta-chip { font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border2); color: var(--text2); font-family: 'JetBrains Mono', monospace; display: inline-flex; align-items: center; gap: 5px; }
+  .meta-chip-label { color: var(--text3); }
+  .edit-btn { padding: 5px 11px; border-radius: 5px; border: 1px solid var(--border2); background: transparent; color: var(--text2); cursor: pointer; font-family: inherit; font-size: 12px; transition: all 0.12s; }
+  .edit-btn:hover { border-color: var(--accent); color: var(--accent2); }
+  .edit-btn.ml-auto { margin-left: auto; }
+  .del-camp-btn:hover { border-color: var(--red); color: var(--red-text); }
+
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+  .search-wrap { position: relative; width: 220px; }
+  .search-wrap input { width: 100%; padding: 7px 10px 7px 28px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text1); font-family: inherit; font-size: 13px; outline: none; transition: border-color 0.12s; }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text3); font-size: 12px; }
+  .filter-select { padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); font-family: inherit; font-size: 13px; cursor: pointer; outline: none; }
+  .filter-select:focus { border-color: var(--accent); }
+  .count-chip { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; padding: 3px 8px; background: var(--bg3); border-radius: 4px; }
+  .primary-btn { margin-left: auto; padding: 7px 14px; border-radius: 6px; border: none; background: var(--accent); color: #fff; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.12s; }
+  .primary-btn:hover { opacity: 0.88; }
+
+  .table-wrap { flex: 1; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { position: sticky; top: 0; z-index: 2; background: var(--bg2); }
+  th { padding: 9px 12px; text-align: left; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); border-bottom: 1px solid var(--border2); white-space: nowrap; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:hover td { background: rgba(127,119,221,0.03); }
+  .pn { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text3); }
+  .video-name-cell { max-width: 220px; display: flex; align-items: center; gap: 6px; }
+  .video-name-text { font-size: 13px; color: var(--text1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', monospace; }
+  .version-tag { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; background: var(--accent-dim); color: var(--accent2); flex-shrink: 0; }
+  .cat-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 3px; background: var(--amber-bg); color: var(--amber-text); }
+  .link-cell a { font-size: 12px; color: var(--blue-text); text-decoration: none; font-family: 'JetBrains Mono', monospace; display: inline-flex; align-items: center; gap: 3px; }
+  .link-cell a:hover { color: var(--accent2); }
+  .no-link { font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .editor-cell { display: flex; align-items: center; gap: 7px; }
+  .editor-avatar { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
+  .av-Zidni { background: #3c3489; color: var(--accent2); }
+  .av-Patty { background: #085041; color: var(--green-text); }
+  .av-Sharm { background: #633806; color: var(--amber-text); }
+  .av-Elsa { background: #72243e; color: var(--pink-text); }
+  .editor-name { font-size: 12px; color: var(--text1); }
+  .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .s-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .st-Approved { background: var(--green-bg); color: var(--green-text); }
+  .st-Approved .s-dot { background: var(--green-text); }
+  .st-In_Review { background: var(--blue-bg); color: var(--blue-text); }
+  .st-In_Review .s-dot { background: var(--blue-text); }
+  .st-Draft { background: var(--gray-bg); color: var(--gray-text); }
+  .st-Draft .s-dot { background: var(--gray-text); }
+  .st-Needs_Revision { background: var(--red-bg); color: var(--red-text); }
+  .st-Needs_Revision .s-dot { background: var(--red-text); }
+  .date-cell { font-size: 12px; color: var(--text2); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .eta-cell { font-size: 12px; color: var(--amber-text); font-family: 'JetBrains Mono', monospace; white-space: nowrap; font-weight: 500; }
+  .sched-cell { font-size: 12px; color: var(--blue-text); font-family: 'JetBrains Mono', monospace; white-space: nowrap; font-weight: 500; }
+  .released-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; background: var(--green-bg); color: var(--green-text); }
+  .diff-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
+  .diff-Low { background: #04342c; color: #5dcaa5; }
+  .diff-Moderate { background: #042c53; color: #85b7eb; }
+  .diff-High { background: #412402; color: #fac775; }
+  .diff-Max { background: #501313; color: #f09595; }
+  .row-actions { display: flex; gap: 4px; }
+  .action-btn { padding: 4px 9px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 11px; font-family: inherit; transition: all 0.12s; }
+  .action-btn:hover { border-color: var(--border2); color: var(--text1); background: var(--bg3); }
+  .del-btn:hover { border-color: var(--red); color: var(--red-text); background: var(--red-bg); }
+
+  .scheduler-panel, .automation-panel, .config-panel, .notif-panel { padding: 24px 28px; overflow-y: auto; flex: 1; max-width: 1040px; width: 100%; }
+  .section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 12px; margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+  .section-title:first-child { margin-top: 0; }
+  .auto-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .auto-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .auto-icon { width: 28px; height: 28px; border-radius: 6px; background: var(--accent-dim); color: var(--accent2); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; }
+  .auto-title { font-size: 14px; font-weight: 700; color: var(--text1); }
+  .auto-sub { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+  .auto-desc { font-size: 13px; color: var(--text2); line-height: 1.6; margin: 8px 0; }
+  .code-block { background: #07070a; border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin-top: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #c3f0d9; line-height: 1.65; overflow-x: auto; white-space: pre; }
+  .run-btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--accent2); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.12s; }
+  .run-btn:hover { background: var(--accent); color: #fff; }
+  .run-btn.secondary { border-color: var(--border2); color: var(--text2); background: transparent; }
+  .run-btn.secondary:hover { border-color: var(--text2); color: var(--text1); background: var(--bg3); }
+  .webhook-row { display: flex; gap: 8px; margin-top: 10px; }
+  .webhook-row input { flex: 1; padding: 8px 10px; border-radius: 5px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text1); font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; }
+  .webhook-row input:focus { border-color: var(--accent); }
+  .save-btn { padding: 8px 14px; border-radius: 5px; border: none; background: var(--accent); color: #fff; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .save-btn:hover { opacity: 0.9; }
+
+  .scheduler-config-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .scheduler-date-pick { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text2); }
+  .scheduler-date-pick input[type="date"] { padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text1); font-family: inherit; font-size: 13px; outline: none; color-scheme: dark; }
+  .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text2); cursor: pointer; }
+  .checkbox-row input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+
+  .editor-plans { display: grid; gap: 12px; margin-top: 12px; }
+  .editor-plan { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .editor-plan.alert { border-color: var(--red); background: rgba(226,75,74,0.04); }
+  .editor-plan-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .editor-plan-header .editor-avatar { width: 30px; height: 30px; font-size: 11px; }
+  .editor-plan-name { font-size: 14px; font-weight: 700; color: var(--text1); }
+  .editor-plan-rules { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-left: auto; }
+  .editor-plan-rules-inline { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .plan-slots { display: flex; flex-direction: column; gap: 6px; }
+  .plan-slot { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg3); border-radius: 6px; border: 1px solid var(--border); }
+  .plan-slot-num { width: 22px; height: 22px; border-radius: 4px; background: var(--bg4); color: var(--text2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+  .plan-slot-name { font-size: 12px; color: var(--text1); font-weight: 500; font-family: 'JetBrains Mono', monospace; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .plan-slot-country { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+  .plan-empty { padding: 16px; text-align: center; color: var(--text3); font-size: 12px; background: var(--bg3); border-radius: 6px; border: 1px dashed var(--border2); }
+  .alert-box { padding: 10px 12px; border-radius: 6px; background: var(--red-bg); color: var(--red-text); font-size: 12px; display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; border: 1px solid var(--red); }
+
+  /* Pending batch UI */
+  .batch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
+  .batch-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; position: relative; overflow: hidden; }
+  .batch-card.ready { border-color: var(--green); background: rgba(29,158,117,0.04); }
+  .batch-card.warn { border-color: var(--amber-text); background: rgba(250,199,117,0.03); }
+  .batch-card.empty { opacity: 0.55; }
+  .batch-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .batch-header-right { margin-left: auto; font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .batch-card-title { font-size: 14px; font-weight: 700; color: var(--text1); }
+  .batch-progress-bar { width: 100%; height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; margin: 8px 0 10px; }
+  .batch-progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .batch-progress-fill.warn { background: var(--amber-text); }
+  .batch-progress-fill.ready { background: var(--green); }
+  .batch-items { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+  .batch-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px; background: var(--bg3); border-radius: 4px; }
+  .batch-item-idx { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3); width: 14px; flex-shrink: 0; }
+  .batch-item-name { color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .batch-item-change { font-size: 9.5px; padding: 1px 5px; border-radius: 3px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
+  .change-created { background: var(--green-bg); color: var(--green-text); }
+  .change-reassigned { background: #3c3489; color: #d8d4ff; }
+  .change-status { background: var(--blue-bg); color: var(--blue-text); }
+  .batch-actions { display: flex; gap: 6px; }
+  .batch-flush-btn { flex: 1; padding: 6px 10px; border-radius: 5px; border: 1px solid var(--green); background: rgba(29,158,117,0.1); color: var(--green-text); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .batch-flush-btn:hover { background: var(--green); color: #fff; }
+  .batch-copy-btn, .batch-slack-btn { padding: 6px 9px; border-radius: 5px; border: 1px solid var(--border2); background: transparent; color: var(--text2); font-family: inherit; font-size: 12px; cursor: pointer; }
+  .batch-copy-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+  .batch-slack-btn:hover { border-color: var(--green); color: var(--green-text); background: var(--green-bg); }
+  .batch-clear-btn { padding: 6px 10px; border-radius: 5px; border: 1px solid var(--border2); background: transparent; color: var(--text3); font-family: inherit; font-size: 12px; cursor: pointer; }
+  .batch-clear-btn:hover { border-color: var(--red); color: var(--red-text); }
+  .sent-copy-btn { padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border2); background: transparent; color: var(--text2); font-family: inherit; font-size: 11px; cursor: pointer; }
+  .sent-copy-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+
+  .sent-log { display: flex; flex-direction: column; gap: 8px; }
+  .sent-entry { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .sent-entry-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sent-entry-time { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-left: auto; }
+  .sent-entry-body { font-size: 12px; color: var(--text2); font-family: 'JetBrains Mono', monospace; line-height: 1.6; white-space: pre-wrap; padding: 6px 8px; background: #07070a; border-radius: 4px; border-left: 2px solid var(--accent); }
+
+  .log-list { display: flex; flex-direction: column; gap: 6px; }
+  .log-entry { display: flex; gap: 10px; padding: 8px 10px; border-radius: 6px; background: var(--bg3); font-size: 12px; border-left: 2px solid var(--accent); }
+  .log-time { color: var(--text3); font-family: 'JetBrains Mono', monospace; font-size: 11px; flex-shrink: 0; }
+  .log-msg { color: var(--text1); }
+  .log-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; margin-right: 4px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; }
+  .tag-created { background: var(--green-bg); color: var(--green-text); }
+  .tag-updated { background: var(--blue-bg); color: var(--blue-text); }
+  .tag-deleted { background: var(--red-bg); color: var(--red-text); }
+  .tag-scheduled { background: #3c3489; color: #d8d4ff; }
+  .tag-notified { background: #0f6e56; color: #9fe1cb; }
+  .tag-queued { background: var(--bg4); color: var(--text2); }
+
+  .toast { position: fixed; bottom: 20px; right: 20px; z-index: 100; background: var(--bg3); border: 1px solid var(--border2); border-radius: 8px; padding: 10px 16px; font-size: 13px; color: var(--text1); opacity: 0; transform: translateY(8px); transition: all 0.2s; pointer-events: none; max-width: 380px; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.success { border-color: var(--green); box-shadow: 0 0 12px rgba(29,158,117,0.2); }
+  .toast.error { border-color: var(--red); box-shadow: 0 0 12px rgba(226,75,74,0.2); }
+
+  .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.65); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+  .modal-overlay.open { opacity: 1; pointer-events: auto; }
+  .modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 22px 24px; width: 580px; max-width: 94vw; max-height: 90vh; overflow-y: auto; transform: translateY(8px); transition: transform 0.15s; }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-title { font-size: 15px; font-weight: 700; color: var(--text1); margin-bottom: 16px; letter-spacing: -0.2px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-row.full { grid-column: span 2; }
+  .form-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); margin-bottom: 5px; display: block; }
+  .form-input, .form-select, .form-textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text1); font-family: inherit; font-size: 13px; outline: none; transition: border-color 0.12s; color-scheme: dark; }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+  .form-textarea { min-height: 72px; resize: vertical; font-family: inherit; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .cancel-btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border2); background: transparent; color: var(--text2); cursor: pointer; font-family: inherit; font-size: 13px; }
+  .cancel-btn:hover { color: var(--text1); }
+  .submit-btn { padding: 8px 16px; border-radius: 6px; border: none; background: var(--accent); color: #fff; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; }
+  .submit-btn:hover { opacity: 0.9; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text3); font-size: 13px; }
+  .empty-state-big { text-align: center; padding: 80px 20px; color: var(--text3); }
+  .empty-state-big .title { font-size: 16px; color: var(--text2); margin-bottom: 6px; font-weight: 500; }
+  .empty-state-big .sub { font-size: 13px; color: var(--text3); margin-bottom: 16px; }
+
+  .config-row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .config-label { font-size: 13px; color: var(--text2); font-weight: 500; }
+  .config-value { font-size: 12px; color: var(--text1); font-family: 'JetBrains Mono', monospace; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a47; }
+</style>
+</head>
+<body>
+
+<div class="app" id="app"></div>
+<div class="toast" id="toast"></div>
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+"use strict";
+
+window.addEventListener('error', function(e) {
+  var app = document.getElementById('app');
+  if (app) {
+    app.innerHTML = '<div style="padding:40px;color:#f09595;font-family:monospace;font-size:12px;">' +
+      '<h2 style="margin-bottom:12px;color:#fff;font-family:sans-serif;">Runtime Error</h2>' +
+      '<div><strong>Message:</strong> ' + (e.message || '(unknown)') + '</div>' +
+      '<div><strong>Line:</strong> ' + (e.lineno || '?') + ':' + (e.colno || '?') + '</div>' +
+      (e.error && e.error.stack ? '<pre style="margin-top:12px;white-space:pre-wrap;">' + e.error.stack + '</pre>' : '') +
+    '</div>';
+  }
+});
+
+// ===================== EDITOR RULES =====================
+var EDITORS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
+var DIFFICULTIES = ['Low', 'Moderate', 'High', 'Max'];
+var EDITOR_ALLOWED_DIFF = {
+  Zidni: ['Low','Moderate','High','Max'],
+  Sharm: ['Low','Moderate','High'],
+  Patty: ['Low','Moderate'],
+  Elsa:  ['Low','Moderate','High','Max']
+};
+var EDITOR_AUTO_SCHEDULE = { Zidni: true, Sharm: true, Patty: true, Elsa: false };
+var EDITOR_RULES = {
+  Zidni: { cap: 4, countryOrder: ['ES', 'IT', 'UK'], idealMix: { Low: 1, Moderate: 1, High: 1, Max: 1 } },
+  Sharm: { cap: 3, countryOrder: ['UK'], idealMix: { Low: 1, Moderate: 2 } },
+  Patty: { cap: 3, countryOrder: ['UK'], idealMix: { Low: 2, Moderate: 1 } }
+};
+
+// Batching thresholds
+var BATCH_SIZE_LIMIT = 3;
+var BATCH_TIME_LIMIT_MS = 30 * 60 * 1000; // 30 min
+
+// ===================== STATE =====================
+var STATE = {
+  tab: 'campaigns',
+  activeSubCampaignId: 1,
+  expandedCountries: { UK: true, ES: false, IT: false, PL: false },
+  search: '',
+  statusFilter: 'all',
+  editorFilter: 'all',
+  webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+  slackWorkspace: '',
+  editorSlackChannels: { Zidni: '', Sharm: '', Patty: '', Elsa: '' },
+  schedulerDate: todayISO(),
+  schedulerIncludeWeekends: false,
+
+  countries: [
+    { code: 'UK', name: 'United Kingdom' },
+    { code: 'ES', name: 'Spain' },
+    { code: 'IT', name: 'Italy' },
+    { code: 'PL', name: 'Poland' }
+  ],
+  campaigns: [
+    { id: 1, country: 'UK', rank: 1, name: 'Privilege Supply \u2013 Luxury', brief: 'High-end product showcase, tone = aspirational', driveId: '1a2B3cD4eF5gH6iJ', category: 'Luxury', slackOverride: '' },
+    { id: 2, country: 'UK', rank: 2, name: 'Privilege Supply \u2013 Essentials', brief: 'Everyday essentials, tone = practical', driveId: '', category: 'Essentials', slackOverride: '' },
+    { id: 3, country: 'ES', rank: 1, name: 'Lujo Privilegio \u2013 Primavera', brief: 'Spring luxury drop for the Spanish market (Zidni only)', driveId: '', category: 'Luxury', slackOverride: '' },
+    { id: 4, country: 'IT', rank: 1, name: 'Privilege Supply \u2013 Moda', brief: 'Italian fashion-forward editorial cuts (Zidni only)', driveId: '', category: 'Luxury', slackOverride: '' },
+    { id: 5, country: 'PL', rank: 1, name: 'Privilege Supply \u2013 Codzienny', brief: 'Polish everyday essentials launch (empty for now)', driveId: '', category: 'Essentials', slackOverride: '' }
+  ],
+  assets: seedAssets(),
+
+  // Pending batches — in-memory queue per editor
+  pendingBatches: {
+    Zidni: { items: [], firstQueuedAt: null },
+    Sharm: { items: [], firstQueuedAt: null },
+    Patty: { items: [], firstQueuedAt: null },
+    Elsa:  { items: [], firstQueuedAt: null }
+  },
+  // Sent notifications history (for viewing in the Notifications tab)
+  sentNotifications: [],
+
+  activityLog: [
+    { time: '00:00', tag: 'created', msg: 'Seeded 20 video assets with difficulty ratings' },
+    { time: '00:00', tag: 'created', msg: '4 editors initialized (Zidni, Sharm, Patty, Elsa)' }
+  ],
+  nextAssetId: 21,
+  nextCampaignId: 6,
+  nextBatchItemId: 1
+};
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+function seedAssets() {
+  var ukLux = [
+    { name: 'Luxury_1N_PrivilegeSupply_ThisorThat_V1', ed: 'Patty',  df: 'Low'      },
+    { name: 'Luxury_2N_PrivilegeSupply_GRWM_V1',       ed: 'Patty',  df: 'Low'      },
+    { name: 'Luxury_3N_PrivilegeSupply_Unboxing_V1',   ed: 'Patty',  df: 'Moderate' },
+    { name: 'Luxury_4N_PrivilegeSupply_POV_V1',        ed: 'Sharm',  df: 'Low'      },
+    { name: 'Luxury_5N_PrivilegeSupply_Review_V2',     ed: 'Sharm',  df: 'Moderate' },
+    { name: 'Luxury_6N_PrivilegeSupply_Lifestyle_V1',  ed: 'Sharm',  df: 'Moderate' },
+    { name: 'Luxury_7N_PrivilegeSupply_Haul_V1',       ed: 'Sharm',  df: 'High'     },
+    { name: 'Luxury_8N_PrivilegeSupply_BTS_V1',        ed: 'Zidni',  df: 'High'     },
+    { name: 'Luxury_9N_PrivilegeSupply_Vlog_V2',       ed: 'Zidni',  df: 'Max'      },
+    { name: 'Luxury_10N_PrivilegeSupply_TryOn_V1',     ed: 'Patty',  df: 'Low'      },
+    { name: 'Luxury_11N_PrivilegeSupply_Reaction_V1',  ed: 'Sharm',  df: 'Low'      },
+    { name: 'Luxury_12N_PrivilegeSupply_Comparison_V1',ed: 'Patty',  df: 'Moderate' },
+    { name: 'Luxury_13N_PrivilegeSupply_Collection_V2',ed: 'Zidni',  df: 'High'     },
+    { name: 'Luxury_14N_PrivilegeSupply_Transformation_V1', ed: 'Zidni', df: 'Max'  },
+    { name: 'Luxury_15N_PrivilegeSupply_Recap_V1',     ed: 'Sharm',  df: 'Moderate' }
+  ];
+  var esLux = [
+    { name: 'Lujo_1N_Primavera_Intro_V1',    ed: 'Zidni', df: 'Moderate' },
+    { name: 'Lujo_2N_Primavera_Showcase_V1', ed: 'Zidni', df: 'High'     },
+    { name: 'Lujo_3N_Primavera_Story_V1',    ed: 'Zidni', df: 'Max'      }
+  ];
+  var itLux = [
+    { name: 'Moda_1N_Editorial_V1', ed: 'Zidni', df: 'High' },
+    { name: 'Moda_2N_Editorial_V2', ed: 'Zidni', df: 'Max'  }
+  ];
+  var out = [], id = 1;
+  ukLux.forEach(function(a, i) { out.push(mkAsset(id++, i+1, 1, a.name, a.ed, a.df, 'Apr 22, 2026', a.name.indexOf('V2') >= 0 ? 'V2' : 'V1')); });
+  esLux.forEach(function(a, i) { out.push(mkAsset(id++, i+1, 3, a.name, a.ed, a.df, 'Apr 25, 2026', 'V1')); });
+  itLux.forEach(function(a, i) { out.push(mkAsset(id++, i+1, 4, a.name, a.ed, a.df, 'Apr 26, 2026', 'V' + (i+1))); });
+  return out;
+}
+
+function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, version) {
+  return {
+    id: id, pn: pn, campaignId: campaignId, name: name, category: 'LUXURY',
+    rawVideo: 'https://teamtilt.notion.site', editingBrief: '',
+    editor: editor, difficulty: difficulty, finalVideo: '',
+    estDelivery: estDelivery, dateApproved: '',
+    scheduledFor: '', released: false,
+    status: 'Draft', version: version
+  };
+}
+
+// ===================== UTILITIES =====================
+function toast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  setTimeout(function() { t.className = 'toast'; }, 2800);
+}
+
+function timeStamp() {
+  var d = new Date();
+  var hh = String(d.getHours()); if (hh.length < 2) hh = '0' + hh;
+  var mm = String(d.getMinutes()); if (mm.length < 2) mm = '0' + mm;
+  return hh + ':' + mm;
+}
+
+function logAction(tag, msg) {
+  STATE.activityLog.unshift({ time: timeStamp(), tag: tag, msg: msg });
+  if (STATE.activityLog.length > 40) STATE.activityLog.pop();
+  console.log('[notification system]', '[' + tag.toUpperCase() + ']', msg);
+}
+
+function openModal(html, onSubmit) {
+  var ov = document.getElementById('modal-overlay');
+  document.getElementById('modal').innerHTML = html;
+  ov.classList.add('open');
+  var cancel = document.getElementById('modal-cancel');
+  if (cancel) cancel.addEventListener('click', closeModal);
+  var submit = document.getElementById('modal-submit');
+  if (submit) submit.addEventListener('click', onSubmit);
+  setTimeout(function() {
+    var el = document.querySelector('#modal input, #modal textarea, #modal select');
+    if (el) el.focus();
+  }, 50);
+}
+function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+  });
+}
+
+function editorInitials(e) { return ({Zidni:'ZD', Patty:'PT', Sharm:'SH', Elsa:'EL'})[e] || '??'; }
+function statusClass(s) { return 'st-' + s.replace(/ /g, '_'); }
+
+function getActiveCampaign() {
+  for (var i = 0; i < STATE.campaigns.length; i++) {
+    if (STATE.campaigns[i].id === STATE.activeSubCampaignId) return STATE.campaigns[i];
+  }
+  return null;
+}
+
+function getSubCampaignsForCountry(code) {
+  return STATE.campaigns.filter(function(c) { return c.country === code; }).sort(function(a, b) { return a.rank - b.rank; });
+}
+
+function getCountryByCode(code) {
+  for (var i = 0; i < STATE.countries.length; i++) if (STATE.countries[i].code === code) return STATE.countries[i];
+  return null;
+}
+
+function findCampaignById(id) {
+  for (var i = 0; i < STATE.campaigns.length; i++) if (STATE.campaigns[i].id === id) return STATE.campaigns[i];
+  return null;
+}
+
+function getFilteredAssets() {
+  var camp = getActiveCampaign();
+  if (!camp) return [];
+  var list = STATE.assets.filter(function(a) { return a.campaignId === camp.id; });
+  if (STATE.search) {
+    var q = STATE.search.toLowerCase();
+    list = list.filter(function(a) {
+      return a.name.toLowerCase().indexOf(q) >= 0
+          || a.editor.toLowerCase().indexOf(q) >= 0
+          || a.version.toLowerCase().indexOf(q) >= 0
+          || a.status.toLowerCase().indexOf(q) >= 0
+          || (a.difficulty || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  if (STATE.statusFilter !== 'all') list = list.filter(function(a) { return a.status === STATE.statusFilter; });
+  if (STATE.editorFilter !== 'all') list = list.filter(function(a) { return a.editor === STATE.editorFilter; });
+  return list.sort(function(a, b) { return a.pn - b.pn; });
+}
+
+// ===================== NOTIFICATION BATCHING =====================
+// Queue a notification for an editor. If thresholds met, fire immediately.
+function queueNotification(editor, changeType, assetName, assetId) {
+  if (!STATE.pendingBatches[editor]) {
+    STATE.pendingBatches[editor] = { items: [], firstQueuedAt: null };
+  }
+  var batch = STATE.pendingBatches[editor];
+  batch.items.push({
+    id: STATE.nextBatchItemId++,
+    assetId: assetId,
+    name: assetName,
+    change: changeType,
+    queuedAt: Date.now()
+  });
+  if (batch.firstQueuedAt === null) batch.firstQueuedAt = Date.now();
+
+  logAction('queued', editor + ': "' + assetName + '" \u2014 ' + changeType + ' (batch ' + batch.items.length + '/' + BATCH_SIZE_LIMIT + ')');
+
+  // Check if we should fire
+  if (batch.items.length >= BATCH_SIZE_LIMIT) {
+    fireBatch(editor, 'size-limit');
+  }
+}
+
+function fireBatch(editor, reason) {
+  var batch = STATE.pendingBatches[editor];
+  if (!batch || batch.items.length === 0) return false;
+  var items = batch.items.slice(0, BATCH_SIZE_LIMIT);
+  var remaining = batch.items.slice(BATCH_SIZE_LIMIT);
+
+  // Build Slack-style message
+  var lines = [':clapper: *' + editor + '* \u2014 ' + items.length + ' video update' + (items.length > 1 ? 's' : '')];
+  items.forEach(function(it, i) {
+    var changeLabel = ({ created: 'new task', reassigned: 'reassigned', status: 'status change' })[it.change] || it.change;
+    lines.push('  ' + (i+1) + '. ' + it.name + '  _(' + changeLabel + ')_');
+  });
+  var msg = lines.join('\n');
+
+  // Record as "sent"
+  STATE.sentNotifications.unshift({
+    time: timeStamp(),
+    editor: editor,
+    items: items,
+    reason: reason,
+    body: msg
+  });
+  if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+
+  logAction('notified', editor + ' \u2014 sent ' + items.length + ' update(s) to Slack (' + reason + ')');
+
+  // Update batch state
+  batch.items = remaining;
+  batch.firstQueuedAt = remaining.length > 0 ? Date.now() : null;
+  return true;
+}
+
+function clearBatch(editor) {
+  if (!STATE.pendingBatches[editor]) return;
+  var n = STATE.pendingBatches[editor].items.length;
+  STATE.pendingBatches[editor] = { items: [], firstQueuedAt: null };
+  logAction('deleted', editor + ': cleared ' + n + ' pending notification(s)');
+  toast('Cleared ' + n + ' pending notifications', 'success');
+  render();
+}
+
+// Tick every 5s to check time limit + update countdowns
+setInterval(function() {
+  var nowTs = Date.now();
+  var anyFired = false;
+  Object.keys(STATE.pendingBatches).forEach(function(editor) {
+    var batch = STATE.pendingBatches[editor];
+    if (batch.items.length > 0 && batch.firstQueuedAt !== null) {
+      if (nowTs - batch.firstQueuedAt >= BATCH_TIME_LIMIT_MS) {
+        fireBatch(editor, 'time-limit');
+        anyFired = true;
+      }
+    }
+  });
+  // Re-render notifications tab passively so countdown stays live
+  if (STATE.tab === 'notifications' || anyFired) render();
+}, 5000);
+
+// ===================== SCHEDULER =====================
+function isWeekend(isoDate) {
+  var d = new Date(isoDate + 'T12:00:00');
+  var day = d.getDay();
+  return day === 0 || day === 6;
+}
+
+function priorityKey(asset) {
+  var camp = findCampaignById(asset.campaignId);
+  return { country: camp ? camp.country : 'ZZ', subRank: camp ? camp.rank : 999, pn: asset.pn };
+}
+
+function sortByPriority(assets, countryOrder) {
+  var idx = {};
+  countryOrder.forEach(function(c, i) { idx[c] = i; });
+  return assets.slice().sort(function(a, b) {
+    var ka = priorityKey(a), kb = priorityKey(b);
+    var ia = idx[ka.country]; if (ia === undefined) ia = 999;
+    var ib = idx[kb.country]; if (ib === undefined) ib = 999;
+    if (ia !== ib) return ia - ib;
+    if (ka.subRank !== kb.subRank) return ka.subRank - kb.subRank;
+    return ka.pn - kb.pn;
+  });
+}
+
+function computeDayPlan() {
+  var plans = { Zidni: [], Sharm: [], Patty: [] };
+  var alerts = [];
+  var overflow = [];
+  var used = {};
+
+  function availableFor(editor) {
+    return STATE.assets.filter(function(a) {
+      if (used[a.id] || a.released || a.scheduledFor || a.status === 'Approved') return false;
+      return a.editor === editor;
+    });
+  }
+
+  ['Zidni', 'Sharm', 'Patty'].forEach(function(editor) {
+    var rules = EDITOR_RULES[editor];
+    var pool = sortByPriority(availableFor(editor), rules.countryOrder);
+    var ideal = Object.assign({}, rules.idealMix);
+
+    for (var d = 0; d < DIFFICULTIES.length; d++) {
+      var diff = DIFFICULTIES[d];
+      var need = ideal[diff] || 0;
+      while (need > 0 && plans[editor].length < rules.cap) {
+        var found = null;
+        for (var i = 0; i < pool.length; i++) if (pool[i].difficulty === diff) { found = pool[i]; break; }
+        if (!found) break;
+        plans[editor].push(found);
+        used[found.id] = true;
+        pool = pool.filter(function(x) { return x.id !== found.id; });
+        need--;
+      }
+    }
+    while (plans[editor].length < rules.cap && pool.length > 0) {
+      var pick = pool.shift();
+      plans[editor].push(pick);
+      used[pick.id] = true;
+    }
+
+    if (plans[editor].length === 0) {
+      alerts.push(editor + ' has no videos matching their skill level \u2014 reassign manually');
+    }
+  });
+
+  // Overflow: Zidni absorbs videos assigned to editors who can't handle them
+  if (plans.Zidni.length < EDITOR_RULES.Zidni.cap) {
+    var slotsLeft = EDITOR_RULES.Zidni.cap - plans.Zidni.length;
+    STATE.assets.forEach(function(a) {
+      if (slotsLeft <= 0 || used[a.id] || a.released || a.scheduledFor || a.status === 'Approved') return;
+      var allowed = EDITOR_ALLOWED_DIFF[a.editor] || [];
+      if (allowed.indexOf(a.difficulty) < 0) {
+        plans.Zidni.push(a);
+        used[a.id] = true;
+        overflow.push({ from: a.editor, to: 'Zidni', asset: a });
+        slotsLeft--;
+      }
+    });
+    plans.Zidni = sortByPriority(plans.Zidni, EDITOR_RULES.Zidni.countryOrder);
+  }
+
+  return { plans: plans, alerts: alerts, overflow: overflow };
+}
+
+function runScheduler() {
+  var dateStr = STATE.schedulerDate;
+  if (isWeekend(dateStr) && !STATE.schedulerIncludeWeekends) {
+    toast('Weekend skipped. Enable override if you want to drop today.', 'error');
+    return;
+  }
+  var result = computeDayPlan();
+  var totalScheduled = 0;
+
+  Object.keys(result.plans).forEach(function(editor) {
+    var list = result.plans[editor];
+    list.forEach(function(a) { a.scheduledFor = dateStr; totalScheduled++; });
+    if (list.length) {
+      logAction('scheduled', editor + ': ' + list.length + ' video(s) scheduled for ' + dateStr);
+    }
+  });
+  result.overflow.forEach(function(o) { logAction('updated', 'Overflow: ' + o.asset.name + ' \u2192 Zidni (from ' + o.from + ')'); });
+  result.alerts.forEach(function(msg) { logAction('updated', 'ALERT: ' + msg); });
+
+  toast(totalScheduled ? 'Scheduled ' + totalScheduled + ' videos for ' + dateStr : 'No videos scheduled (queues empty?)', totalScheduled ? 'success' : 'error');
+  render();
+}
+
+function clearSchedule() {
+  var dateStr = STATE.schedulerDate, cleared = 0;
+  STATE.assets.forEach(function(a) {
+    if (a.scheduledFor === dateStr && !a.released) { a.scheduledFor = ''; cleared++; }
+  });
+  if (cleared) logAction('updated', 'Cleared ' + cleared + ' scheduled videos for ' + dateStr);
+  toast(cleared ? 'Cleared ' + cleared + ' scheduled videos' : 'Nothing to clear', cleared ? 'success' : '');
+  render();
+}
+
+function releaseScheduled() {
+  var dateStr = STATE.schedulerDate;
+  var byEditor = {};
+  STATE.assets.forEach(function(a) {
+    if (a.scheduledFor === dateStr && !a.released) {
+      a.released = true;
+      byEditor[a.editor] = (byEditor[a.editor] || []);
+      byEditor[a.editor].push(a);
+    }
+  });
+
+  var total = 0;
+  Object.keys(byEditor).forEach(function(editor) {
+    var list = byEditor[editor];
+    total += list.length;
+    // Daily drop is a direct send (not batched) because it's already a batch
+    var lines = [':clapper: *Daily queue for ' + editor + '* (' + dateStr + ')'];
+    list.forEach(function(a, i) { lines.push('  ' + (i+1) + '. ' + a.name + '  _(' + a.difficulty + ')_'); });
+    STATE.sentNotifications.unshift({
+      time: timeStamp(), editor: editor,
+      items: list.map(function(a) { return { name: a.name, change: 'daily-queue' }; }),
+      reason: 'daily-drop', body: lines.join('\n')
+    });
+    logAction('notified', editor + ' \u2014 daily queue sent (' + list.length + ' videos)');
+  });
+  if (STATE.sentNotifications.length > 20) STATE.sentNotifications = STATE.sentNotifications.slice(0, 20);
+
+  toast(total ? 'Released ' + total + ' videos + sent daily queue pings' : 'Nothing to release', total ? 'success' : '');
+  render();
+}
+
+// ===================== SUB-CAMPAIGN MODALS =====================
+function showAddSubCampaignModal(forCountry) {
+  var countryOpts = STATE.countries.map(function(c) {
+    return '<option value="' + c.code + '"' + (c.code === forCountry ? ' selected' : '') + '>' + c.code + ' - ' + c.name + '</option>';
+  }).join('');
+  var nextRank = getSubCampaignsForCountry(forCountry).length + 1;
+
+  var html =
+    '<div class="modal-title">New Sub-Campaign</div>' +
+    '<div class="form-grid">' +
+      '<div class="form-row full"><label class="form-label">Campaign Name *</label><input id="f-cname" class="form-input" placeholder="e.g. Brand - Category"></div>' +
+      '<div class="form-row"><label class="form-label">Country</label><select id="f-ccountry" class="form-select">' + countryOpts + '</select></div>' +
+      '<div class="form-row"><label class="form-label">Rank (within country)</label><input id="f-crank" type="number" min="1" class="form-input" value="' + nextRank + '"></div>' +
+      '<div class="form-row"><label class="form-label">Category</label><select id="f-ccat" class="form-select"><option>Luxury</option><option>Essentials</option><option>BTS</option></select></div>' +
+      '<div class="form-row full"><label class="form-label">Campaign Brief</label><textarea id="f-cbrief" class="form-textarea"></textarea></div>' +
+      '<div class="form-row full"><label class="form-label">Google Drive Folder ID</label><input id="f-cdrive" class="form-input"></div>' +
+      '<div class="form-row full"><label class="form-label">Slack Channel Override (optional)</label><input id="f-cslack" class="form-input"></div>' +
+    '</div>' +
+    '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Cancel</button><button class="submit-btn" id="modal-submit">Add</button></div>';
+
+  openModal(html, function() {
+    var name = document.getElementById('f-cname').value.trim();
+    if (!name) { toast('Campaign name is required', 'error'); return; }
+    var country = document.getElementById('f-ccountry').value;
+    var camp = {
+      id: STATE.nextCampaignId++, country: country, name: name,
+      rank: parseInt(document.getElementById('f-crank').value, 10) || (getSubCampaignsForCountry(country).length + 1),
+      brief: document.getElementById('f-cbrief').value,
+      category: document.getElementById('f-ccat').value,
+      driveId: document.getElementById('f-cdrive').value,
+      slackOverride: document.getElementById('f-cslack').value
+    };
+    STATE.campaigns.push(camp);
+    reorderCampaigns(true);
+    STATE.activeSubCampaignId = camp.id;
+    STATE.expandedCountries[country] = true;
+    logAction('created', 'Sub-campaign "' + name + '" added to ' + country);
+    closeModal();
+    toast('Sub-campaign added', 'success');
+    render();
+  });
+}
+
+function showEditCampaignModal() {
+  var c = getActiveCampaign(); if (!c) return;
+  var catOpts = ['Luxury','Essentials','BTS'].map(function(v) { return '<option' + (v === c.category ? ' selected' : '') + '>' + v + '</option>'; }).join('');
+  var countryOpts = STATE.countries.map(function(co) {
+    return '<option value="' + co.code + '"' + (co.code === c.country ? ' selected' : '') + '>' + co.code + ' - ' + co.name + '</option>';
+  }).join('');
+
+  var html =
+    '<div class="modal-title">Edit Sub-Campaign</div>' +
+    '<div class="form-grid">' +
+      '<div class="form-row full"><label class="form-label">Campaign Name</label><input id="f-cname" class="form-input" value="' + escapeHtml(c.name) + '"></div>' +
+      '<div class="form-row"><label class="form-label">Country</label><select id="f-ccountry" class="form-select">' + countryOpts + '</select></div>' +
+      '<div class="form-row"><label class="form-label">Rank</label><input id="f-crank" type="number" min="1" class="form-input" value="' + c.rank + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Category</label><select id="f-ccat" class="form-select">' + catOpts + '</select></div>' +
+      '<div class="form-row full"><label class="form-label">Campaign Brief</label><textarea id="f-cbrief" class="form-textarea">' + escapeHtml(c.brief) + '</textarea></div>' +
+      '<div class="form-row full"><label class="form-label">Google Drive Folder ID</label><input id="f-cdrive" class="form-input" value="' + escapeHtml(c.driveId) + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Slack Channel Override</label><input id="f-cslack" class="form-input" value="' + escapeHtml(c.slackOverride) + '"></div>' +
+    '</div>' +
+    '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Cancel</button><button class="submit-btn" id="modal-submit">Save</button></div>';
+
+  openModal(html, function() {
+    c.name = document.getElementById('f-cname').value.trim() || c.name;
+    c.country = document.getElementById('f-ccountry').value;
+    c.rank = parseInt(document.getElementById('f-crank').value, 10) || c.rank;
+    c.brief = document.getElementById('f-cbrief').value;
+    c.category = document.getElementById('f-ccat').value;
+    c.driveId = document.getElementById('f-cdrive').value;
+    c.slackOverride = document.getElementById('f-cslack').value;
+    reorderCampaigns(true);
+    STATE.expandedCountries[c.country] = true;
+    logAction('updated', 'Sub-campaign "' + c.name + '" edited');
+    closeModal();
+    toast('Sub-campaign updated', 'success');
+    render();
+  });
+}
+
+function deleteCampaign() {
+  var c = getActiveCampaign(); if (!c) return;
+  var n = STATE.assets.filter(function(a) { return a.campaignId === c.id; }).length;
+  if (!confirm('Delete "' + c.name + '" and all ' + n + ' video assets?')) return;
+  STATE.assets = STATE.assets.filter(function(a) { return a.campaignId !== c.id; });
+  STATE.campaigns = STATE.campaigns.filter(function(x) { return x.id !== c.id; });
+  reorderCampaigns(true);
+  STATE.activeSubCampaignId = STATE.campaigns.length ? STATE.campaigns[0].id : null;
+  logAction('deleted', 'Sub-campaign "' + c.name + '" deleted');
+  toast('Sub-campaign deleted', 'success');
+  render();
+}
+
+function reorderCampaigns(silent) {
+  for (var i = 0; i < STATE.countries.length; i++) {
+    var subs = getSubCampaignsForCountry(STATE.countries[i].code);
+    for (var j = 0; j < subs.length; j++) subs[j].rank = j + 1;
+  }
+  if (!silent) { logAction('updated', 'Sub-campaigns re-ranked within each country'); toast('Sub-campaigns reordered', 'success'); }
+}
+
+function getNextPn(campaignId) {
+  var pns = STATE.assets.filter(function(a) { return a.campaignId === campaignId; }).map(function(a) { return a.pn; });
+  return pns.length ? Math.max.apply(null, pns) + 1 : 1;
+}
+
+function showAssetModal(existing) {
+  var camp = getActiveCampaign();
+  if (!camp) { toast('Select a sub-campaign first', 'error'); return; }
+  var isEdit = !!existing;
+  var a = existing || {
+    id: null, pn: getNextPn(camp.id), category: 'LUXURY',
+    rawVideo: 'https://teamtilt.notion.site', editingBrief: '',
+    editor: 'Zidni', difficulty: 'Moderate', finalVideo: '',
+    estDelivery: '', dateApproved: '', scheduledFor: '', released: false,
+    status: 'Draft', version: 'V1', name: ''
+  };
+
+  var editorOpts = EDITORS.map(function(v) {
+    var mark = EDITOR_AUTO_SCHEDULE[v] ? '' : ' \u2014 manual only';
+    return '<option' + (v === a.editor ? ' selected' : '') + ' value="' + v + '">' + v + mark + '</option>';
+  }).join('');
+  var diffOpts = DIFFICULTIES.map(function(v) { return '<option' + (v === a.difficulty ? ' selected' : '') + '>' + v + '</option>'; }).join('');
+  var statusOpts = ['Draft','In Review','Needs Revision','Approved'].map(function(v) { return '<option' + (v === a.status ? ' selected' : '') + '>' + v + '</option>'; }).join('');
+
+  var allowed = EDITOR_ALLOWED_DIFF[a.editor] || [];
+  var mismatchWarning = (isEdit && allowed.indexOf(a.difficulty) < 0)
+    ? '<div style="grid-column:span 2; padding:8px 10px; background:var(--amber-bg); color:var(--amber-text); border-radius:6px; font-size:12px;">\u26A0 ' + a.editor + ' doesn\'t handle ' + a.difficulty + ' difficulty. Scheduler will overflow to Zidni.</div>'
+    : '';
+
+  var html =
+    '<div class="modal-title">' + (isEdit ? 'Edit Video Asset' : 'New Video Asset') + '</div>' +
+    '<div class="form-grid">' +
+      '<div class="form-row full"><label class="form-label">Video Name *</label><input id="f-vname" class="form-input" value="' + escapeHtml(a.name) + '"></div>' +
+      '<div class="form-row"><label class="form-label">NO.</label><input id="f-vpn" type="number" min="1" class="form-input" value="' + a.pn + '"></div>' +
+      '<div class="form-row"><label class="form-label">Version</label><input id="f-vver" class="form-input" value="' + escapeHtml(a.version) + '"></div>' +
+      '<div class="form-row"><label class="form-label">Category</label><input id="f-vcat" class="form-input" value="' + escapeHtml(a.category) + '"></div>' +
+      '<div class="form-row"><label class="form-label">Difficulty</label><select id="f-vdiff" class="form-select">' + diffOpts + '</select></div>' +
+      '<div class="form-row full"><label class="form-label">Editor</label><select id="f-veditor" class="form-select">' + editorOpts + '</select></div>' +
+      mismatchWarning +
+      '<div class="form-row full"><label class="form-label">Raw Video File (URL)</label><input id="f-vraw" class="form-input" value="' + escapeHtml(a.rawVideo) + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Editing Brief</label><input id="f-vbrief" class="form-input" value="' + escapeHtml(a.editingBrief) + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Final Video (Frame.io Link)</label><input id="f-vfinal" class="form-input" value="' + escapeHtml(a.finalVideo) + '"></div>' +
+      '<div class="form-row"><label class="form-label">Estimated Delivery</label><input id="f-veta" class="form-input" placeholder="Apr 25, 2026" value="' + escapeHtml(a.estDelivery) + '"></div>' +
+      '<div class="form-row"><label class="form-label">Date Approved</label><input id="f-vdate" class="form-input" placeholder="Apr 16, 2026" value="' + escapeHtml(a.dateApproved) + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Status</label><select id="f-vstatus" class="form-select">' + statusOpts + '</select></div>' +
+    '</div>' +
+    '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Cancel</button><button class="submit-btn" id="modal-submit">' + (isEdit ? 'Save' : 'Add') + '</button></div>';
+
+  openModal(html, function() {
+    var name = document.getElementById('f-vname').value.trim();
+    if (!name) { toast('Video name is required', 'error'); return; }
+    var oldEditor = a.editor, oldStatus = a.status;
+    var payload = {
+      pn: parseInt(document.getElementById('f-vpn').value, 10) || a.pn,
+      name: name,
+      category: document.getElementById('f-vcat').value,
+      difficulty: document.getElementById('f-vdiff').value,
+      rawVideo: document.getElementById('f-vraw').value,
+      editingBrief: document.getElementById('f-vbrief').value,
+      editor: document.getElementById('f-veditor').value,
+      finalVideo: document.getElementById('f-vfinal').value,
+      estDelivery: document.getElementById('f-veta').value,
+      dateApproved: document.getElementById('f-vdate').value,
+      status: document.getElementById('f-vstatus').value,
+      version: document.getElementById('f-vver').value || 'V1'
+    };
+    if (isEdit) {
+      Object.keys(payload).forEach(function(k) { a[k] = payload[k]; });
+      logAction('updated', 'Asset "' + name + '" updated');
+      toast('Asset updated', 'success');
+      // Real in-app notifications
+      if (oldEditor !== a.editor) {
+        queueNotification(a.editor, 'reassigned', a.name, a.id);
+      }
+      if (oldStatus !== a.status) {
+        queueNotification(a.editor, 'status', a.name, a.id);
+      }
+    } else {
+      payload.id = STATE.nextAssetId++;
+      payload.campaignId = camp.id;
+      payload.scheduledFor = '';
+      payload.released = false;
+      STATE.assets.push(payload);
+      logAction('created', 'Asset "' + name + '" added (' + payload.difficulty + ', ' + payload.editor + ')');
+      queueNotification(payload.editor, 'created', payload.name, payload.id);
+      toast('Asset added', 'success');
+    }
+    closeModal();
+    render();
+  });
+}
+
+function deleteAsset(id) {
+  var a = null;
+  for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+  if (!a) return;
+  if (!confirm('Delete "' + a.name + '"?')) return;
+  STATE.assets = STATE.assets.filter(function(x) { return x.id !== id; });
+  logAction('deleted', 'Asset "' + a.name + '" deleted');
+  toast('Asset deleted', 'success');
+  render();
+}
+
+// ===================== VIEWS =====================
+function totalPending() {
+  var n = 0;
+  Object.keys(STATE.pendingBatches).forEach(function(e) { n += STATE.pendingBatches[e].items.length; });
+  return n;
+}
+
+function renderTopbar() {
+  var pending = totalPending();
+  var pendingBadge = pending > 0 ? '<span class="tab-badge ' + (pending >= BATCH_SIZE_LIMIT ? 'alert' : '') + '">' + pending + '</span>' : '';
+  return '' +
+    '<div class="topbar">' +
+      '<div class="logo"><div class="logo-dot"></div>Tilt <span>/ Campaign Manager</span></div>' +
+      '<div class="topbar-tabs">' +
+        '<button class="tab-btn ' + (STATE.tab === 'campaigns' ? 'active' : '') + '" onclick="App.setTab(\'campaigns\')">Campaigns</button>' +
+        '<button class="tab-btn ' + (STATE.tab === 'scheduler' ? 'active' : '') + '" onclick="App.setTab(\'scheduler\')">Scheduler</button>' +
+        '<button class="tab-btn ' + (STATE.tab === 'notifications' ? 'active' : '') + '" onclick="App.setTab(\'notifications\')">Notifications' + pendingBadge + '</button>' +
+        '<button class="tab-btn ' + (STATE.tab === 'automations' ? 'active' : '') + '" onclick="App.setTab(\'automations\')">Automations</button>' +
+        '<button class="tab-btn ' + (STATE.tab === 'config' ? 'active' : '') + '" onclick="App.setTab(\'config\')">Config</button>' +
+      '</div>' +
+      '<div class="topbar-right">' +
+        '<div class="status-dot"></div>' +
+        '<span>' + STATE.countries.length + ' countries \u00B7 ' + STATE.campaigns.length + ' subs \u00B7 ' + STATE.assets.length + ' assets</span>' +
+      '</div>' +
+    '</div>';
+}
+
+function renderSidebar() {
+  var html = '';
+  for (var i = 0; i < STATE.countries.length; i++) {
+    var country = STATE.countries[i];
+    var subs = getSubCampaignsForCountry(country.code);
+    var isOpen = STATE.expandedCountries[country.code];
+    var chevron = isOpen ? '\u25BE' : '\u25B8';
+    html +=
+      '<div class="country-group">' +
+        '<div class="country-row ' + (isOpen ? 'open' : '') + '" onclick="App.toggleCountry(\'' + country.code + '\')">' +
+          '<span class="country-chevron">' + chevron + '</span>' +
+          '<div class="country-flag flag-' + country.code + '">' + country.code + '</div>' +
+          '<div class="country-name">' + country.name + '</div>' +
+          '<div class="country-count">' + subs.length + '</div>' +
+        '</div>';
+    if (isOpen) {
+      html += '<div class="subcamp-list open">';
+      for (var j = 0; j < subs.length; j++) {
+        var s = subs[j];
+        var active = s.id === STATE.activeSubCampaignId;
+        html +=
+          '<div class="subcamp-item ' + (active ? 'active' : '') + '" onclick="App.selectCampaign(' + s.id + ')">' +
+            '<div class="rank-badge">' + s.rank + '</div>' +
+            '<div class="subcamp-name">' + escapeHtml(s.name) + '</div>' +
+            '<div class="cat-pill cat-' + s.category + '">' + s.category + '</div>' +
+          '</div>';
+      }
+      html += '<button class="add-sub-btn" onclick="App.addSub(\'' + country.code + '\')">+ Add sub-campaign</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  return '<div class="sidebar"><div class="sidebar-header"><div class="sidebar-title">Countries \u00B7 ' + STATE.countries.length + '</div></div>' +
+    '<button class="reorder-btn" onclick="App.reorderCampaigns(false)">\u2195 Reorder sub-campaigns</button>' +
+    '<div class="sidebar-scroll">' + html + '</div></div>';
+}
+
+function renderCampaignsView() {
+  var camp = getActiveCampaign();
+  if (!camp) return '<div class="content"><div class="empty-state-big"><div class="title">No sub-campaign selected</div><div class="sub">Pick one from the sidebar.</div></div></div>';
+  var country = getCountryByCode(camp.country);
+  var filtered = getFilteredAssets();
+  var totalForCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; }).length;
+  var approved = STATE.assets.filter(function(a) { return a.campaignId === camp.id && a.status === 'Approved'; }).length;
+
+  var rows = '';
+  if (filtered.length === 0) {
+    rows = '<tr><td colspan="12"><div class="empty-state">No assets match your filters</div></td></tr>';
+  } else {
+    for (var i = 0; i < filtered.length; i++) {
+      var a = filtered[i];
+      rows +=
+        '<tr>' +
+          '<td><span class="pn">' + a.pn + '</span></td>' +
+          '<td><div class="video-name-cell"><span class="video-name-text" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span><span class="version-tag">' + escapeHtml(a.version) + '</span></div></td>' +
+          '<td><span class="cat-tag">' + escapeHtml(a.category) + '</span></td>' +
+          '<td><span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span></td>' +
+          '<td class="link-cell">' + (a.rawVideo ? '<a href="' + escapeHtml(a.rawVideo) + '" target="_blank" rel="noopener">notion \u2197</a>' : '<span class="no-link">\u2014</span>') + '</td>' +
+          '<td><div class="editor-cell"><div class="editor-avatar av-' + a.editor + '">' + editorInitials(a.editor) + '</div><span class="editor-name">' + a.editor + '</span></div></td>' +
+          '<td class="link-cell">' + (a.finalVideo ? '<a href="' + escapeHtml(a.finalVideo) + '" target="_blank" rel="noopener">f.io \u2197</a>' : '<span class="no-link">\u2014</span>') + '</td>' +
+          '<td><span class="eta-cell">' + (a.estDelivery || '\u2014') + '</span></td>' +
+          '<td><span class="sched-cell">' + (a.scheduledFor || '\u2014') + '</span>' + (a.released ? ' <span class="released-badge">\u2713 sent</span>' : '') + '</td>' +
+          '<td><span class="date-cell">' + (a.dateApproved || '\u2014') + '</span></td>' +
+          '<td><span class="status-badge ' + statusClass(a.status) + '"><span class="s-dot"></span>' + a.status + '</span></td>' +
+          '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(' + a.id + ')">Edit</button><button class="action-btn del-btn" onclick="App.deleteAsset(' + a.id + ')">Del</button></div></td>' +
+        '</tr>';
+    }
+  }
+  var metaChips =
+    '<span class="meta-chip"><span class="meta-chip-label">rank</span>' + camp.rank + ' / ' + getSubCampaignsForCountry(camp.country).length + '</span>' +
+    '<span class="meta-chip"><span class="meta-chip-label">assets</span>' + totalForCamp + '</span>' +
+    '<span class="meta-chip"><span class="meta-chip-label">approved</span>' + approved + '/' + totalForCamp + '</span>' +
+    (camp.driveId ? '<span class="meta-chip"><span class="meta-chip-label">drive</span>' + escapeHtml(camp.driveId.substring(0, 14)) + '...</span>' : '') +
+    (camp.slackOverride ? '<span class="meta-chip" style="color:var(--accent2)"><span class="meta-chip-label">slack</span>custom</span>' : '<span class="meta-chip"><span class="meta-chip-label">slack</span>default</span>');
+
+  var editorFilterOpts = ['all'].concat(EDITORS).map(function(v) {
+    return '<option value="' + v + '"' + (STATE.editorFilter === v ? ' selected' : '') + '>' + (v === 'all' ? 'All editors' : v) + '</option>';
+  }).join('');
+
+  return '<div class="content"><div class="camp-header">' +
+    '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Sub-Campaign #' + camp.rank + '</span></div>' +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div><div class="cat-pill cat-' + camp.category + '">' + camp.category + '</div><button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button><button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button></div>' +
+    '<div class="camp-brief">' + (camp.brief ? escapeHtml(camp.brief) : '<em style="color:var(--text3)">No brief set</em>') + '</div>' +
+    '<div class="camp-meta">' + metaChips + '</div>' +
+    '</div>' +
+    '<div class="toolbar">' +
+      '<div class="search-wrap"><span class="search-icon">\u2315</span><input type="text" placeholder="Search..." value="' + escapeHtml(STATE.search) + '" oninput="App.onSearch(this.value)"></div>' +
+      '<select class="filter-select" onchange="App.onStatusFilter(this.value)">' +
+        '<option value="all"' + (STATE.statusFilter === 'all' ? ' selected' : '') + '>All statuses</option>' +
+        ['Approved','In Review','Draft','Needs Revision'].map(function(s) { return '<option' + (STATE.statusFilter === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+      '</select>' +
+      '<select class="filter-select" onchange="App.onEditorFilter(this.value)">' + editorFilterOpts + '</select>' +
+      '<span class="count-chip">' + filtered.length + ' / ' + totalForCamp + ' rows</span>' +
+      '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video Asset</button>' +
+    '</div>' +
+    '<div class="table-wrap"><table><thead><tr>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th><th>Raw</th><th>Editor</th><th>Final</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>Status</th><th style="width:110px">Actions</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+}
+
+function renderSchedulerView() {
+  var result = computeDayPlan();
+  var dateStr = STATE.schedulerDate;
+  var weekend = isWeekend(dateStr);
+
+  var plansHtml = '';
+  ['Zidni', 'Sharm', 'Patty'].forEach(function(editor) {
+    var list = result.plans[editor];
+    var rules = EDITOR_RULES[editor];
+    var isAlert = list.length === 0;
+    var mixStr = Object.keys(rules.idealMix).map(function(k) { return rules.idealMix[k] + ' ' + k; }).join(' + ');
+    var countryStr = rules.countryOrder.join(' \u203A ');
+
+    var slotsHtml = list.length === 0
+      ? '<div class="plan-empty">No available videos in ' + editor + '\'s queue today</div>'
+      : list.map(function(a, i) {
+          var camp = findCampaignById(a.campaignId);
+          var code = camp ? camp.country : '?';
+          return '<div class="plan-slot"><div class="plan-slot-num">' + (i+1) + '</div>' +
+            '<span class="plan-slot-name">' + escapeHtml(a.name) + '</span>' +
+            '<span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span>' +
+            '<span class="plan-slot-country flag-' + code + '">' + code + '</span></div>';
+        }).join('');
+
+    plansHtml +=
+      '<div class="editor-plan ' + (isAlert ? 'alert' : '') + '">' +
+        '<div class="editor-plan-header">' +
+          '<div class="editor-avatar av-' + editor + '">' + editorInitials(editor) + '</div>' +
+          '<div><div class="editor-plan-name">' + editor + '</div>' +
+          '<div class="editor-plan-rules-inline">Ideal mix: ' + mixStr + ' \u00B7 Cap: ' + rules.cap + ' \u00B7 Priority: ' + countryStr + '</div></div>' +
+          '<div class="editor-plan-rules">' + list.length + '/' + rules.cap + ' slots</div>' +
+        '</div>' +
+        '<div class="plan-slots">' + slotsHtml + '</div>' +
+      '</div>';
+  });
+
+  var alertsHtml = result.alerts.length ? result.alerts.map(function(m) { return '<div class="alert-box">\u26A0 ' + escapeHtml(m) + '</div>'; }).join('') : '';
+  var overflowHtml = result.overflow.length
+    ? '<div class="auto-card"><div class="auto-title" style="margin-bottom:8px;">Overflow routing</div>' +
+      result.overflow.map(function(o) { return '<div style="font-size:12px;color:var(--text2);padding:4px 0;font-family:monospace;">\u27A4 "' + escapeHtml(o.asset.name) + '" \u2014 ' + o.from + ' cannot handle ' + o.asset.difficulty + ', absorbed by Zidni</div>'; }).join('') + '</div>'
+    : '';
+  var weekendNote = weekend ? '<div class="alert-box" style="background:var(--amber-bg);color:var(--amber-text);border-color:var(--amber-text);">\u26A0 ' + dateStr + ' is a weekend. ' + (STATE.schedulerIncludeWeekends ? 'Override ON \u2014 scheduler will run.' : 'Scheduler will skip unless override is checked.') + '</div>' : '';
+
+  return '<div class="content"><div class="scheduler-panel">' +
+    '<div class="section-title">Daily Scheduler</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">\u23F0</div><div><div class="auto-title">3:00 PM Daily Drop</div><div class="auto-sub">Mon-Fri \u00B7 auto-picks videos per editor based on difficulty + country priority</div></div></div>' +
+      '<div class="auto-desc">Preview today\'s plan below. Slack pings fire only when you release.</div>' +
+      '<div class="scheduler-config-row">' +
+        '<div class="scheduler-date-pick"><span>Plan for:</span><input type="date" value="' + dateStr + '" onchange="App.setSchedulerDate(this.value)"></div>' +
+        '<label class="checkbox-row"><input type="checkbox" ' + (STATE.schedulerIncludeWeekends ? 'checked' : '') + ' onchange="App.toggleWeekends(this.checked)"> Override weekend skip</label>' +
+      '</div>' +
+      weekendNote +
+      '<div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">' +
+        '<button class="run-btn" onclick="App.runScheduler()">\u25B6 Run scheduler (stamp Scheduled For)</button>' +
+        '<button class="run-btn secondary" onclick="App.clearSchedule()">Clear unscheduled</button>' +
+        '<button class="run-btn" style="background:var(--green-bg);color:var(--green-text);border-color:var(--green);" onclick="App.releaseScheduled()">\u{1F4E8} Release & notify editors</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="section-title">Plan for ' + dateStr + '</div>' +
+    alertsHtml +
+    '<div class="editor-plans">' + plansHtml + '</div>' +
+    overflowHtml +
+    '<div class="auto-card"><div class="auto-title" style="margin-bottom:8px;">Elsa \u2014 manual only</div><div class="auto-desc">Elsa never gets scheduled by the daily drop, but she does receive reactive Slack pings when you manually assign her a video or change one of her tasks. See the Notifications tab for her queue.</div></div>' +
+    '</div></div>';
+}
+
+function renderNotificationsView() {
+  var webhookReady = STATE.webhookUrl && looksLikeWebhookUrl(STATE.webhookUrl) && !isPlaceholderWebhook(STATE.webhookUrl);
+  var isFileProtocol = location.protocol === 'file:';
+  var fileBanner = isFileProtocol
+    ? '<div class="alert-box" style="margin-bottom:12px;">\u26A0 You\'re running this file via <code style="font-family:monospace; background:var(--bg4); padding:1px 5px; border-radius:3px;">file://</code>. Safari and Firefox block webhook requests from this origin. Slack sends may fail or fall back to blind mode (no delivery confirmation). For reliable sends, host the file on a local server \u2014 e.g. <code style="font-family:monospace; background:var(--bg4); padding:1px 5px; border-radius:3px;">python3 -m http.server</code> then open <code style="font-family:monospace; background:var(--bg4); padding:1px 5px; border-radius:3px;">http://localhost:8000/campaign-manager.html</code>.</div>'
+    : '';
+
+  // Batch cards per editor
+  var cards = EDITORS.map(function(editor) {
+    var batch = STATE.pendingBatches[editor] || { items: [], firstQueuedAt: null };
+    var count = batch.items.length;
+    var timeRemaining = '';
+    var progressPct = 0;
+    var cardClass = 'empty';
+    var progressClass = '';
+
+    if (count > 0) {
+      if (count >= BATCH_SIZE_LIMIT) { cardClass = 'ready'; progressClass = 'ready'; progressPct = 100; }
+      else if (batch.firstQueuedAt) {
+        var elapsed = Date.now() - batch.firstQueuedAt;
+        var remaining = Math.max(0, BATCH_TIME_LIMIT_MS - elapsed);
+        var pctTime = Math.min(100, (elapsed / BATCH_TIME_LIMIT_MS) * 100);
+        var pctSize = (count / BATCH_SIZE_LIMIT) * 100;
+        progressPct = Math.max(pctTime, pctSize);
+        var mins = Math.floor(remaining / 60000);
+        var secs = Math.floor((remaining % 60000) / 1000);
+        timeRemaining = 'fires in ~' + mins + 'm ' + String(secs).padStart(2,'0') + 's';
+        cardClass = remaining < 5 * 60 * 1000 ? 'warn' : '';
+        progressClass = remaining < 5 * 60 * 1000 ? 'warn' : '';
+      }
+    }
+
+    var itemsHtml = count === 0
+      ? '<div style="padding:20px; text-align:center; color:var(--text3); font-size:12px; background:var(--bg3); border-radius:6px; border:1px dashed var(--border2);">No pending notifications</div>'
+      : batch.items.map(function(it, i) {
+          var changeLabel = ({ created: 'new task', reassigned: 'reassigned', status: 'status change' })[it.change] || it.change;
+          return '<div class="batch-item">' +
+            '<span class="batch-item-idx">' + (i+1) + '.</span>' +
+            '<span class="batch-item-name">' + escapeHtml(it.name) + '</span>' +
+            '<span class="batch-item-change change-' + it.change + '">' + changeLabel + '</span>' +
+          '</div>';
+        }).join('');
+
+    var statusLabel = count >= BATCH_SIZE_LIMIT ? 'ready to fire'
+      : count === 0 ? 'empty'
+      : timeRemaining || (count + '/' + BATCH_SIZE_LIMIT + ' queued');
+
+    var sendBtnAttrs = webhookReady
+      ? 'class="batch-flush-btn" title="POST this batch to Slack via webhook"'
+      : 'class="batch-flush-btn" title="No webhook configured \u2014 set one in Automations" disabled style="opacity:0.45; cursor:not-allowed;"';
+
+    var actions = count > 0
+      ? '<div class="batch-actions">' +
+          '<button ' + sendBtnAttrs + ' onclick="App.sendBatch(\'' + editor + '\')">\u{1F680} Send</button>' +
+          '<button class="batch-copy-btn" title="Copy Slack-formatted message" onclick="App.copyMessage(' + JSON.stringify(buildBatchMessage(editor, batch.items.slice(0, BATCH_SIZE_LIMIT))).replace(/"/g, '&quot;') + ', \'Copied \u2014 paste into Slack\')">\u{1F4CB}</button>' +
+          '<button class="batch-slack-btn" title="Open Slack channel" onclick="App.openSlack(\'' + editor + '\')">\u{1F517}</button>' +
+          '<button class="batch-copy-btn" title="Mark sent in-app without POSTing to Slack (dry-run)" onclick="App.flushBatch(\'' + editor + '\')">\u{1F4E8}</button>' +
+          '<button class="batch-clear-btn" onclick="App.clearBatchCmd(\'' + editor + '\')">Clear</button>' +
+        '</div>'
+      : '';
+
+    return '<div class="batch-card ' + cardClass + '">' +
+      '<div class="batch-card-header">' +
+        '<div class="editor-avatar av-' + editor + '">' + editorInitials(editor) + '</div>' +
+        '<div class="batch-card-title">' + editor + '</div>' +
+        '<div class="batch-header-right">' + statusLabel + '</div>' +
+      '</div>' +
+      '<div class="batch-progress-bar"><div class="batch-progress-fill ' + progressClass + '" style="width:' + progressPct + '%;"></div></div>' +
+      '<div class="batch-items">' + itemsHtml + '</div>' +
+      actions +
+    '</div>';
+  }).join('');
+
+  // Sent notifications log
+  var sentHtml = STATE.sentNotifications.length === 0
+    ? '<div style="padding:40px; text-align:center; color:var(--text3); font-size:13px;">No notifications sent yet. Try adding, reassigning, or changing the status of a video asset.</div>'
+    : STATE.sentNotifications.map(function(n, idx) {
+        var reasonLabel = ({ 'size-limit': '3 videos queued', 'time-limit': '30-min timer', 'daily-drop': 'daily 3 PM drop', 'manual': 'manual flush', 'sent-live': 'sent to Slack \u2713', 'sent-blind': 'sent blind (unconfirmed)' })[n.reason] || n.reason;
+        var bodyEsc = JSON.stringify(n.body).replace(/"/g, '&quot;');
+        var resendAttrs = webhookReady
+          ? 'class="sent-copy-btn" title="Re-send to Slack"'
+          : 'class="sent-copy-btn" title="No webhook configured \u2014 set one in Automations" disabled style="opacity:0.45; cursor:not-allowed;"';
+        return '<div class="sent-entry">' +
+          '<div class="sent-entry-header">' +
+            '<div class="editor-avatar av-' + n.editor + '">' + editorInitials(n.editor) + '</div>' +
+            '<div style="font-size:13px; font-weight:600;">' + n.editor + '</div>' +
+            '<span style="font-size:10px; padding:2px 6px; background:var(--bg4); color:var(--text2); border-radius:3px; font-family:monospace;">' + reasonLabel + '</span>' +
+            '<span class="sent-entry-time">' + n.time + '</span>' +
+            '<button ' + resendAttrs + ' onclick="App.resendSent(' + idx + ')">\u{1F680}</button>' +
+            '<button class="sent-copy-btn" title="Copy message" onclick="App.copyMessage(' + bodyEsc + ', \'Copied\')">\u{1F4CB}</button>' +
+            '<button class="sent-copy-btn" title="Open Slack" onclick="App.openSlack(\'' + n.editor + '\')">\u{1F517}</button>' +
+          '</div>' +
+          '<div class="sent-entry-body">' + escapeHtml(n.body) + '</div>' +
+        '</div>';
+      }).join('');
+
+  return '<div class="content"><div class="notif-panel">' +
+    fileBanner +
+    '<div class="section-title">Pending Batches <button class="run-btn" style="margin-left:auto; padding:5px 12px; font-size:12px;" onclick="App.showExport()">\u{1F4E4} Export for editor</button></div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-desc" style="margin:0 0 6px;">Notifications queue and fire as a batch Slack message when either <strong style="color:var(--text1);">3 video updates</strong> accumulate or <strong style="color:var(--text1);">30 minutes</strong> have passed since the first update \u2014 whichever comes first. Try editing a video in the Campaigns tab to see it queue here.</div>' +
+      '<div class="auto-desc" style="margin:0; font-size:11.5px; color:var(--text3);"><strong style="color:var(--text2);">Button legend:</strong> \u{1F680} POST to Slack via webhook \u00B7 \u{1F4CB} copy to clipboard \u00B7 \u{1F517} open Slack channel \u00B7 \u{1F4E8} mark sent in-app without posting (dry-run) \u00B7 Clear discards the batch. ' +
+        (webhookReady ? '' : '<span style="color:var(--amber-text);">\u26A0 No webhook configured yet \u2014 set one in Automations to enable \u{1F680} Send.</span>') +
+      '</div>' +
+      '<div class="batch-grid">' + cards + '</div>' +
+    '</div>' +
+    '<div class="section-title">Sent Notifications (last 20)</div>' +
+    '<div class="auto-card"><div class="sent-log">' + sentHtml + '</div></div>' +
+  '</div></div>';
+}
+
+function renderAutomationsView() {
+  var logHtml = STATE.activityLog.map(function(l) {
+    return '<div class="log-entry"><span class="log-time">' + l.time + '</span>' +
+      '<div class="log-msg"><span class="log-tag tag-' + l.tag + '">' + l.tag + '</span>' + escapeHtml(l.msg) + '</div></div>';
+  }).join('');
+
+  return '<div class="content"><div class="automation-panel">' +
+    '<div class="section-title">Automations</div>' +
+
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">01</div><div><div class="auto-title">Auto-reorder Sub-Campaigns by Rank</div><div class="auto-sub">trigger: Campaigns.Rank field updated</div></div></div>' +
+      '<div class="auto-desc">When a campaign\'s rank changes, re-numbers sub-campaigns 1, 2, 3\u2026 inside each country. Run manually via the sidebar button or set up as a scheduled automation.</div>' +
+      '<button class="run-btn" style="margin-top:8px;" onclick="App.reorderCampaigns(false)">\u25B6 Run reorder now</button>' +
+    '</div>' +
+
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">02</div><div><div class="auto-title">Daily Scheduler \u2014 3 PM, Mon\u2013Fri</div><div class="auto-sub">picks per editor based on difficulty mix + country priority</div></div></div>' +
+      '<div class="auto-desc">For Zidni, Sharm, Patty: picks the next batch of videos fitting their ideal mix. Zidni absorbs overflow when others can\'t handle a difficulty. Elsa is excluded from this automation but still receives reactive notifications. Open the <strong>Scheduler</strong> tab to preview and run.</div>' +
+    '</div>' +
+
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">03</div><div><div class="auto-title">Editor Notifications \u2014 hybrid batch</div><div class="auto-sub">trigger: video asset created, reassigned, or status changed</div></div></div>' +
+      '<div class="auto-desc">' +
+        'Fires when (a) a new video is assigned, (b) a video is reassigned, or (c) a video\'s status changes. ' +
+        'Messages are batched: queue up to <strong style="color:var(--text1);">3 video updates</strong> OR wait <strong style="color:var(--text1);">30 minutes</strong> from the first update \u2014 whichever comes first. ' +
+        'Elsa is included (manual assignments still ping her). ' +
+        'Open the <strong>Notifications</strong> tab to see pending batches and manually flush them.' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">04</div><div><div class="auto-title">Slack Webhook Config</div><div class="auto-sub">future: real automated sends \u00B7 currently unused</div></div></div>' +
+      '<div class="auto-desc">Stores an <strong style="color:var(--text1);">Incoming Webhook URL</strong> (https://hooks.slack.com/services/...) for later use when automated sends are turned on. Right now the app does not send any HTTP requests \u2014 every Slack ping is delivered manually via the \u{1F4CB} Copy and \u{1F517} Open Slack buttons. Save just stores the URL locally. Send test ping actually POSTs a message to verify the webhook works.</div>' +
+      '<div class="webhook-row"><input type="text" id="webhook-input" value="' + escapeHtml(STATE.webhookUrl) + '" placeholder="https://hooks.slack.com/services/..."><button class="save-btn" onclick="App.saveWebhook()">Save locally</button><button class="edit-btn" onclick="App.testWebhook()" style="margin-left:4px;">\u{1F4E1} Send test ping</button></div>' +
+    '</div>' +
+
+    '<div class="section-title">Live Activity Log</div>' +
+    '<div class="auto-card"><div class="auto-desc" style="margin-bottom:12px">Every action in the campaign manager fires through the notification system. Open the browser console to see the raw payloads.</div><div class="log-list">' + logHtml + '</div></div>' +
+  '</div></div>';
+}
+
+function renderConfigView() {
+  var counts = {};
+  EDITORS.forEach(function(e) { counts[e] = STATE.assets.filter(function(a) { return a.editor === e; }).length; });
+
+  var editorCards = EDITORS.map(function(e) {
+    var rules = EDITOR_RULES[e];
+    var mix = rules ? Object.keys(rules.idealMix).map(function(k) { return rules.idealMix[k] + ' ' + k; }).join(' + ') : '\u2014';
+    var cap = rules ? rules.cap : '\u2014';
+    var countries = rules ? rules.countryOrder.join(' \u203A ') : '\u2014';
+    var auto = EDITOR_AUTO_SCHEDULE[e] ? 'Auto-scheduled' : 'Manual only';
+    return '<div style="padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg3); min-width:220px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;"><div class="editor-avatar av-' + e + '">' + editorInitials(e) + '</div><div><div style="font-size:14px;font-weight:600;">' + e + '</div><div style="font-size:11px;color:' + (EDITOR_AUTO_SCHEDULE[e] ? 'var(--green-text)' : 'var(--amber-text)') + ';">' + auto + '</div></div></div>' +
+      '<div style="font-size:11px;color:var(--text3);font-family:monospace;line-height:1.8;">' +
+      'Handles: ' + EDITOR_ALLOWED_DIFF[e].join(', ') + '<br>' +
+      'Daily mix: ' + mix + '<br>' +
+      'Cap: ' + cap + '/day<br>' +
+      'Priority: ' + countries + '<br>' +
+      'Total assets: ' + counts[e] +
+      '</div></div>';
+  }).join('');
+
+  // Per-editor Slack channel rows
+  var slackRows = EDITORS.map(function(e) {
+    var url = (STATE.editorSlackChannels && STATE.editorSlackChannels[e]) || '';
+    var urlEsc = escapeHtml(url);
+    var hasUrl = !!url;
+    return '<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">' +
+      '<div class="editor-avatar av-' + e + '" style="flex-shrink:0;">' + editorInitials(e) + '</div>' +
+      '<div style="font-size:13px; font-weight:600; color:var(--text1); width:60px; flex-shrink:0;">' + e + '</div>' +
+      '<input type="text" id="slack-ch-' + e + '" class="form-input" ' +
+        'style="flex:1; font-family:\'JetBrains Mono\', monospace; font-size:12px;" ' +
+        'placeholder="https://app.slack.com/client/T.../D... or slack://channel?..." ' +
+        'value="' + urlEsc + '" ' +
+        'onblur="App.saveEditorChannel(\'' + e + '\', this.value)">' +
+      '<button class="edit-btn" onclick="App.openSlack(\'' + e + '\')" ' +
+        (hasUrl ? '' : 'disabled style="opacity:0.4; cursor:not-allowed;"') + ' ' +
+        'title="Open this channel in Slack">Test</button>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="content"><div class="config-panel">' +
+    '<div class="section-title">Editors</div>' +
+    '<div class="auto-card"><div style="display:flex; gap:12px; flex-wrap:wrap;">' + editorCards + '</div></div>' +
+
+    '<div class="section-title">Slack Integration</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-desc" style="margin-bottom:14px;">Per-editor Slack channel URLs used by the \u{1F517} Open Slack buttons on pending batches, sent notifications, and the Export modal. Paste the full channel URL from Slack\'s \u201CCopy link\u201D option \u2014 it will open Slack directly (desktop app if installed, otherwise web). Changes save automatically when you click away from the field.</div>' +
+      '<div style="display:flex; align-items:center; gap:10px; padding:8px 0 12px; border-bottom:1px solid var(--border);">' +
+        '<div style="font-size:12px; font-weight:600; color:var(--text2); width:130px; flex-shrink:0;">Workspace URL</div>' +
+        '<input type="text" class="form-input" ' +
+          'style="flex:1; font-family:\'JetBrains Mono\', monospace; font-size:12px;" ' +
+          'placeholder="https://yourteam.slack.com (optional)" ' +
+          'value="' + escapeHtml(STATE.slackWorkspace || '') + '" ' +
+          'onblur="App.saveWorkspace(this.value)">' +
+      '</div>' +
+      slackRows +
+    '</div>' +
+
+    '<div class="section-title">Schema Overview</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-title" style="margin-bottom: 12px">Table 1 \u00B7 Countries</div>' +
+      '<div class="config-row"><div class="config-label">Country Code</div><div class="config-value">UK, ES, IT, PL</div></div>' +
+      '<div class="config-row" style="border-bottom:none"><div class="config-label">Country Name</div><div class="config-value">Single line text</div></div>' +
+    '</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-title" style="margin-bottom: 12px">Table 2 \u00B7 Campaigns</div>' +
+      '<div class="config-row"><div class="config-label">Campaign Name</div><div class="config-value">Single line text</div></div>' +
+      '<div class="config-row"><div class="config-label">Country</div><div class="config-value">Link to Countries</div></div>' +
+      '<div class="config-row"><div class="config-label">Rank</div><div class="config-value">Number \u00B7 within country</div></div>' +
+      '<div class="config-row"><div class="config-label">Campaign Brief</div><div class="config-value">Long text</div></div>' +
+      '<div class="config-row"><div class="config-label">Google Drive Folder ID</div><div class="config-value">Single line text</div></div>' +
+      '<div class="config-row"><div class="config-label">Category</div><div class="config-value">Luxury / Essentials / BTS</div></div>' +
+      '<div class="config-row" style="border-bottom:none"><div class="config-label">Slack Channel Override</div><div class="config-value">Single line text (optional)</div></div>' +
+    '</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-title" style="margin-bottom: 12px">Table 3 \u00B7 Video Assets</div>' +
+      '<div class="config-row"><div class="config-label">NO.</div><div class="config-value">Number</div></div>' +
+      '<div class="config-row"><div class="config-label">Video Name</div><div class="config-value">Single line text</div></div>' +
+      '<div class="config-row"><div class="config-label">Category</div><div class="config-value">Single line text</div></div>' +
+      '<div class="config-row"><div class="config-label">Difficulty</div><div class="config-value">Low / Moderate / High / Max</div></div>' +
+      '<div class="config-row"><div class="config-label">Raw Video File</div><div class="config-value">URL</div></div>' +
+      '<div class="config-row"><div class="config-label">Editing Brief</div><div class="config-value">URL or long text</div></div>' +
+      '<div class="config-row"><div class="config-label">Editor</div><div class="config-value">Zidni / Sharm / Patty / Elsa</div></div>' +
+      '<div class="config-row"><div class="config-label">Final Video (Frame.io)</div><div class="config-value">URL</div></div>' +
+      '<div class="config-row"><div class="config-label">Estimated Delivery</div><div class="config-value">Date</div></div>' +
+      '<div class="config-row"><div class="config-label">Scheduled For</div><div class="config-value">Date \u00B7 set by scheduler</div></div>' +
+      '<div class="config-row"><div class="config-label">Released</div><div class="config-value">Checkbox</div></div>' +
+      '<div class="config-row"><div class="config-label">Date Approved</div><div class="config-value">Date</div></div>' +
+      '<div class="config-row"><div class="config-label">Status</div><div class="config-value">Draft / In Review / Needs Revision / Approved</div></div>' +
+      '<div class="config-row"><div class="config-label">Version</div><div class="config-value">V1, V2...</div></div>' +
+      '<div class="config-row" style="border-bottom:none"><div class="config-label">Campaign</div><div class="config-value">Link to Campaigns</div></div>' +
+    '</div>' +
+
+    '<div class="section-title" style="color:var(--red-text); margin-top:24px;">Danger Zone</div>' +
+    '<div class="auto-card" style="border-color:var(--red); background:rgba(226,75,74,0.03);">' +
+      '<div class="auto-header">' +
+        '<div class="auto-icon" style="background:var(--red-bg); color:var(--red-text);">\u26A0</div>' +
+        '<div><div class="auto-title" style="color:var(--red-text);">Reset all data</div>' +
+        '<div class="auto-sub">wipes localStorage and reloads the page with seeded defaults</div></div>' +
+      '</div>' +
+      '<div class="auto-desc">Erases every campaign, video asset, pending batch, sent notification, and activity log entry. Editor Slack channel URLs and workspace settings are also cleared. There is no undo.</div>' +
+      '<button class="run-btn" style="margin-top:10px; background:var(--red-bg); color:var(--red-text); border-color:var(--red);" onclick="App.resetAllData()">\u267B Reset all data</button>' +
+    '</div>' +
+  '</div></div>';
+}
+
+// ===================== PERSISTENCE =====================
+var STORAGE_KEY = 'tilt-campaign-manager-v1';
+var persistenceEnabled = true;
+
+function saveState() {
+  if (!persistenceEnabled) return;
+  try {
+    var snapshot = {
+      activeSubCampaignId: STATE.activeSubCampaignId,
+      expandedCountries: STATE.expandedCountries,
+      webhookUrl: STATE.webhookUrl,
+      slackWorkspace: STATE.slackWorkspace,
+      editorSlackChannels: STATE.editorSlackChannels,
+      schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
+      countries: STATE.countries,
+      campaigns: STATE.campaigns,
+      assets: STATE.assets,
+      pendingBatches: STATE.pendingBatches,
+      sentNotifications: STATE.sentNotifications,
+      activityLog: STATE.activityLog,
+      nextAssetId: STATE.nextAssetId,
+      nextCampaignId: STATE.nextCampaignId,
+      nextBatchItemId: STATE.nextBatchItemId
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  } catch (e) {
+    console.warn('Failed to save state', e);
+  }
+}
+
+function loadState() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    var snapshot = JSON.parse(raw);
+    Object.keys(snapshot).forEach(function(key) {
+      STATE[key] = snapshot[key];
+    });
+    // Ensure pending batches exist for all editors (incl. new ones added in later versions)
+    EDITORS.forEach(function(e) {
+      if (!STATE.pendingBatches[e]) STATE.pendingBatches[e] = { items: [], firstQueuedAt: null };
+      if (STATE.editorSlackChannels[e] === undefined) STATE.editorSlackChannels[e] = '';
+    });
+    return true;
+  } catch (e) {
+    console.warn('Failed to load state', e);
+    return false;
+  }
+}
+
+function resetAllData() {
+  if (!confirm('Wipe ALL data and reset to seeded defaults? This cannot be undone.')) return;
+  persistenceEnabled = false;
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
+// ===================== SLACK HELPERS =====================
+function copyToClipboard(text, successMsg) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function() {
+      toast(successMsg || 'Copied to clipboard', 'success');
+    }).catch(function() {
+      fallbackCopy(text, successMsg);
+    });
+  } else {
+    fallbackCopy(text, successMsg);
+  }
+}
+
+function fallbackCopy(text, successMsg) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); toast(successMsg || 'Copied', 'success'); }
+  catch (e) { toast('Copy failed — select and copy manually', 'error'); }
+  document.body.removeChild(ta);
+}
+
+function openSlackChannel(editor) {
+  var channel = (STATE.editorSlackChannels || {})[editor];
+  var ws = STATE.slackWorkspace;
+  if (!channel) {
+    toast('Set ' + editor + '\'s Slack channel URL in Config first', 'error');
+    App.setTab('config');
+    return;
+  }
+  if (looksLikeWebhookUrl(channel)) {
+    toast(editor + '\'s channel URL is a webhook URL \u2014 use a channel URL instead (in Slack: right-click channel \u2192 Copy link)', 'error');
+    App.setTab('config');
+    return;
+  }
+  // Try slack:// deep link first, fall back to web URL
+  window.open(channel, '_blank');
+}
+
+function looksLikeWebhookUrl(url) {
+  if (!url) return false;
+  return /hooks\.slack\.com\/services\//i.test(url);
+}
+
+function isPlaceholderWebhook(url) {
+  var m = url.match(/\/services\/([^\/]+)\/([^\/]+)\/([^\/\s]+)/);
+  if (!m) return true;
+  return m[1] === 'T000' || m[2] === 'B000' || /^X+$/i.test(m[3]);
+}
+
+function resolveWebhookForEditor(/* editor */) {
+  // For now, everyone uses the global webhook. Extension point for per-editor webhooks later.
+  return STATE.webhookUrl;
+}
+
+// Shared Slack sender. Returns a Promise that resolves { ok, body, status } or rejects on hard network failure.
+// Uses Slack's documented form-encoded mode so we can actually read the response.
+function postToSlack(url, text) {
+  var payload = { text: text };
+  var formBody = 'payload=' + encodeURIComponent(JSON.stringify(payload));
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody
+  }).then(function(res) {
+    return res.text().then(function(body) {
+      return { ok: res.status === 200 && body === 'ok', status: res.status, body: body };
+    });
+  });
+}
+
+function testWebhookPing() {
+  var input = document.getElementById('webhook-input');
+  var url = input ? input.value.trim() : STATE.webhookUrl;
+  if (!url) { toast('Paste a webhook URL first', 'error'); return; }
+  if (!looksLikeWebhookUrl(url)) {
+    toast('That URL doesn\'t look like a Slack incoming webhook (hooks.slack.com/services/...)', 'error');
+    return;
+  }
+  if (isPlaceholderWebhook(url)) {
+    toast('That webhook URL looks like a placeholder \u2014 get a real one from api.slack.com/apps', 'error');
+    return;
+  }
+
+  toast('Sending test ping...', '');
+  var text = ':wave: Test ping from Tilt Campaign Manager \u2014 ' + new Date().toLocaleString();
+  postToSlack(url, text).then(function(r) {
+    if (r.ok) {
+      toast('\u2713 Test ping delivered \u2014 check your Slack channel', 'success');
+      logAction('notified', 'Webhook test ping sent successfully');
+    } else {
+      toast('Slack rejected the ping: "' + r.body + '" (status ' + r.status + ')', 'error');
+      logAction('deleted', 'Webhook test failed: ' + r.body);
+    }
+  }).catch(function(err) {
+    // Network-level failure. Fall back to no-cors blind send so it still reaches Slack.
+    fetch(url, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    }).then(function() {
+      toast('Ping sent (could not read Slack\'s response \u2014 check the channel to confirm)', 'success');
+      logAction('notified', 'Webhook test ping sent (blind, no-cors fallback)');
+    }).catch(function(e2) {
+      toast('Send failed: ' + (e2 && e2.message ? e2.message : 'network error'), 'error');
+    });
+  });
+}
+
+// Send a pending batch to Slack. On success, move items from pending to sent (like fireBatch).
+// On failure, leave the batch intact so the user can retry or fall back to copy/paste.
+function sendPendingBatch(editor) {
+  var batch = STATE.pendingBatches[editor];
+  if (!batch || batch.items.length === 0) { toast('Nothing to send', 'error'); return; }
+  var url = resolveWebhookForEditor(editor);
+  if (!url) { toast('Set the webhook URL in Automations first', 'error'); App.setTab('automations'); return; }
+  if (!looksLikeWebhookUrl(url) || isPlaceholderWebhook(url)) {
+    toast('Webhook URL is missing or a placeholder \u2014 fix it in Automations', 'error');
+    App.setTab('automations');
+    return;
+  }
+
+  var items = batch.items.slice(0, BATCH_SIZE_LIMIT);
+  var remaining = batch.items.slice(BATCH_SIZE_LIMIT);
+  var msg = buildBatchMessage(editor, items);
+
+  function markSent(reason) {
+    STATE.sentNotifications.unshift({
+      time: timeStamp(), editor: editor, items: items, reason: reason, body: msg
+    });
+    if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+    batch.items = remaining;
+    batch.firstQueuedAt = remaining.length > 0 ? Date.now() : null;
+  }
+
+  toast('Sending to Slack...', '');
+  postToSlack(url, msg).then(function(r) {
+    if (!r.ok) {
+      toast('Slack rejected the batch: "' + r.body + '"', 'error');
+      logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
+      return;
+    }
+    markSent('sent-live');
+    logAction('notified', editor + ' \u2014 sent ' + items.length + ' update(s) live to Slack (confirmed)');
+    toast('\u2713 Sent to Slack', 'success');
+    render();
+  }).catch(function(err) {
+    // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
+    fetch(url, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: msg })
+    }).then(function() {
+      markSent('sent-blind');
+      logAction('notified', editor + ' \u2014 sent ' + items.length + ' update(s) blind (no confirmation)');
+      toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
+      render();
+    }).catch(function(e2) {
+      var m = (e2 && e2.message) || (err && err.message) || 'network error';
+      var hint = (location.protocol === 'file:')
+        ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
+        : '';
+      toast('Send failed: ' + m + hint, 'error');
+    });
+  });
+}
+
+// Re-send an entry from the sent notifications log (idempotent: doesn't modify state).
+function resendSentNotification(idx) {
+  var n = STATE.sentNotifications[idx];
+  if (!n) return;
+  var url = resolveWebhookForEditor(n.editor);
+  if (!url) { toast('Set the webhook URL in Automations first', 'error'); App.setTab('automations'); return; }
+  if (!looksLikeWebhookUrl(url) || isPlaceholderWebhook(url)) {
+    toast('Webhook URL is missing or a placeholder \u2014 fix it in Automations', 'error');
+    App.setTab('automations');
+    return;
+  }
+  toast('Re-sending...', '');
+  postToSlack(url, n.body).then(function(r) {
+    if (r.ok) {
+      toast('\u2713 Re-sent to Slack', 'success');
+      logAction('notified', n.editor + ' \u2014 re-sent a prior notification (confirmed)');
+    } else {
+      toast('Slack rejected the re-send: "' + r.body + '"', 'error');
+    }
+  }).catch(function(err) {
+    // Same no-cors fallback as sendPendingBatch
+    fetch(url, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: n.body })
+    }).then(function() {
+      toast('Re-sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
+      logAction('notified', n.editor + ' \u2014 re-sent blind (no confirmation)');
+    }).catch(function(e2) {
+      var m = (e2 && e2.message) || (err && err.message) || 'network error';
+      var hint = (location.protocol === 'file:')
+        ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers.'
+        : '';
+      toast('Re-send failed: ' + m + hint, 'error');
+    });
+  });
+}
+
+// Build the clean message body for a batch (pending or sent)
+function buildBatchMessage(editor, items) {
+  var lines = [':clapper: *' + editor + '* \u2014 ' + items.length + ' video update' + (items.length > 1 ? 's' : '')];
+  items.forEach(function(it, i) {
+    var changeLabel = ({ created: 'new task', reassigned: 'reassigned', status: 'status change', 'daily-queue': 'daily queue' })[it.change] || it.change;
+    lines.push('  ' + (i+1) + '. ' + it.name + '  _(' + changeLabel + ')_');
+  });
+  return lines.join('\n');
+}
+
+// Build a daily queue message for an editor based on currently-assigned, unreleased videos
+function buildDailyQueueMessage(editor, dateStr) {
+  var list = STATE.assets.filter(function(a) {
+    return a.editor === editor && !a.released && a.status !== 'Approved';
+  }).sort(function(a, b) { return a.pn - b.pn; });
+  if (list.length === 0) return null;
+  var lines = [':clapper: *Daily queue for ' + editor + '*' + (dateStr ? ' (' + dateStr + ')' : '')];
+  list.slice(0, 10).forEach(function(a, i) {
+    lines.push('  ' + (i+1) + '. ' + a.name + '  _(' + a.difficulty + ')_');
+  });
+  if (list.length > 10) lines.push('  ...and ' + (list.length - 10) + ' more');
+  return lines.join('\n');
+}
+
+function showExportModal() {
+  var editorOpts = EDITORS.map(function(e) {
+    var count = STATE.assets.filter(function(a) { return a.editor === e && !a.released && a.status !== 'Approved'; }).length;
+    return '<option value="' + e + '">' + e + ' (' + count + ' open)</option>';
+  }).join('');
+
+  var html =
+    '<div class="modal-title">Export daily queue for editor</div>' +
+    '<div class="form-row full"><label class="form-label">Editor</label>' +
+      '<select id="export-editor" class="form-select" onchange="App.updateExportPreview()">' + editorOpts + '</select></div>' +
+    '<div class="form-row full"><label class="form-label">Message preview (edit freely before copying)</label>' +
+      '<textarea id="export-preview" class="form-textarea" style="min-height:180px;font-family:monospace;font-size:12px;"></textarea></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;">' +
+      '<button class="submit-btn" id="export-copy">\u{1F4CB} Copy message</button>' +
+      '<button class="edit-btn" id="export-open-slack">\u{1F4E8} Open Slack</button>' +
+    '</div>' +
+    '<div class="modal-actions" style="margin-top:14px;"><button class="cancel-btn" id="modal-cancel">Close</button></div>';
+
+  openModal(html, function() {});
+  setTimeout(function() {
+    // Populate initial preview
+    var sel = document.getElementById('export-editor');
+    App.updateExportPreview();
+    // Wire buttons
+    document.getElementById('export-copy').addEventListener('click', function() {
+      var txt = document.getElementById('export-preview').value;
+      copyToClipboard(txt, 'Copied \u2014 paste into Slack');
+    });
+    document.getElementById('export-open-slack').addEventListener('click', function() {
+      openSlackChannel(document.getElementById('export-editor').value);
+    });
+  }, 60);
+}
+
+function render() {
+  var body;
+  if (STATE.tab === 'campaigns') body = renderSidebar() + renderCampaignsView();
+  else if (STATE.tab === 'scheduler') body = renderSchedulerView();
+  else if (STATE.tab === 'notifications') body = renderNotificationsView();
+  else if (STATE.tab === 'automations') body = renderAutomationsView();
+  else body = renderConfigView();
+  document.getElementById('app').innerHTML = renderTopbar() + '<div class="main">' + body + '</div>';
+  saveState();
+}
+
+// ===================== EVENTS =====================
+var App = {
+  setTab: function(t) { STATE.tab = t; render(); },
+  selectCampaign: function(id) {
+    STATE.activeSubCampaignId = id;
+    var c = findCampaignById(id);
+    if (c) STATE.expandedCountries[c.country] = true;
+    render();
+  },
+  toggleCountry: function(code) { STATE.expandedCountries[code] = !STATE.expandedCountries[code]; render(); },
+  addSub: function(code) { showAddSubCampaignModal(code); },
+  editAssetById: function(id) {
+    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { showAssetModal(STATE.assets[i]); return; }
+  },
+  deleteAsset: deleteAsset,
+  showEditCampaignModal: showEditCampaignModal,
+  showAssetModal: showAssetModal,
+  deleteCampaign: deleteCampaign,
+  reorderCampaigns: reorderCampaigns,
+  saveWebhook: function() {
+    var input = document.getElementById('webhook-input');
+    if (input) { STATE.webhookUrl = input.value; saveState(); toast('Webhook URL saved locally (not sent)', 'success'); }
+  },
+  testWebhook: testWebhookPing,
+  sendBatch: sendPendingBatch,
+  resendSent: resendSentNotification,
+  onSearch: function(v) { STATE.search = v; render(); },
+  onStatusFilter: function(v) { STATE.statusFilter = v; render(); },
+  onEditorFilter: function(v) { STATE.editorFilter = v; render(); },
+  setSchedulerDate: function(v) { STATE.schedulerDate = v; render(); },
+  toggleWeekends: function(v) { STATE.schedulerIncludeWeekends = v; render(); },
+  runScheduler: runScheduler,
+  clearSchedule: clearSchedule,
+  releaseScheduled: releaseScheduled,
+  flushBatch: function(editor) {
+    var fired = fireBatch(editor, 'manual');
+    if (fired) toast('Fired batch for ' + editor, 'success');
+    else toast('Nothing to flush');
+    render();
+  },
+  clearBatchCmd: function(editor) { clearBatch(editor); },
+  copyMessage: function(text, label) { copyToClipboard(text, label || 'Copied'); },
+  openSlack: function(editor) { openSlackChannel(editor); },
+  showExport: function() { showExportModal(); },
+  updateExportPreview: function() {
+    var sel = document.getElementById('export-editor');
+    var preview = document.getElementById('export-preview');
+    if (!sel || !preview) return;
+    var editor = sel.value;
+    var msg = buildDailyQueueMessage(editor, todayISO()) || 'No open videos for ' + editor + ' right now.';
+    preview.value = msg;
+  },
+  saveEditorChannel: function(editor, url) {
+    var trimmed = (url || '').trim();
+    if (STATE.editorSlackChannels[editor] === trimmed) return;
+    STATE.editorSlackChannels[editor] = trimmed;
+    saveState();
+    render();
+  },
+  saveWorkspace: function(v) {
+    var trimmed = (v || '').trim();
+    if (STATE.slackWorkspace === trimmed) return;
+    STATE.slackWorkspace = trimmed;
+    saveState();
+  },
+  resetAllData: resetAllData
+};
+window.App = App;
+
+document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'modal-overlay') closeModal(); });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+
+// Load persisted state on boot
+var hadSavedState = loadState();
+if (hadSavedState) {
+  logAction('updated', 'Restored saved state from your browser');
+}
+
+render();
+</script>
+</body>
+</html>
