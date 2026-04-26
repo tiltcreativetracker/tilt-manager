@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <style>
+      @import url('https://api.fontshare.com/v2/css?f[]=aspekta@950&amp;display=swap');
+    </style>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a3a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="6" fill="url(#bg)"/>
+  <g transform="rotate(-8 16 16)">
+    <text x="16" y="22" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="950"
+          font-family="'Aspekta', -apple-system, system-ui, sans-serif"
+          letter-spacing="-1">CT</text>
+  </g>
+</svg>
