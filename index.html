@@ -1277,6 +1277,7 @@ var Fb = {
       editorSlackChannels: STATE.editorSlackChannels,
       editorSlackIds: STATE.editorSlackIds,
       categoryHeadSlackIds: STATE.categoryHeadSlackIds,
+      pmSlackIds: STATE.pmSlackIds,
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
@@ -1610,6 +1611,17 @@ var DEFAULT_CATEGORIES = [
   { name: 'Health and Beauty',     color: CATEGORY_PALETTE[1] }  // teal (reuse)
 ];
 
+// Each country has an assigned PM — gets @mentioned in PM Review queue messages
+// and in Category Head QC "Approved" notifications so they know a video is
+// ready to publish. Empty value = no auto-mention (US and PL not assigned yet).
+var COUNTRY_PMS = {
+  UK: 'Elsa',
+  IT: 'Anasstassiya',
+  ES: 'Laura',
+  US: '',
+  PL: ''
+};
+
 // Each category has an assigned "category head" — the person responsible for
 // reviewing that category's videos. Auto-displayed in the Category Head QC
 // column on the asset table; auto-set when the asset's category changes.
@@ -1717,6 +1729,11 @@ var STATE = {
   // Heads are derived from category via CATEGORY_HEADS; this map is keyed by
   // the head's display name (Anand, Hanyan, Nazy, Cristian).
   categoryHeadSlackIds: { Anand: '', Hanyan: '', Nazy: '', Cristian: '' },
+  // Slack member IDs per country PM — keyed by country code, values are the
+  // PM's Slack member ID. When set, PM Review queue and Category Head QC
+  // Approved messages @mention the PM so they get pinged. Names of the PMs
+  // come from COUNTRY_PMS (UK→Elsa, IT→Anasstassiya, ES→Laura).
+  pmSlackIds: { UK: '', IT: '', ES: '', US: '', PL: '' },
   schedulerDate: todayISO(),
   schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
@@ -2116,6 +2133,18 @@ function mentionCategoryHead(category) {
   var ids = (STATE && STATE.categoryHeadSlackIds) || {};
   var id = (ids[head] || '').trim();
   return id ? '<@' + id + '>' : head;
+}
+
+// Returns the Slack mention syntax for a country's PM when their member ID is
+// configured, or just the PM's plain name otherwise. Returns '' when no PM is
+// assigned for that country (US and PL by default) so the message header
+// doesn't end up with a stray '@' prefix.
+function mentionPm(country) {
+  var pmName = (COUNTRY_PMS && COUNTRY_PMS[country]) || '';
+  if (!pmName) return '';
+  var ids = (STATE && STATE.pmSlackIds) || {};
+  var id = (ids[country] || '').trim();
+  return id ? '<@' + id + '>' : pmName;
 }
 
 // Returns a normalized URL if `str` (after trimming) looks like a single URL, or null
@@ -5684,6 +5713,28 @@ function renderConfigView() {
       '</div></div>';
   }).join('');
 
+  // Country PM Slack member ID rows. One per country with an assigned PM in
+  // COUNTRY_PMS — pings the PM in PM Review messages and Category Head QC
+  // Approved messages. Empty PM names (US, PL) are skipped.
+  var pmRows = STATE.countries.map(function(c) {
+    var pmName = (COUNTRY_PMS && COUNTRY_PMS[c.code]) || '';
+    var slackId = (STATE.pmSlackIds && STATE.pmSlackIds[c.code]) || '';
+    var slackIdEsc = escapeHtml(slackId);
+    var nameLabel = pmName ? escapeHtml(pmName) : '<em style="color:var(--text3); font-weight:400;">unassigned</em>';
+    var inputAttrs = pmName
+      ? 'placeholder="U07ABC123 (member ID)" value="' + slackIdEsc + '" onblur="App.savePmSlackId(\'' + c.code + '\', this.value)"'
+      : 'placeholder="No PM assigned" disabled style="opacity:0.4;"';
+    return '<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">' +
+      '<div class="country-flag flag-' + c.code + '" style="flex-shrink:0;">' + c.code + '</div>' +
+      '<div style="font-size:13px; font-weight:600; color:var(--text1); width:120px; flex-shrink:0;">' + nameLabel + '</div>' +
+      '<input type="text" id="pm-id-' + c.code + '" class="form-input" ' +
+        'style="flex:1; max-width:240px; font-family:\'JetBrains Mono\', monospace; font-size:12px;" ' +
+        'title="Slack member ID for ' + (pmName || 'this PM') + ' — pings them in PM Review and Category Head QC Approved messages." ' +
+        inputAttrs + '>' +
+      '<div style="font-size:11px; color:var(--text3); flex:1;">' + escapeHtml(c.name) + '</div>' +
+    '</div>';
+  }).join('');
+
   // Category head Slack member ID rows. One row per unique head listed in
   // CATEGORY_HEADS — when set, the head gets @mentioned in PM batch messages
   // for For Review items in their categories.
@@ -5860,6 +5911,11 @@ function renderConfigView() {
       '</div>' +
       slackRows +
       '<div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);">' +
+        '<div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; letter-spacing:0.04em; text-transform:uppercase;">PM Slack IDs</div>' +
+        '<div style="font-size:11.5px; color:var(--text3); margin-bottom:10px;">PM Review queue messages and Category Head QC <em>Approved</em> messages auto @-mention the PM for that country. Set each PM\'s Slack member ID here to enable the ping.</div>' +
+        pmRows +
+      '</div>' +
+      '<div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);">' +
         '<div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; letter-spacing:0.04em; text-transform:uppercase;">Category head Slack IDs</div>' +
         '<div style="font-size:11.5px; color:var(--text3); margin-bottom:10px;">When a video reaches <em>For Review</em> in the workflow, the assigned category head gets @mentioned in the country PM message — but only if their Slack member ID is set here.</div>' +
         headRows +
@@ -5962,6 +6018,7 @@ function saveState() {
       editorSlackChannels: STATE.editorSlackChannels,
       editorSlackIds: STATE.editorSlackIds,
       categoryHeadSlackIds: STATE.categoryHeadSlackIds,
+      pmSlackIds: STATE.pmSlackIds,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       countries: STATE.countries,
       categories: STATE.categories,
@@ -6043,6 +6100,12 @@ function loadState() {
       if (head && STATE.categoryHeadSlackIds[head] === undefined) {
         STATE.categoryHeadSlackIds[head] = '';
       }
+    });
+    // Auto-seed PM Slack IDs (one per country). Empty default = no @mention until
+    // the user pastes the member ID in Config.
+    if (!STATE.pmSlackIds) STATE.pmSlackIds = {};
+    STATE.countries.forEach(function(c) {
+      if (STATE.pmSlackIds[c.code] === undefined) STATE.pmSlackIds[c.code] = '';
     });
     // Reconcile saved countries with the canonical list: add any missing countries
     // (e.g. US added in this version) and re-order to canonical order.
@@ -6818,7 +6881,13 @@ function buildBatchMessage(recipient, items, opts) {
   var header;
   if (isPmBatch) {
     var country = recipient.slice(3);
-    header = ':clapper: *Review queue \u2014 ' + country + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
+    // @-mention the PM so they get pinged. mentionPm() returns '<@USERID>' if a
+    // Slack member ID is set in pmSlackIds, plain name fallback otherwise, or
+    // empty string for unassigned countries (US, PL) — in which case the
+    // header just opens with the emoji.
+    var pmMention = mentionPm(country);
+    var pmPrefix = pmMention ? pmMention + ' ' : '';
+    header = ':clapper: ' + pmPrefix + '*Review queue \u2014 ' + country + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
   } else if (isChqBatch) {
     // CHQ recipient is a category name (e.g. 'CHQ:Sneakers'), one queue per
     // category so the right head sees only their own pile. Country mix happens
@@ -7618,6 +7687,29 @@ var App = {
         // "For Review" (the head's review status) instead of the workflow
         // status, which would be misleading on a CHQ batch.
         queueNotification('CHQ:' + a.category, 'for-review', a, detail, { statusLabel: newVal });
+      }
+    }
+    // Approved → ping the country PM (Elsa for UK, Anasstassiya for IT, Laura
+    // for ES) with the final video link. Routes into the existing PM:Country
+    // batch so it lands in the country review channel where the PM lives.
+    if (newVal === 'Approved' && old !== 'Approved') {
+      var campA = findCampaignById(a.campaignId);
+      var countryA = campA && campA.country;
+      if (countryA && CHQ_COUNTRY_ALLOWLIST[countryA]) {
+        var detailA = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
+        queueNotification('PM:' + countryA, 'category-approved', a, detailA, { statusLabel: 'Approved (Category Head)' });
+      }
+    }
+    // Needs Revisions → ping the assigned editor (NOT the head) so they know
+    // to fix it. Routes to the editor's own DM batch with the existing
+    // mentionEditor() in the header. Final video link in the per-item lines
+    // so the editor sees what to revise.
+    if (newVal === 'Needs Revisions' && old !== 'Needs Revisions' && a.editor) {
+      var campN = findCampaignById(a.campaignId);
+      var countryN = campN && campN.country;
+      if (countryN && CHQ_COUNTRY_ALLOWLIST[countryN]) {
+        var detailN = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
+        queueNotification(a.editor, 'category-needs-revisions', a, detailN, { statusLabel: 'Needs Revisions (Category Head)' });
       }
     }
     render();
@@ -8689,6 +8781,21 @@ var App = {
     STATE.categoryHeadSlackIds[head] = trimmed;
     saveState();
     logAction('updated', 'Category head ' + head + ' Slack member ID ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
+    render();
+  },
+
+  // Save a country PM's Slack member ID. When set, the PM gets @mentioned in
+  // the PM Review queue header AND in Category Head QC Approved messages for
+  // that country. Names of the PMs are mapped per country in COUNTRY_PMS
+  // (UK → Elsa, IT → Anasstassiya, ES → Laura).
+  savePmSlackId: function(country, id) {
+    var trimmed = (id || '').trim();
+    if (!STATE.pmSlackIds) STATE.pmSlackIds = {};
+    if (STATE.pmSlackIds[country] === trimmed) return;
+    STATE.pmSlackIds[country] = trimmed;
+    saveState();
+    var pmName = (COUNTRY_PMS && COUNTRY_PMS[country]) || country;
+    logAction('updated', country + ' PM (' + pmName + ') Slack member ID ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
     render();
   },
   saveWorkspace: function(v) {
