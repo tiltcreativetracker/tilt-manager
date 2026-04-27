@@ -1260,6 +1260,28 @@ var Fb = {
   // saveState/render pass doesn't re-upload the same data.
   applySnapshot: function(data) {
     if (!data) return;
+    // Don't yank the DOM out from under the user mid-click. If a <select> /
+    // <input> / <textarea> is currently focused, or a pointer interaction is
+    // in flight (mousedown without matching mouseup), retry shortly. This
+    // prevents the "click-twice" flake where a remote snapshot fires while the
+    // user is opening or picking from a dropdown — the re-render destroys the
+    // dropdown DOM and the click is lost. Capped retries so a stuck focus
+    // doesn't block sync forever.
+    var ae = document.activeElement;
+    var aeBusy = ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+    if ((aeBusy || (typeof PtrDrag !== 'undefined' && PtrDrag.active)) && (Fb._snapshotRetries || 0) < 8) {
+      Fb._pendingSnapshotData = data;
+      Fb._snapshotRetries = (Fb._snapshotRetries || 0) + 1;
+      clearTimeout(Fb._snapshotRetryTimer);
+      Fb._snapshotRetryTimer = setTimeout(function() {
+        var d = Fb._pendingSnapshotData;
+        Fb._pendingSnapshotData = null;
+        Fb.applySnapshot(d);
+      }, 250);
+      return;
+    }
+    Fb._snapshotRetries = 0;
+    Fb._pendingSnapshotData = null;
     Fb._suppressUpload = true;
     try {
       // Copy known fields onto STATE. Skip metadata fields prefixed with `_`.
