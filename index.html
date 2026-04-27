@@ -2,10 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="icon" type="image/png" href="favicon.png">
 <title>Tilt // Creative Tracker</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!-- Firebase SDK (v10 compat — works directly in browser, no build step). Loaded synchronously
      before the app script so `firebase.auth()` / `firebase.firestore()` are available on boot. -->
@@ -26,6 +24,65 @@
     --blue-bg: #042c53; --blue-text: #85b7eb;
     --gray-bg: #2c2c2a; --gray-text: #b4b2a9;
     --pink-bg: #4b1528; --pink-text: #f4c0d1;
+  }
+
+  /* Light mode — auto-applied when the device is set to light. Flips the
+     CSS variable palette + overrides the hardcoded saturated tags/pills/avatars
+     so they read as soft tinted bg + dark text instead of dark bg + light text. */
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafafa; --bg2: #ffffff; --bg3: #f1f0f5; --bg4: #e6e4ec;
+      --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.15);
+      --text1: #1a1a22; --text2: #5a5872; --text3: #8a87a0;
+      --accent: #6a60c8; --accent2: #4a40b0; --accent-dim: rgba(127,119,221,0.10);
+      --green: #0a7a55; --green-bg: #d4f4e6; --green-text: #0a5040;
+      --amber-bg: #fff0d5; --amber-text: #8a4f00;
+      --red: #c9352a; --red-bg: #ffe0dc; --red-text: #8a2018;
+      --blue-bg: #d8eaf8; --blue-text: #0a4a8a;
+      --gray-bg: #ececea; --gray-text: #4a4845;
+      --pink-bg: #fde0ea; --pink-text: #8a1f3f;
+    }
+    /* Avatars — re-tint with soft bg + saturated text */
+    .av-Zidni { background: #e8e6f8; color: #4a40b0; }
+    .av-Patty { background: #d4f4e6; color: #0a5040; }
+    .av-Sharm { background: #fff0d5; color: #8a4f00; }
+    .av-Elsa  { background: #fde0ea; color: #8a1f3f; }
+    /* Status pills */
+    .st-Assigned { background: #e8e6f8; color: #4a40b0; }
+    .change-reassigned, .change-assigned, .tag-scheduled { background: #e8e6f8; color: #4a40b0; }
+    .tag-notified { background: #d4f4e6; color: #0a5040; }
+    /* Difficulty pills */
+    .diff-Low      { background: #d4f4e6; color: #0a5040; }
+    .diff-Moderate { background: #d8eaf8; color: #0a4a8a; }
+    .diff-High     { background: #fff0d5; color: #8a4f00; }
+    .diff-Max      { background: #ffe0dc; color: #8a2018; }
+    /* QC pills */
+    .qc-Missing_files { background: #fff0d5; color: #8a4f00; }
+    .qc-Ready         { background: #d4f4e6; color: #0a5040; }
+    /* Notification reason pills */
+    .sent-reason-live  { background: #d4f4e6; color: #0a5040; }
+    .sent-reason-blind { background: #fff0d5; color: #8a4f00; }
+    /* In-review status (teal) — used in three places */
+    .wc-status-pill.st-review,
+    .status-legend .wc-status-abbr.st-review,
+    .log-status-badge.st-review { color: #0a6a5a; border-color: rgba(10,106,90,0.3); background: rgba(10,106,90,0.10); }
+    /* Type pill organic */
+    .type-pill-organic { background: #e8eaf2; color: #3a4458; border-color: #cfd4e0; }
+    /* Today board accent */
+    .today-col-accent-todo { border-top: 3px solid #4a40b0; }
+    /* Code blocks + log entry bodies — light surface + readable text */
+    .code-block { background: #f4f4f7; color: #0a5040; border-color: var(--border); }
+    .sent-entry-body { background: #f4f4f7; color: var(--text2); border-left-color: var(--accent); }
+    /* Empty-state dashed box */
+    .today-col-empty { background: var(--bg3); }
+    /* Sign-in card on the gate — soften shadows + give the Google button a border so it doesn't vanish on the white card */
+    .signin-card { box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+    .signin-btn { border: 1px solid #d8d6e0; }
+    .signin-btn:hover { background: #f4f4f7; box-shadow: 0 4px 14px rgba(0,0,0,0.08); }
+    /* Logo dot glow — stronger in light mode for contrast */
+    .logo-dot { box-shadow: 0 0 6px rgba(106,96,200,0.5); }
+    /* Scrollbar thumb */
+    ::-webkit-scrollbar-thumb:hover { background: #c0bdd0; }
   }
   body { font-family: 'Inter Tight', system-ui, sans-serif; background: var(--bg); color: var(--text1); height: 100vh; overflow: hidden; font-size: 14px; -webkit-font-smoothing: antialiased; }
   .app { display: flex; flex-direction: column; height: 100vh; }
