@@ -5132,9 +5132,11 @@ function renderNotificationsView() {
   function renderBatchCard(recipient) {
     var isPm = recipient.indexOf('PM:') === 0;
     var isChq = recipient.indexOf('CHQ:') === 0;
-    var countryCode = isPm ? recipient.slice(3) : (isChq ? recipient.slice(4) : null);
+    var countryCode = isPm ? recipient.slice(3) : null;
+    var chqCategory = isChq ? recipient.slice(4) : null;
+    var head = isChq ? getCategoryHead(chqCategory) : '';
     var displayName = isPm ? (countryCode + ' \u2014 PM review queue')
-                    : isChq ? (countryCode + ' \u2014 Category Head QC')
+                    : isChq ? (chqCategory + (head ? ' \u00b7 ' + head : '') + ' \u2014 Category Head QC')
                     : recipient;
     var avatarHtml;
     if (isPm) {
@@ -5143,11 +5145,14 @@ function renderNotificationsView() {
         '<div class="country-flag flag-' + countryCode + '" style="width:20px; height:14px; font-size:8px;">' + countryCode + '</div>' +
         '</div>';
     } else if (isChq) {
-      // CHQ avatar: same compound shape as PM but with a magnifier glyph instead
-      // of "PM" so the user can distinguish the two queues at a glance.
-      avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + countryCode + '">' +
+      // CHQ avatar: magnifier glyph + a small category-colored chip showing the
+      // category name, so the user can scan the row by category.
+      var c = categoryColor(chqCategory);
+      var bgL = c.bgLight || c.bg;
+      var fgL = c.fgLight || c.fg;
+      avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(chqCategory) + (head ? ' (' + head + ')' : '') + '">' +
         '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-        '<div class="country-flag flag-' + countryCode + '" style="width:20px; height:14px; font-size:8px;">' + countryCode + '</div>' +
+        '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + '; height:14px; font-size:7.5px; padding:0 4px; display:inline-flex; align-items:center;">' + escapeHtml(chqCategory) + '</div>' +
         '</div>';
     } else {
       avatarHtml = '<div class="editor-avatar av-' + recipient + '">' + editorInitials(recipient) + '</div>';
@@ -5328,9 +5333,17 @@ function renderNotificationsView() {
 
   var editorCards = EDITORS.map(renderBatchCard).join('');
   var pmCards = STATE.countries.map(function(c) { return renderBatchCard('PM:' + c.code); }).join('');
-  // Category Head QC cards — one per country, parallel to PM. Each one fires when
-  // any video in the country has its categoryHeadQc set to "For Review".
-  var chqCards = STATE.countries.map(function(c) { return renderBatchCard('CHQ:' + c.code); }).join('');
+  // Category Head QC cards — one per category that has a head. The queue keys off
+  // the asset's category, batched independent of country (UK + US items share one
+  // queue). Country mix is shown via [UK] / [US] tags on each item line.
+  var chqCategories = (function() {
+    var seen = {}, out = [];
+    Object.keys(CATEGORY_HEADS).forEach(function(cat) {
+      if (!seen[cat]) { seen[cat] = true; out.push(cat); }
+    });
+    return out;
+  })();
+  var chqCards = chqCategories.map(function(cat) { return renderBatchCard('CHQ:' + cat); }).join('');
 
   // Sent notifications log
   var sentHtml = STATE.sentNotifications.length === 0
@@ -5353,7 +5366,8 @@ function renderNotificationsView() {
         // and a cleaner label ('PM review \u2014 UK') instead of the raw 'PM:UK' recipient key.
         var isPmEntry = typeof n.editor === 'string' && n.editor.indexOf('PM:') === 0;
         var isChqEntry = typeof n.editor === 'string' && n.editor.indexOf('CHQ:') === 0;
-        var entryCountry = isPmEntry ? n.editor.slice(3) : (isChqEntry ? n.editor.slice(4) : null);
+        var entryCountry = isPmEntry ? n.editor.slice(3) : null;
+        var entryCategory = isChqEntry ? n.editor.slice(4) : null;
         var avatarHtml;
         if (isPmEntry) {
           avatarHtml = '<div class="pm-avatar" title="PM review queue for ' + entryCountry + '">' +
@@ -5361,15 +5375,18 @@ function renderNotificationsView() {
             '<div class="country-flag flag-' + entryCountry + '" style="width:20px; height:14px; font-size:8px;">' + entryCountry + '</div>' +
             '</div>';
         } else if (isChqEntry) {
-          avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + entryCountry + '">' +
+          var ec = categoryColor(entryCategory);
+          var ecBgL = ec.bgLight || ec.bg;
+          var ecFgL = ec.fgLight || ec.fg;
+          avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(entryCategory) + '">' +
             '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-            '<div class="country-flag flag-' + entryCountry + '" style="width:20px; height:14px; font-size:8px;">' + entryCountry + '</div>' +
+            '<div class="cat-pill" style="--cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + '; height:14px; font-size:7.5px; padding:0 4px; display:inline-flex; align-items:center;">' + escapeHtml(entryCategory) + '</div>' +
             '</div>';
         } else {
           avatarHtml = '<div class="editor-avatar av-' + n.editor + '">' + editorInitials(n.editor) + '</div>';
         }
         var displayName = isPmEntry ? ('PM review \u2014 ' + entryCountry)
-                        : isChqEntry ? ('Category Head QC \u2014 ' + entryCountry)
+                        : isChqEntry ? ('Category Head QC \u2014 ' + entryCategory)
                         : n.editor;
         return '<div class="sent-entry">' +
           '<div class="sent-entry-header">' +
@@ -6234,13 +6251,16 @@ function resolveWebhookForEditor(recipient, items) {
     return cw[code] || fallback;
   }
 
-  // CHQ:XX (Category Head QC) -> same country webhook as PM, since category heads
-  // typically live in the same country channel. Honors campaign overrides too.
+  // CHQ:Category (Category Head QC) -> queue is per-category; items can span
+  // multiple countries (e.g. UK + US Sneakers in one batch), so per-country
+  // routing doesn't apply. Honors a campaign override if every item shares one
+  // campaign; otherwise routes to the global fallback webhook. Heads get pinged
+  // via the @-mention in the message header regardless of which channel it
+  // lands in.
   if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
-    var chqCode = recipient.slice(4);
     var chqOverride = sharedCampaignOverride(items);
     if (chqOverride) return chqOverride;
-    return cw[chqCode] || fallback;
+    return fallback;
   }
 
   // Editor recipient -> infer country from the batch items
@@ -6780,8 +6800,13 @@ function buildBatchMessage(recipient, items, opts) {
     var country = recipient.slice(3);
     header = ':clapper: *Review queue \u2014 ' + country + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
   } else if (isChqBatch) {
-    var chqCountry = recipient.slice(4);
-    header = ':mag: *Category Head QC \u2014 ' + chqCountry + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
+    // CHQ recipient is a category name (e.g. 'CHQ:Sneakers'), one queue per
+    // category so the right head sees only their own pile. Country mix happens
+    // INSIDE the batch — UK and US items can both end up in one Sneakers queue.
+    var chqCategory = recipient.slice(4);
+    var chqHeadMention = mentionCategoryHead(chqCategory);
+    var chqHeadPrefix = chqHeadMention ? chqHeadMention + ' ' : '';
+    header = ':mag: ' + chqHeadPrefix + '*Category Head QC \u2014 ' + chqCategory + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
   } else {
     var suffix = opts.countryLabel ? ' (' + opts.countryLabel + ')' : '';
     // mentionEditor(recipient) returns '<@USERID>' if a Slack member ID is configured
@@ -6798,15 +6823,13 @@ function buildBatchMessage(recipient, items, opts) {
     // Fallback to change type if status wasn't captured (legacy items from older batches
     // won't have .status populated). Rare edge, but worth protecting against.
     var statusLabel = it.status || it.change || '';
-    // CHQ batch items \u2014 append the assigned category head's @mention so they
-    // get pinged. Resolved per-item via the snapshot's category, so a batch with
-    // mixed categories (Sneakers, Luxury, etc.) pings the right head per video.
-    var headTag = '';
-    if (isChqBatch && it.category) {
-      var mention = mentionCategoryHead(it.category);
-      if (mention) headTag = '  cc: ' + mention;
-    }
-    lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel + headTag);
+    // CHQ batch items \u2014 the queue is per-category so all items share one
+    // head; we still @-mention them once on the first line via the header (no
+    // per-line cc needed). Add a country tag in brackets since the queue can
+    // span both UK and US items.
+    var lineSuffix = '';
+    if (isChqBatch && it.country) lineSuffix = ' [' + it.country + ']';
+    lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel + lineSuffix);
     if (FINAL_VIDEO_STATUSES[it.status]) {
       var finalUrl = extractSingleUrl(it.finalVideo);
       var finalLink = finalUrl ? '<' + finalUrl + '|Frame>' : '\u2014';
@@ -7560,14 +7583,18 @@ var App = {
     var head = getCategoryHead(a.category) || 'no head';
     logAction('updated', 'Asset "' + a.name + '" category-head QC (' + head + '): ' + old + ' \u2192 ' + newVal);
     // Notification trigger: when transitioning INTO 'For Review', queue the
-    // video into the country's CHQ batch so the head gets pinged in Slack.
+    // video into the per-category CHQ batch so the head gets pinged in Slack.
     // Other transitions (Draft, Needs Revisions, Approved) don't fire \u2014 those
     // are review verdicts the head sets, not a request for their attention.
-    if (newVal === 'For Review' && old !== 'For Review') {
+    // Country filter: only UK and US videos for now (other countries are out
+    // of scope for category-head review until those teams are onboarded).
+    var CHQ_COUNTRY_ALLOWLIST = { UK: 1, US: 1 };
+    if (newVal === 'For Review' && old !== 'For Review' && a.category) {
       var camp = findCampaignById(a.campaignId);
-      if (camp && camp.country) {
+      var country = camp && camp.country;
+      if (country && CHQ_COUNTRY_ALLOWLIST[country]) {
         var detail = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
-        queueNotification('CHQ:' + camp.country, 'for-review', a, detail);
+        queueNotification('CHQ:' + a.category, 'for-review', a, detail);
       }
     }
     render();
