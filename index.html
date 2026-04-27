@@ -2959,19 +2959,25 @@ function getFilteredAssets() {
 // ===================== NOTIFICATION BATCHING =====================
 // Queue a notification. `recipient` is a batch key (editor name like 'Zidni' or 'PM:UK').
 // `detail` is the already-formatted detail string to show under the item (e.g. raw+brief or Frame.io link).
-function queueNotification(recipient, changeType, asset, detail) {
+function queueNotification(recipient, changeType, asset, detail, opts) {
+  opts = opts || {};
   if (!STATE.pendingBatches[recipient]) {
     STATE.pendingBatches[recipient] = { items: [], firstQueuedAt: null };
   }
   var batch = STATE.pendingBatches[recipient];
   var camp = findCampaignById(asset.campaignId);
+  // `opts.statusLabel` overrides the snapshot status — used by CHQ batches so
+  // the message shows the categoryHeadQc value (e.g. "For Review") instead of
+  // the workflow status (e.g. "Assigned"). Falls back to asset.status for the
+  // existing PM/editor batches that snapshot workflow status.
+  var snapshotStatus = opts.statusLabel || asset.status;
   batch.items.push({
     id: STATE.nextBatchItemId++,
     assetId: asset.id,
     campaignId: asset.campaignId,
     name: asset.name,
     country: camp ? camp.country : null,
-    status: asset.status,
+    status: snapshotStatus,
     editor: asset.editor || '',
     // Snapshot the raw, brief, and final URLs too, so the batch message can show per-item
     // links even if the asset is edited between queue and send. Read from the asset at
@@ -7608,7 +7614,10 @@ var App = {
       var country = camp && camp.country;
       if (country && CHQ_COUNTRY_ALLOWLIST[country]) {
         var detail = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
-        queueNotification('CHQ:' + a.category, 'for-review', a, detail);
+        // Pass the categoryHeadQc value as statusLabel so the message shows
+        // "For Review" (the head's review status) instead of the workflow
+        // status, which would be misleading on a CHQ batch.
+        queueNotification('CHQ:' + a.category, 'for-review', a, detail, { statusLabel: newVal });
       }
     }
     render();
