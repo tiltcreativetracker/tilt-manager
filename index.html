@@ -676,6 +676,10 @@
   .log-time { color: var(--text3); font-family: 'JetBrains Mono', monospace; font-size: 11px; flex-shrink: 0; }
   .log-msg { color: var(--text1); }
   .log-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; margin-right: 4px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; }
+  /* Attribution chip — shows who did the action, between the tag and the message */
+  .log-user { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10.5px; font-weight: 600; margin-right: 6px; background: var(--accent-dim); color: var(--accent2); font-family: 'JetBrains Mono', monospace; }
+  .log-user-system { background: var(--bg4); color: var(--text3); font-style: italic; }
+  .log-msg-text { color: var(--text1); }
   .tag-created { background: var(--green-bg); color: var(--green-text); }
   .tag-updated { background: var(--blue-bg); color: var(--blue-text); }
   .tag-deleted { background: var(--red-bg); color: var(--red-text); }
@@ -5192,8 +5196,22 @@ function renderNotificationsView() {
 
 function renderAutomationsView() {
   var logHtml = STATE.activityLog.map(function(l) {
+    // Pick a short display name for the user. Prefer first name from displayName,
+    // fall back to local-part of email, fall back to "system" for pre-auth entries.
+    var who = 'system';
+    if (l.userName && l.userName !== 'system') {
+      who = l.userName.split(' ')[0]; // first name only — keeps the log compact
+    } else if (l.userEmail) {
+      who = l.userEmail.split('@')[0];
+    }
+    var whoTitle = (l.userName || '') + (l.userEmail ? ' ‹' + l.userEmail + '›' : '');
+    var whoChipHtml = l.userName
+      ? '<span class="log-user" title="' + escapeHtml(whoTitle) + '">' + escapeHtml(who) + '</span>'
+      : '<span class="log-user log-user-system" title="Pre-auth or automation">system</span>';
     return '<div class="log-entry"><span class="log-time">' + l.time + '</span>' +
-      '<div class="log-msg"><span class="log-tag tag-' + l.tag + '">' + l.tag + '</span>' + escapeHtml(l.msg) + '</div></div>';
+      '<div class="log-msg"><span class="log-tag tag-' + l.tag + '">' + l.tag + '</span>' +
+      whoChipHtml +
+      '<span class="log-msg-text">' + escapeHtml(l.msg) + '</span></div></div>';
   }).join('');
 
   return '<div class="content"><div class="automation-panel">' +
@@ -7803,7 +7821,7 @@ var App = {
     }
     // Recompute rank numbering across all countries (per-country dense ranks)
     reorderCampaigns(true);
-    logAction('added', 'Campaign duplicated: "' + source.name + '" \u2192 "' + newName + '" (' + copiedAssets + ' videos)');
+    logAction('created', 'Campaign duplicated: "' + source.name + '" \u2192 "' + newName + '" (' + copiedAssets + ' videos)');
     toast('Duplicated as "' + newName + '"' + (copiedAssets ? ' with ' + copiedAssets + ' video' + (copiedAssets === 1 ? '' : 's') : ''), 'success');
     STATE.activeSubCampaignId = newId;
     STATE.expandedCountries[source.country] = true;
@@ -7857,7 +7875,16 @@ var App = {
 
   saveWebhook: function() {
     var input = document.getElementById('webhook-input');
-    if (input) { STATE.webhookUrl = input.value; saveState(); toast('Webhook URL saved locally (not sent)', 'success'); }
+    if (input) {
+      var oldUrl = STATE.webhookUrl;
+      var newUrl = input.value;
+      if (oldUrl !== newUrl) {
+        STATE.webhookUrl = newUrl;
+        saveState();
+        logAction('updated', 'Global Slack webhook updated');
+      }
+      toast('Webhook URL saved locally (not sent)', 'success');
+    }
   },
   testWebhook: testWebhookPing,
   saveCountryWebhook: function(code, url) {
@@ -7866,6 +7893,7 @@ var App = {
     if (STATE.countryWebhooks[code] === trimmed) return; // no-op if unchanged (onblur fires on every click-away)
     STATE.countryWebhooks[code] = trimmed;
     saveState();
+    logAction('updated', code + ' PM review webhook ' + (trimmed === '' ? 'cleared' : 'updated'));
     var label = trimmed === '' ? 'cleared (will fall back to global)'
               : (webhookValid(trimmed) ? 'saved' : 'saved, but doesn\u2019t look like a real webhook URL');
     toast(code + ' webhook ' + label, webhookValid(trimmed) || trimmed === '' ? 'success' : 'error');
@@ -7924,6 +7952,7 @@ var App = {
     if (STATE.qcWebhooks[code] === trimmed) return;
     STATE.qcWebhooks[code] = trimmed;
     saveState();
+    logAction('updated', code + ' QC report webhook ' + (trimmed === '' ? 'cleared' : 'updated'));
     var label = trimmed === '' ? 'cleared (will fall back to global)'
               : (webhookValid(trimmed) ? 'saved' : 'saved, but doesn\u2019t look like a real webhook URL');
     toast(code + ' QC webhook ' + label, webhookValid(trimmed) || trimmed === '' ? 'success' : 'error');
@@ -8080,6 +8109,7 @@ var App = {
     if (STATE.editorSlackChannels[editor] === trimmed) return;
     STATE.editorSlackChannels[editor] = trimmed;
     saveState();
+    logAction('updated', editor + ' Slack channel URL ' + (trimmed === '' ? 'cleared' : 'updated'));
     render();
   },
   saveWorkspace: function(v) {
@@ -8087,6 +8117,7 @@ var App = {
     if (STATE.slackWorkspace === trimmed) return;
     STATE.slackWorkspace = trimmed;
     saveState();
+    logAction('updated', 'Slack workspace URL ' + (trimmed === '' ? 'cleared' : 'updated'));
   },
   resetAllData: resetAllData
 };
