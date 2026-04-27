@@ -102,8 +102,18 @@
   .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
   .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
-  /* Category Head QC cell — shows the auto-assigned reviewer's name as a soft pill. */
-  .cat-head-chip { display: inline-block; padding: 3px 9px; border-radius: 4px; background: var(--accent-dim); color: var(--accent2); font-size: 11px; font-weight: 600; }
+  /* Category Head QC cell — head name (auto-assigned) on top, editable status pill below. */
+  .cat-head-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .cat-head-chip { display: inline-block; padding: 3px 9px; border-radius: 4px; background: var(--accent-dim); color: var(--accent2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .cat-head-chip-empty { background: var(--bg4); color: var(--text3); font-style: italic; font-weight: 500; }
+  /* Editable status badge — reuses the workflow status palette (.st-Draft etc.) so
+     "For Review" / "Needs Revisions" / "Approved" pick up the same colors as the
+     workflow Status column. */
+  .cat-head-status-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; white-space: nowrap; }
+  .cat-head-status-badge.st-Draft           { background: var(--bg4); color: var(--text3); }
+  .cat-head-status-badge.st-For_Review      { color: #5eead4; border: 1px solid rgba(94,234,212,0.35); background: rgba(94,234,212,0.08); }
+  .cat-head-status-badge.st-Needs_Revisions { background: var(--red-bg); color: var(--red-text); }
+  .cat-head-status-badge.st-Approved        { background: var(--green-bg); color: var(--green-text); }
   .type-pill { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid transparent; }
   .type-pill-paid { background: var(--accent-dim); color: var(--accent2); border-color: rgba(127,119,221,0.35); }
   .type-pill-organic { background: #222234; color: #a6b1c9; border-color: #333348; }
@@ -1024,6 +1034,13 @@
     .status-legend .wc-status-abbr.st-review,
     .log-status-badge.st-review { color: #0a6a5a; border-color: rgba(10,106,90,0.3); background: rgba(10,106,90,0.10); }
 
+    /* Category Head QC status badge — re-tint for light mode */
+    .cat-head-status-badge.st-Draft           { background: var(--bg4); color: var(--text3); }
+    .cat-head-status-badge.st-For_Review      { color: #0a6a5a; border-color: rgba(10,106,90,0.3); background: rgba(10,106,90,0.10); }
+    .cat-head-status-badge.st-Needs_Revisions { background: #ffe0dc; color: #8a2018; }
+    .cat-head-status-badge.st-Approved        { background: #d4f4e6; color: #0a5040; }
+    .cat-head-chip { background: #e8e6f8; color: #4a40b0; }
+
     /* Type pill — Organic */
     .type-pill-organic { background: #e8eaf2; color: #3a4458; border-color: #cfd4e0; }
 
@@ -1601,6 +1618,11 @@ function getCategoryHead(category) {
   if (!category) return '';
   return CATEGORY_HEADS[category] || '';
 }
+
+// Status values the category head can set on a video. Distinct from the
+// Footage QC values (which track raw-files / pricing readiness) — these track
+// the head's review verdict on the produced video.
+var CATEGORY_HEAD_QC_VALUES = ['Draft', 'For Review', 'Needs Revisions', 'Approved'];
 var EDITOR_ALLOWED_DIFF = {
   Zidni: ['Low','Moderate','High','Max'],
   Sharm: ['Low','Moderate','High'],
@@ -1963,8 +1985,13 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     estDelivery: toISODate(estDelivery), dateApproved: '',
     scheduledFor: '', released: false,
     status: editor ? 'Assigned' : 'Draft', version: version,
-    // QC state \u2014 separate from status. Draft (default), Missing files, or Ready.
+    // Footage QC state \u2014 separate from workflow status. Draft, Missing files,
+    // Missing prices, or Ready.
     qc: 'Draft',
+    // Category Head QC state \u2014 the category head's review verdict on the produced
+    // video (Draft, For Review, Needs Revisions, Approved). The responsible head
+    // is auto-derived from the asset's category via CATEGORY_HEADS.
+    categoryHeadQc: 'Draft',
     // Version history: Google-Sheets-style full-asset snapshots captured before any
     // field mutation (see VERSION HISTORY HELPERS block). Entries have the shape
     // {id, snappedAt, label, named, changedFields, snapshot:{...VH_SNAPSHOT_FIELDS}}.
@@ -2200,6 +2227,19 @@ var EDITABLE_FIELDS = {
     },
     value: function(a) { return a.qc || 'Draft'; },
     appMethod: 'setAssetQc'
+  },
+  // Category Head QC — separate column from Footage QC. Reuses the .st-* status
+  // pill classes (Draft / For Review / Needs Revisions / Approved already exist
+  // in the workflow status palette, so the look matches the Status column).
+  categoryHeadQc: {
+    kind: 'select',
+    options: function() { return CATEGORY_HEAD_QC_VALUES; },
+    display: function(a) {
+      var v = a.categoryHeadQc || 'Draft';
+      return '<span class="cat-head-status-badge st-' + v.replace(/ /g, '_') + '">' + v + '</span>';
+    },
+    value: function(a) { return a.categoryHeadQc || 'Draft'; },
+    appMethod: 'setAssetCategoryHeadQc'
   }
 };
 
@@ -3737,6 +3777,7 @@ function duplicateAsset(id) {
     status: 'Draft',           // reset per spec; auto-flips to Assigned below if editor is present
     version: src.version,
     qc: 'Draft',               // QC resets to Draft for the new copy
+    categoryHeadQc: 'Draft',   // Category head review state also resets
     versionHistory: [],        // History starts clean \u2014 copy is a fresh asset
     assignedAt: ''             // Stamped below if the editor is kept (auto-Assigned path)
   };
@@ -4020,13 +4061,15 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
           '<td>' + renderStatusSelect(a) + '</td>' +
           '<td>' + (function() {
-            // Category Head QC cell — shows the auto-assigned head's name based on the
-            // asset's category. Read-only display: changing the asset's category will
-            // re-render this cell with the new head. Categories not in CATEGORY_HEADS
-            // (e.g. Essentials, BTS) display an em-dash placeholder.
+            // Category Head QC cell — head name (auto-assigned from category) on top,
+            // editable status dropdown below (Draft / For Review / Needs Revisions /
+            // Approved). Categories not in CATEGORY_HEADS (e.g. Essentials, BTS) show
+            // an em-dash for the name but still let the user set a status.
             var head = getCategoryHead(a.category);
-            if (!head) return '<span style="color:var(--text3); font-size:11px;">—</span>';
-            return '<span class="cat-head-chip" title="Auto-assigned by category: ' + escapeHtml(a.category) + '">' + escapeHtml(head) + '</span>';
+            var nameHtml = head
+              ? '<span class="cat-head-chip" title="Auto-assigned by category: ' + escapeHtml(a.category) + '">' + escapeHtml(head) + '</span>'
+              : '<span class="cat-head-chip cat-head-chip-empty" title="No head assigned for this category">—</span>';
+            return '<div class="cat-head-cell">' + nameHtml + renderEditableCell(a, 'categoryHeadQc') + '</div>';
           })() + '</td>' +
           '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(' + a.id + ')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(' + a.id + ')" title="Duplicate this row">Dup</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(' + a.id + ')" title="Delete this row">Del</button>' : '') + '</div></td>' +
         '</tr>';
@@ -5903,6 +5946,8 @@ function loadState() {
       if (a.dateApproved) a.dateApproved = toISODate(a.dateApproved) || a.dateApproved;
       // QC field added in this version \u2014 default to 'Draft' if missing or unknown
       if (QC_VALUES.indexOf(a.qc) < 0) a.qc = 'Draft';
+      // Category Head QC added later \u2014 same default behavior
+      if (CATEGORY_HEAD_QC_VALUES.indexOf(a.categoryHeadQc) < 0) a.categoryHeadQc = 'Draft';
       // versionHistory added in this version \u2014 migrate any asset missing it.
       // Also migrate legacy entries (url-only shape pre-Google-Sheets-rewrite)
       // to the new full-snapshot shape.
@@ -7316,6 +7361,25 @@ var App = {
       delete STATE.qcDismissed[a.campaignId];
     }
     logAction('updated', 'Asset "' + a.name + '" QC: ' + old + ' \u2192 ' + newQc);
+    render();
+  },
+
+  // Inline edit for the Category Head QC dropdown (Draft / For Review / Needs
+  // Revisions / Approved). The responsible head is auto-derived from category
+  // at render time, so changing this field does NOT change who's assigned \u2014
+  // it only updates the head's review verdict on the produced video.
+  setAssetCategoryHeadQc: function(id, newVal) {
+    var a = null;
+    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    if (!a) return;
+    if (CATEGORY_HEAD_QC_VALUES.indexOf(newVal) < 0) { render(); return; }
+    var old = a.categoryHeadQc || 'Draft';
+    if (old === newVal) { render(); return; }
+    var vhPre = snapshotAsset(a);
+    a.categoryHeadQc = newVal;
+    pushVersion(a, vhPre, ['categoryHeadQc']);
+    var head = getCategoryHead(a.category) || 'no head';
+    logAction('updated', 'Asset "' + a.name + '" category-head QC (' + head + '): ' + old + ' \u2192 ' + newVal);
     render();
   },
 
