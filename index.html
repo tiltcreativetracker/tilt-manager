@@ -254,7 +254,12 @@
   /* In Progress \u2014 amber to signal "actively being worked on" between Assigned and For Review */
   .st-In_Progress { background: var(--amber-bg); color: var(--amber-text); }
   /* Inline status dropdown styled to match the badge colors */
-  .status-select { appearance: none; -webkit-appearance: none; padding: 3px 22px 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: inherit; border: 1px solid transparent; cursor: pointer; outline: none; background-repeat: no-repeat; background-position: right 6px center; background-size: 8px; transition: filter 0.12s, box-shadow 0.12s; }
+  /* Status dropdown. NO transitions on focus/hover — Safari on macOS has a known quirk
+     where styled <select> elements with `appearance: none` and a focus transition
+     (e.g. animated box-shadow) sometimes need TWO clicks to open: the first click
+     starts the focus animation, the second opens the popup. Keeping these transitions
+     instant fixes that. Also bumped the padding so the click target is easier to hit. */
+  .status-select { appearance: none; -webkit-appearance: none; padding: 5px 24px 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: inherit; border: 1px solid transparent; cursor: pointer; outline: none; background-repeat: no-repeat; background-position: right 6px center; background-size: 8px; }
   .status-select:hover { filter: brightness(1.15); }
   .status-select:focus { box-shadow: 0 0 0 2px var(--accent-dim); }
   .status-select option { background: var(--bg3); color: var(--text1); }
