@@ -654,7 +654,11 @@
   .batch-card.empty { opacity: 0.55; }
   .batch-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .batch-header-right { margin-left: auto; font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
-  .batch-card-title { font-size: 14px; font-weight: 700; color: var(--text1); }
+  .batch-card-title { font-size: 14px; font-weight: 700; color: var(--text1); line-height: 1.25; }
+  /* Two-line title used by Category Head QC cards: category on top, head as a
+     muted subtitle. Long category names wrap naturally inside the main line. */
+  .batch-card-title-main { font-size: 14px; font-weight: 700; color: var(--text1); line-height: 1.25; word-break: normal; overflow-wrap: break-word; }
+  .batch-card-title-sub  { font-size: 11.5px; font-weight: 500; color: var(--text2); margin-top: 2px; line-height: 1.2; }
   .batch-progress-bar { width: 100%; height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; margin: 8px 0 10px; }
   .batch-progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
   .batch-progress-fill.warn { background: var(--amber-text); }
@@ -5135,12 +5139,18 @@ function renderNotificationsView() {
     var countryCode = isPm ? recipient.slice(3) : null;
     var chqCategory = isChq ? recipient.slice(4) : null;
     var head = isChq ? getCategoryHead(chqCategory) : '';
-    // CHQ titles drop the "\u2014 Category Head QC" suffix because the section header
-    // and the avatar already say it; just show category + head so the card title
-    // stays compact even for long category names like "Bags and Accessories".
-    var displayName = isPm ? (countryCode + ' \u2014 PM review queue')
-                    : isChq ? (chqCategory + (head ? ' \u00b7 ' + head : ''))
-                    : recipient;
+    // CHQ titles render as TWO lines: category on top (wraps cleanly for long
+    // names like "Bags and Accessories"), head as a smaller muted subtitle
+    // below. PM and editor titles stay as a single plain string.
+    var displayName;
+    if (isPm) {
+      displayName = escapeHtml(countryCode + ' \u2014 PM review queue');
+    } else if (isChq) {
+      displayName = '<div class="batch-card-title-main">' + escapeHtml(chqCategory) + '</div>'
+        + (head ? '<div class="batch-card-title-sub">' + escapeHtml(head) + '</div>' : '');
+    } else {
+      displayName = escapeHtml(recipient);
+    }
     var avatarHtml;
     if (isPm) {
       avatarHtml = '<div class="pm-avatar" title="PM review queue for ' + countryCode + '">' +
