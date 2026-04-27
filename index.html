@@ -5166,7 +5166,7 @@ function renderNotificationsView() {
       var fgL = c.fgLight || c.fg;
       avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(chqCategory) + (head ? ' (' + head + ')' : '') + '">' +
         '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-        '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + '; height:auto; max-width:90px; font-size:7.5px; padding:1px 4px; line-height:1.15; display:inline-block; white-space:normal; word-break:break-word;">' + escapeHtml(chqCategory) + '</div>' +
+        '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + '; height:auto; max-width:90px; font-size:7.5px; padding:1px 4px; line-height:1.15; display:inline-flex; align-items:center; justify-content:center; text-align:center; white-space:normal; word-break:break-word;">' + escapeHtml(chqCategory) + '</div>' +
         '</div>';
     } else {
       avatarHtml = '<div class="editor-avatar av-' + recipient + '">' + editorInitials(recipient) + '</div>';
@@ -5394,7 +5394,7 @@ function renderNotificationsView() {
           var ecFgL = ec.fgLight || ec.fg;
           avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(entryCategory) + '">' +
             '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-            '<div class="cat-pill" style="--cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + '; height:auto; max-width:90px; font-size:7.5px; padding:1px 4px; line-height:1.15; display:inline-block; white-space:normal; word-break:break-word;">' + escapeHtml(entryCategory) + '</div>' +
+            '<div class="cat-pill" style="--cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + '; height:auto; max-width:90px; font-size:7.5px; padding:1px 4px; line-height:1.15; display:inline-flex; align-items:center; justify-content:center; text-align:center; white-space:normal; word-break:break-word;">' + escapeHtml(entryCategory) + '</div>' +
             '</div>';
         } else {
           avatarHtml = '<div class="editor-avatar av-' + n.editor + '">' + editorInitials(n.editor) + '</div>';
