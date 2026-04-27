@@ -5135,8 +5135,11 @@ function renderNotificationsView() {
     var countryCode = isPm ? recipient.slice(3) : null;
     var chqCategory = isChq ? recipient.slice(4) : null;
     var head = isChq ? getCategoryHead(chqCategory) : '';
+    // CHQ titles drop the "\u2014 Category Head QC" suffix because the section header
+    // and the avatar already say it; just show category + head so the card title
+    // stays compact even for long category names like "Bags and Accessories".
     var displayName = isPm ? (countryCode + ' \u2014 PM review queue')
-                    : isChq ? (chqCategory + (head ? ' \u00b7 ' + head : '') + ' \u2014 Category Head QC')
+                    : isChq ? (chqCategory + (head ? ' \u00b7 ' + head : ''))
                     : recipient;
     var avatarHtml;
     if (isPm) {
@@ -5145,14 +5148,15 @@ function renderNotificationsView() {
         '<div class="country-flag flag-' + countryCode + '" style="width:20px; height:14px; font-size:8px;">' + countryCode + '</div>' +
         '</div>';
     } else if (isChq) {
-      // CHQ avatar: magnifier glyph + a small category-colored chip showing the
-      // category name, so the user can scan the row by category.
+      // CHQ avatar: magnifier glyph + a small category-colored swatch (no text).
+      // The category name lives in the card title, so the avatar stays compact
+      // even when the category name is long like "Bags and Accessories".
       var c = categoryColor(chqCategory);
       var bgL = c.bgLight || c.bg;
       var fgL = c.fgLight || c.fg;
       avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(chqCategory) + (head ? ' (' + head + ')' : '') + '">' +
         '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-        '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + '; height:14px; font-size:7.5px; padding:0 4px; display:inline-flex; align-items:center;">' + escapeHtml(chqCategory) + '</div>' +
+        '<div style="width:14px; height:14px; border-radius:3px; background:var(--cat-bg); --cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';"></div>' +
         '</div>';
     } else {
       avatarHtml = '<div class="editor-avatar av-' + recipient + '">' + editorInitials(recipient) + '</div>';
@@ -5380,7 +5384,7 @@ function renderNotificationsView() {
           var ecFgL = ec.fgLight || ec.fg;
           avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(entryCategory) + '">' +
             '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-            '<div class="cat-pill" style="--cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + '; height:14px; font-size:7.5px; padding:0 4px; display:inline-flex; align-items:center;">' + escapeHtml(entryCategory) + '</div>' +
+            '<div style="width:14px; height:14px; border-radius:3px; background:var(--cat-bg); --cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + ';"></div>' +
             '</div>';
         } else {
           avatarHtml = '<div class="editor-avatar av-' + n.editor + '">' + editorInitials(n.editor) + '</div>';
