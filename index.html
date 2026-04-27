@@ -3074,7 +3074,19 @@ function emitAssetChangeNotifications(asset, ctx) {
     queueNotification(newEditor, 'needs-revisions', asset, revDetail);
   }
 
-  // Draft and Approved intentionally produce no notifications.
+  // Rule: Approved \u2014 ping PM (country channel) with Frame.io link so they
+  // know the video is ready to publish. Routes to the same PM:Country batch
+  // as For Review messages and @mentions the country PM in the header.
+  if (statusChanged && newStatus === 'Approved') {
+    var campAp = findCampaignById(asset.campaignId);
+    var countryAp = campAp ? campAp.country : null;
+    if (countryAp) {
+      var approvedDetail = asset.finalVideo ? 'Frame.io: ' + asset.finalVideo : '(no Frame.io link set)';
+      queueNotification('PM:' + countryAp, 'approved', asset, approvedDetail);
+    }
+  }
+
+  // Draft intentionally produces no notifications.
 }
 
 function fireBatch(recipient, reason) {
