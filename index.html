@@ -102,16 +102,16 @@
   .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
   .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
-  /* Editable variant — same look as the static pill but as a styled <select>,
-     used next to the campaign name so the category can be changed inline.
-     No focus transition (avoids Safari's click-twice bug on appearance:none).
-     `field-sizing: content` makes the <select>'s width hug the selected option
-     text instead of the longest option text — without it, the select is sized
-     for "Bags and Accessories" even when "Luxury" is picked. Supported in
-     Chrome 123+ / Safari 17.4+ (browsers from 2024 onward). */
-  .cat-pill-select { appearance: none; -webkit-appearance: none; border: none; outline: none; cursor: pointer; font-family: inherit; padding: 2px 11px 2px 5px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='4' viewBox='0 0 6 4'><path d='M0 0l3 4 3-4z' fill='currentColor'/></svg>"); background-repeat: no-repeat; background-position: right 3px center; background-size: 5px; field-sizing: content; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cat-pill-select:hover { filter: brightness(1.15); }
-  .cat-pill-select option { background: var(--bg3); color: var(--text1); text-transform: none; font-weight: 500; letter-spacing: normal; font-size: 12px; }
+  /* Editable variant — pill is a visible div (sizes naturally to its content)
+     with an invisible <select> overlaid on top for click handling. Sidesteps
+     the native <select> sizing problem where the element is sized to fit the
+     longest option (e.g. "Bags and Accessories"). */
+  .cat-pill-wrap { position: relative; display: inline-block; cursor: pointer; }
+  .cat-pill-display { display: inline-flex; align-items: center; gap: 3px; }
+  .cat-pill-display .cat-pill-chev { font-size: 8px; opacity: 0.7; line-height: 1; }
+  .cat-pill-wrap:hover .cat-pill-display { filter: brightness(1.15); }
+  .cat-pill-overlay { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none; appearance: none; -webkit-appearance: none; }
+  .cat-pill-overlay option { background: var(--bg3); color: var(--text1); text-transform: none; font-weight: 500; letter-spacing: normal; font-size: 12px; }
   /* Category Head QC cell — head name (auto-assigned) on top, editable status pill below. */
   .cat-head-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
   .cat-head-chip { display: inline-block; padding: 3px 9px; border-radius: 4px; background: var(--accent-dim); color: var(--accent2); font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -2856,10 +2856,13 @@ function categoryBadgeHtml(name) {
   return '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';">' + escapeHtml(name || '\u2014') + '</div>';
 }
 
-// Editable variant \u2014 renders as a styled <select> that looks like the read-only
-// pill but commits a category change for the given campaign on change. Used in
-// the campaign header next to the name so the user can change a campaign's
-// category without opening the Edit modal.
+// Editable variant \u2014 used in the campaign header next to the name. Renders a
+// visible div pill (sized correctly to its selected text) with an invisible
+// <select> overlaid on top for click-to-change behavior. Sidesteps the native
+// <select> sizing problem where the element is sized to fit the longest
+// option's text, not the selected one (so "Bags and Accessories" forces every
+// pill to be that width). The transparent select still gets the click,
+// dropdown opens normally, onchange commits the change.
 function categoryBadgeSelectHtml(camp) {
   var c = categoryColor(camp.category);
   var bgL = c.bgLight || c.bg;
@@ -2868,10 +2871,12 @@ function categoryBadgeSelectHtml(camp) {
     var sel = cat.name === camp.category ? ' selected' : '';
     return '<option value="' + escapeHtml(cat.name) + '"' + sel + '>' + escapeHtml(cat.name) + '</option>';
   }).join('');
-  return '<select class="cat-pill cat-pill-select" ' +
-    'style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';" ' +
-    'title="Change category" ' +
-    'onchange="App.setCampaignCategory(' + camp.id + ', this.value)">' + opts + '</select>';
+  return '<span class="cat-pill-wrap" title="Change category">' +
+    '<span class="cat-pill cat-pill-display" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';">' +
+      escapeHtml(camp.category || '\u2014') + ' <span class="cat-pill-chev">\u25be</span>' +
+    '</span>' +
+    '<select class="cat-pill-overlay" onchange="App.setCampaignCategory(' + camp.id + ', this.value)">' + opts + '</select>' +
+  '</span>';
 }
 
 // Render the pill HTML for a campaign type (Paid Ads / Organic). Paid Ads uses the
