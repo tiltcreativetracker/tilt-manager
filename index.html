@@ -977,12 +977,22 @@
     .av-Sharm { background: #fff0d5; color: #8a4f00; }
     .av-Elsa  { background: #fde0ea; color: #8a1f3f; }
 
-    /* Activity / change tags */
+    /* Activity / change tags. Use background-color (NOT the shorthand) because
+       .st-Assigned is also applied to <select class="status-select"> and the
+       shorthand would reset background-repeat/position/size, causing the dropdown
+       chevron SVG to tile across the whole pill. */
     .st-Assigned,
     .change-reassigned,
     .change-assigned,
-    .tag-scheduled { background: #e8e6f8; color: #4a40b0; }
-    .tag-notified { background: #d4f4e6; color: #0a5040; }
+    .tag-scheduled { background-color: #e8e6f8; color: #4a40b0; }
+    .tag-notified { background-color: #d4f4e6; color: #0a5040; }
+    /* Re-tint the dropdown chevron so it's visible on the light pill background. */
+    .status-select.st-Draft        { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%234a4845'/></svg>"); }
+    .status-select.st-Assigned     { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%234a40b0'/></svg>"); }
+    .status-select.st-In_Progress  { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%238a4f00'/></svg>"); }
+    .status-select.st-For_Review   { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%230a4a8a'/></svg>"); }
+    .status-select.st-Needs_Revisions { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%238a2018'/></svg>"); }
+    .status-select.st-Approved     { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%230a5040'/></svg>"); }
 
     /* Difficulty pills (Low/Moderate/High/Max) */
     .diff-Low      { background: #d4f4e6; color: #0a5040; }
@@ -8389,6 +8399,13 @@ function pdragOnMouseUp(e) {
 
 function pdragStart(event, kind, sourceId) {
   if (event.button !== 0) return; // primary button only
+  // Skip drag activation if the user clicked on a form control or link inside the
+  // draggable element. Otherwise the card's mousedown hijacks the pointer and
+  // pdragOnMouseMove's preventDefault aborts native popups (like the status
+  // dropdown) the moment the user moves 5px to pick an option — making it look
+  // like the dropdown needs two clicks.
+  var t = event.target;
+  if (t && t.closest && t.closest('select, input, textarea, button, a, label')) return;
   PtrDrag.active = true;
   PtrDrag.kind = kind;
   PtrDrag.sourceId = sourceId;
