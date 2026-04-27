@@ -104,8 +104,12 @@
   .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
   /* Editable variant — same look as the static pill but as a styled <select>,
      used next to the campaign name so the category can be changed inline.
-     No focus transition (avoids Safari's click-twice bug on appearance:none). */
-  .cat-pill-select { appearance: none; -webkit-appearance: none; border: none; outline: none; cursor: pointer; font-family: inherit; padding: 2px 18px 2px 5px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='currentColor'/></svg>"); background-repeat: no-repeat; background-position: right 5px center; background-size: 7px; }
+     No focus transition (avoids Safari's click-twice bug on appearance:none).
+     `field-sizing: content` makes the <select>'s width hug the selected option
+     text instead of the longest option text — without it, the select is sized
+     for "Bags and Accessories" even when "Luxury" is picked. Supported in
+     Chrome 123+ / Safari 17.4+ (browsers from 2024 onward). */
+  .cat-pill-select { appearance: none; -webkit-appearance: none; border: none; outline: none; cursor: pointer; font-family: inherit; padding: 2px 16px 2px 5px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='currentColor'/></svg>"); background-repeat: no-repeat; background-position: right 4px center; background-size: 7px; field-sizing: content; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cat-pill-select:hover { filter: brightness(1.15); }
   .cat-pill-select option { background: var(--bg3); color: var(--text1); text-transform: none; font-weight: 500; letter-spacing: normal; font-size: 12px; }
   /* Category Head QC cell — head name (auto-assigned) on top, editable status pill below. */
@@ -1268,6 +1272,7 @@ var Fb = {
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
       editorSlackIds: STATE.editorSlackIds,
+      categoryHeadSlackIds: STATE.categoryHeadSlackIds,
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
@@ -1703,6 +1708,11 @@ var STATE = {
   // in messages so the editor actually receives a Slack ping. When blank, falls
   // back to plain editor name (no ping).
   editorSlackIds: { Zidni: '', Sharm: '', Patty: '', Elsa: '' },
+  // Slack member IDs per category head. Same convention as editorSlackIds —
+  // when set, asset-change notifications mention the head so they get pinged.
+  // Heads are derived from category via CATEGORY_HEADS; this map is keyed by
+  // the head's display name (Anand, Hanyan, Nazy, Cristian).
+  categoryHeadSlackIds: { Anand: '', Hanyan: '', Nazy: '', Cristian: '' },
   schedulerDate: todayISO(),
   schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
@@ -2090,6 +2100,18 @@ function mentionEditor(name) {
   var ids = (STATE && STATE.editorSlackIds) || {};
   var id = (ids[name] || '').trim();
   return id ? '<@' + id + '>' : name;
+}
+
+// Returns the Slack mention syntax for a category head when their member ID is
+// configured, or just the head's plain name otherwise. Resolves the head by
+// looking up CATEGORY_HEADS[category]. Returns '' when the category has no
+// head assigned (e.g. Essentials, BTS) — caller should treat as "no mention".
+function mentionCategoryHead(category) {
+  var head = getCategoryHead(category);
+  if (!head) return '';
+  var ids = (STATE && STATE.categoryHeadSlackIds) || {};
+  var id = (ids[head] || '').trim();
+  return id ? '<@' + id + '>' : head;
 }
 
 // Returns a normalized URL if `str` (after trimming) looks like a single URL, or null
@@ -2950,6 +2972,9 @@ function queueNotification(recipient, changeType, asset, detail) {
     rawVideo: asset.rawVideo || (camp && camp.driveId) || '',
     editingBrief: asset.editingBrief || (camp && camp.brief) || '',
     finalVideo: asset.finalVideo || '',
+    // Snapshot the asset's category so PM batch messages can @mention the
+    // assigned category head when the item is For Review.
+    category: asset.category || '',
     change: changeType,
     detail: detail || '',
     queuedAt: Date.now()
@@ -5586,6 +5611,35 @@ function renderConfigView() {
       '</div></div>';
   }).join('');
 
+  // Category head Slack member ID rows. One row per unique head listed in
+  // CATEGORY_HEADS — when set, the head gets @mentioned in PM batch messages
+  // for For Review items in their categories.
+  var headRows = (function() {
+    var seen = {};
+    var heads = [];
+    Object.keys(CATEGORY_HEADS).forEach(function(cat) {
+      var h = CATEGORY_HEADS[cat];
+      if (h && !seen[h]) { seen[h] = true; heads.push(h); }
+    });
+    return heads.map(function(name) {
+      var slackId = (STATE.categoryHeadSlackIds && STATE.categoryHeadSlackIds[name]) || '';
+      var slackIdEsc = escapeHtml(slackId);
+      // Categories owned by this head — small caption so the user knows who handles what.
+      var cats = Object.keys(CATEGORY_HEADS).filter(function(cat) { return CATEGORY_HEADS[cat] === name; });
+      return '<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">' +
+        '<div style="width:34px; flex-shrink:0;"></div>' +
+        '<div style="font-size:13px; font-weight:600; color:var(--text1); width:90px; flex-shrink:0;">' + escapeHtml(name) + '</div>' +
+        '<input type="text" id="cathead-id-' + escapeHtml(name) + '" class="form-input" ' +
+          'style="width:160px; flex-shrink:0; font-family:\'JetBrains Mono\', monospace; font-size:12px;" ' +
+          'placeholder="U07ABC123 (member ID)" ' +
+          'title="Slack member ID for ' + escapeHtml(name) + ' — pings them when their category videos hit For Review." ' +
+          'value="' + slackIdEsc + '" ' +
+          'onblur="App.saveCategoryHeadSlackId(\'' + escapeHtml(name).replace(/'/g, "\\'") + '\', this.value)">' +
+        '<div style="font-size:11px; color:var(--text3); flex:1;">' + escapeHtml(cats.join(', ')) + '</div>' +
+      '</div>';
+    }).join('');
+  })();
+
   // Per-editor Slack channel + member ID rows
   var slackRows = EDITORS.map(function(e) {
     var url = (STATE.editorSlackChannels && STATE.editorSlackChannels[e]) || '';
@@ -5732,6 +5786,11 @@ function renderConfigView() {
           'onblur="App.saveWorkspace(this.value)">' +
       '</div>' +
       slackRows +
+      '<div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);">' +
+        '<div style="font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; letter-spacing:0.04em; text-transform:uppercase;">Category head Slack IDs</div>' +
+        '<div style="font-size:11.5px; color:var(--text3); margin-bottom:10px;">When a video reaches <em>For Review</em> in the workflow, the assigned category head gets @mentioned in the country PM message — but only if their Slack member ID is set here.</div>' +
+        headRows +
+      '</div>' +
     '</div>' +
 
     '<div class="section-title">Categories</div>' +
@@ -5829,6 +5888,7 @@ function saveState() {
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
       editorSlackIds: STATE.editorSlackIds,
+      categoryHeadSlackIds: STATE.categoryHeadSlackIds,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       countries: STATE.countries,
       categories: STATE.categories,
@@ -5902,6 +5962,14 @@ function loadState() {
       if (STATE.editorSlackChannels[e] === undefined) STATE.editorSlackChannels[e] = '';
       if (!STATE.editorSlackIds) STATE.editorSlackIds = {};
       if (STATE.editorSlackIds[e] === undefined) STATE.editorSlackIds[e] = '';
+    });
+    // Auto-seed category-head Slack IDs (one per unique head listed in CATEGORY_HEADS).
+    if (!STATE.categoryHeadSlackIds) STATE.categoryHeadSlackIds = {};
+    Object.keys(CATEGORY_HEADS).forEach(function(cat) {
+      var head = CATEGORY_HEADS[cat];
+      if (head && STATE.categoryHeadSlackIds[head] === undefined) {
+        STATE.categoryHeadSlackIds[head] = '';
+      }
     });
     // Reconcile saved countries with the canonical list: add any missing countries
     // (e.g. US added in this version) and re-order to canonical order.
@@ -6662,7 +6730,7 @@ function buildBatchMessage(recipient, items, opts) {
   var header;
   if (isPmBatch) {
     var country = recipient.slice(3);
-    header = ':clapper: *Review queue \u2014 ' + country + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
+    header = ':clapper: *Category Head QC \u2014 ' + country + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
   } else {
     var suffix = opts.countryLabel ? ' (' + opts.countryLabel + ')' : '';
     // mentionEditor(recipient) returns '<@USERID>' if a Slack member ID is configured
@@ -6679,7 +6747,17 @@ function buildBatchMessage(recipient, items, opts) {
     // Fallback to change type if status wasn't captured (legacy items from older batches
     // won't have .status populated). Rare edge, but worth protecting against.
     var statusLabel = it.status || it.change || '';
-    lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel);
+    // For Review items in a PM batch: append a category-head @mention so the
+    // assigned head gets pinged alongside the PM. mentionCategoryHead() returns
+    // '<@USERID>' if the head's Slack ID is configured, plain name otherwise,
+    // and '' if the category has no head. Skipped for editor batches (only
+    // makes sense in the country channel where the head is in the loop).
+    var headTag = '';
+    if (isPmBatch && it.status === 'For Review' && it.category) {
+      var mention = mentionCategoryHead(it.category);
+      if (mention) headTag = '  cc: ' + mention;
+    }
+    lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel + headTag);
     if (FINAL_VIDEO_STATUSES[it.status]) {
       var finalUrl = extractSingleUrl(it.finalVideo);
       var finalLink = finalUrl ? '<' + finalUrl + '|Frame>' : '\u2014';
@@ -8488,6 +8566,19 @@ var App = {
     STATE.editorSlackIds[editor] = trimmed;
     saveState();
     logAction('updated', editor + ' Slack member ID ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
+    render();
+  },
+
+  // Save a category head's Slack member ID. When set, the head gets @mentioned in
+  // PM batch messages for For Review videos in their categories (Anand for
+  // Sneakers, Cristian for Luxury, etc.).
+  saveCategoryHeadSlackId: function(head, id) {
+    var trimmed = (id || '').trim();
+    if (!STATE.categoryHeadSlackIds) STATE.categoryHeadSlackIds = {};
+    if (STATE.categoryHeadSlackIds[head] === trimmed) return;
+    STATE.categoryHeadSlackIds[head] = trimmed;
+    saveState();
+    logAction('updated', 'Category head ' + head + ' Slack member ID ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
     render();
   },
   saveWorkspace: function(v) {
