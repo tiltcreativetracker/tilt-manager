@@ -102,6 +102,12 @@
   .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
   .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
+  /* Editable variant — same look as the static pill but as a styled <select>,
+     used next to the campaign name so the category can be changed inline.
+     No focus transition (avoids Safari's click-twice bug on appearance:none). */
+  .cat-pill-select { appearance: none; -webkit-appearance: none; border: none; outline: none; cursor: pointer; font-family: inherit; padding: 2px 18px 2px 5px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='currentColor'/></svg>"); background-repeat: no-repeat; background-position: right 5px center; background-size: 7px; }
+  .cat-pill-select:hover { filter: brightness(1.15); }
+  .cat-pill-select option { background: var(--bg3); color: var(--text1); text-transform: none; font-weight: 500; letter-spacing: normal; font-size: 12px; }
   /* Category Head QC cell — head name (auto-assigned) on top, editable status pill below. */
   .cat-head-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
   .cat-head-chip { display: inline-block; padding: 3px 9px; border-radius: 4px; background: var(--accent-dim); color: var(--accent2); font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -1613,10 +1619,20 @@ var CATEGORY_HEADS = {
 };
 
 // Returns the assigned head's name for a given category name, or '' if none.
-// Used for the Category Head QC column display.
+// Used for the Category Head QC column display. Case-insensitive — legacy
+// rows in the wild may have category stored as "LUXURY" (uppercase) while
+// CATEGORY_HEADS uses titlecase keys; this normalizes both sides.
 function getCategoryHead(category) {
   if (!category) return '';
-  return CATEGORY_HEADS[category] || '';
+  var direct = CATEGORY_HEADS[category];
+  if (direct) return direct;
+  var keyLower = String(category).toLowerCase();
+  for (var k in CATEGORY_HEADS) {
+    if (Object.prototype.hasOwnProperty.call(CATEGORY_HEADS, k) && k.toLowerCase() === keyLower) {
+      return CATEGORY_HEADS[k];
+    }
+  }
+  return '';
 }
 
 // Status values the category head can set on a video. Distinct from the
@@ -2816,6 +2832,24 @@ function categoryBadgeHtml(name) {
   var bgL = c.bgLight || c.bg;
   var fgL = c.fgLight || c.fg;
   return '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';">' + escapeHtml(name || '\u2014') + '</div>';
+}
+
+// Editable variant \u2014 renders as a styled <select> that looks like the read-only
+// pill but commits a category change for the given campaign on change. Used in
+// the campaign header next to the name so the user can change a campaign's
+// category without opening the Edit modal.
+function categoryBadgeSelectHtml(camp) {
+  var c = categoryColor(camp.category);
+  var bgL = c.bgLight || c.bg;
+  var fgL = c.fgLight || c.fg;
+  var opts = (STATE.categories || []).map(function(cat) {
+    var sel = cat.name === camp.category ? ' selected' : '';
+    return '<option value="' + escapeHtml(cat.name) + '"' + sel + '>' + escapeHtml(cat.name) + '</option>';
+  }).join('');
+  return '<select class="cat-pill cat-pill-select" ' +
+    'style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';" ' +
+    'title="Change category" ' +
+    'onchange="App.setCampaignCategory(' + camp.id + ', this.value)">' + opts + '</select>';
 }
 
 // Render the pill HTML for a campaign type (Paid Ads / Organic). Paid Ads uses the
@@ -4127,7 +4161,7 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeHtml(camp.category) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '</div>' +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '</div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
       : '<div class="camp-brief">' + (camp.brief ? escapeHtml(camp.brief) : '<em style="color:var(--text3)">No brief set</em>') + '</div>') +
@@ -5930,6 +5964,24 @@ function loadState() {
         STATE.categories.push({ name: def.name, color: def.color });
       }
     });
+    // Normalize legacy uppercase / mismatched-case categories on assets and campaigns
+    // back to their canonical titlecase form. Without this, CATEGORY_HEADS lookups
+    // (which use titlecase keys) miss against legacy rows that stored "LUXURY". The
+    // data heals on first load after this code ships; subsequent writes from the
+    // editable dropdown already use the canonical name.
+    var canonicalByLower = {};
+    STATE.categories.forEach(function(c) { if (c && c.name) canonicalByLower[c.name.toLowerCase()] = c.name; });
+    function canonicalizeCategory(value) {
+      if (!value) return value;
+      var canon = canonicalByLower[String(value).toLowerCase()];
+      return canon || value; // unknown categories pass through unchanged
+    }
+    STATE.assets.forEach(function(a) {
+      if (a && a.category) a.category = canonicalizeCategory(a.category);
+    });
+    STATE.campaigns.forEach(function(c) {
+      if (c && c.category) c.category = canonicalizeCategory(c.category);
+    });
     // Migrate campaign.type (added in this version). Default to 'Paid Ads' since that's
     // the historical use case \u2014 existing installs will see everything as Paid Ads until
     // they manually flip campaigns to Organic.
@@ -7380,6 +7432,22 @@ var App = {
     pushVersion(a, vhPre, ['categoryHeadQc']);
     var head = getCategoryHead(a.category) || 'no head';
     logAction('updated', 'Asset "' + a.name + '" category-head QC (' + head + '): ' + old + ' \u2192 ' + newVal);
+    render();
+  },
+
+  // Inline change of a campaign's category from the campaign-header pill (next to
+  // the campaign name). Validates the new name against STATE.categories so the
+  // dropdown can't introduce an unknown category. Re-renders to flip the pill
+  // color, the per-asset Category Head QC heads, and the sidebar pill.
+  setCampaignCategory: function(id, newCat) {
+    var c = findCampaignById(id);
+    if (!c) return;
+    var validNames = (STATE.categories || []).map(function(cat) { return cat.name; });
+    if (validNames.indexOf(newCat) < 0) { render(); return; }
+    if (c.category === newCat) return;
+    var old = c.category || '';
+    c.category = newCat;
+    logAction('updated', 'Campaign "' + c.name + '" category: ' + (old || '—') + ' → ' + newCat);
     render();
   },
 
