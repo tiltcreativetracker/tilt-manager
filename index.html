@@ -789,7 +789,9 @@
   .log-editor-bar-left { display: flex; align-items: center; gap: 10px; }
   .log-editor-picker { display: flex; align-items: center; gap: 8px; }
   .log-editor-picker-label { font-size: 10.5px; color: var(--text3); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
-  .log-editor-select { background: var(--bg3); color: var(--text1); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 28px 6px 10px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.12s; min-width: 200px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%236b6880' d='M0 0l5 6 5-6z'/></svg>"); background-repeat: no-repeat; background-position: right 10px center; }
+  /* Daily Log editor picker. NO transition — see status-select for the macOS Safari
+     two-click quirk on styled (appearance: none) selects with focus animations. */
+  .log-editor-select { background: var(--bg3); color: var(--text1); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 28px 6px 10px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; min-width: 200px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%236b6880' d='M0 0l5 6 5-6z'/></svg>"); background-repeat: no-repeat; background-position: right 10px center; }
   .log-editor-select:hover { border-color: var(--accent2); color: var(--accent2); }
   .log-editor-select:focus { outline: none; border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(127,119,221,0.2); }
 
