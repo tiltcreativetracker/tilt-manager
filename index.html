@@ -2133,6 +2133,21 @@ var EDITABLE_FIELDS = {
     value: function(a) { return a.difficulty; },
     appMethod: 'setAssetDifficulty'
   },
+  // Inline-editable category. Options come from STATE.categories (so user-added
+  // categories show up in the dropdown automatically). Display reuses the same
+  // .cat-tag class the table already used for the read-only span — visually
+  // unchanged from before, just clickable now.
+  category: {
+    kind: 'select',
+    options: function() {
+      return (STATE.categories || []).map(function(c) { return c.name; });
+    },
+    display: function(a) {
+      return '<span class="cat-tag">' + escapeHtml(a.category || '') + '</span>';
+    },
+    value: function(a) { return a.category || ''; },
+    appMethod: 'setAssetCategory'
+  },
   editor: {
     kind: 'select',
     // Empty first option => "Unassigned"
@@ -3992,7 +4007,7 @@ function renderCampaignsView() {
         '<tr>' +
           '<td><span class="pn">' + a.pn + '</span></td>' +
           '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + renderVersionHistoryBtn(a) + '</div></td>' +
-          '<td><span class="cat-tag">' + escapeHtml(a.category) + '</span></td>' +
+          '<td>' + renderEditableCell(a, 'category') + '</td>' +
           '<td>' + renderEditableCell(a, 'difficulty') + '</td>' +
           (hideLinkCols ? '' :
             '<td class="link-cell">' + renderEditableCell(a, 'rawVideo') + '</td>' +
@@ -7139,6 +7154,25 @@ var App = {
     a.difficulty = newDiff;
     pushVersion(a, vhPre, ['difficulty']);
     logAction('updated', 'Asset "' + a.name + '" difficulty: ' + old + ' \u2192 ' + newDiff);
+    render();
+  },
+
+  // Inline category change. Validates the new name against STATE.categories so a
+  // dropdown commit can't introduce an unknown category. The Category Head QC
+  // column re-renders automatically (it computes the head from a.category at
+  // render time, so no extra wiring needed there).
+  setAssetCategory: function(id, newCat) {
+    var a = null;
+    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    if (!a) return;
+    var validNames = (STATE.categories || []).map(function(c) { return c.name; });
+    if (validNames.indexOf(newCat) < 0) { render(); return; } // unknown \u2014 ignore
+    if (a.category === newCat) { render(); return; }
+    var old = a.category;
+    var vhPre = snapshotAsset(a);
+    a.category = newCat;
+    pushVersion(a, vhPre, ['category']);
+    logAction('updated', 'Asset "' + a.name + '" category: ' + old + ' \u2192 ' + newCat);
     render();
   },
 
