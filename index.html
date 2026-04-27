@@ -102,6 +102,8 @@
   .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
   .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
+  /* Category Head QC cell — shows the auto-assigned reviewer's name as a soft pill. */
+  .cat-head-chip { display: inline-block; padding: 3px 9px; border-radius: 4px; background: var(--accent-dim); color: var(--accent2); font-size: 11px; font-weight: 600; }
   .type-pill { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid transparent; }
   .type-pill-paid { background: var(--accent-dim); color: var(--accent2); border-color: rgba(127,119,221,0.35); }
   .type-pill-organic { background: #222234; color: #a6b1c9; border-color: #333348; }
@@ -1558,13 +1560,47 @@ var CATEGORY_PALETTE = [
   { bg: '#26453a', fg: '#a8d8c4', bgLight: '#dceee5', fgLight: '#1a4a3a' }  // sage
 ];
 
-// Default seed categories matching the original Luxury/Essentials/BTS trio with their
-// original colors. New categories get the next unused palette slot (pickNextCategoryColor).
+// Default seed categories. The first three are the original Luxury/Essentials/BTS
+// trio; the remainder were added when the team brought on category-head reviewers
+// (see CATEGORY_HEADS below). Colors cycle through CATEGORY_PALETTE — we have 8
+// palette slots and 11 categories, so the last 3 reuse early colors.
 var DEFAULT_CATEGORIES = [
-  { name: 'Luxury',     color: CATEGORY_PALETTE[0] },
-  { name: 'Essentials', color: CATEGORY_PALETTE[1] },
-  { name: 'BTS',        color: CATEGORY_PALETTE[2] }
+  { name: 'Luxury',                color: CATEGORY_PALETTE[0] }, // purple
+  { name: 'Essentials',            color: CATEGORY_PALETTE[1] }, // teal
+  { name: 'BTS',                   color: CATEGORY_PALETTE[2] }, // amber
+  { name: 'Sneakers',              color: CATEGORY_PALETTE[3] }, // pink
+  { name: 'TCG',                   color: CATEGORY_PALETTE[4] }, // blue
+  { name: 'Stone Island',          color: CATEGORY_PALETTE[5] }, // red
+  { name: 'Vintage',               color: CATEGORY_PALETTE[6] }, // gray
+  { name: 'Bags and Accessories',  color: CATEGORY_PALETTE[7] }, // sage
+  { name: 'Y2K',                   color: CATEGORY_PALETTE[3] }, // pink (reuse)
+  { name: 'Jewellery',             color: CATEGORY_PALETTE[7] }, // sage (reuse)
+  { name: 'Health and Beauty',     color: CATEGORY_PALETTE[1] }  // teal (reuse)
 ];
+
+// Each category has an assigned "category head" — the person responsible for
+// reviewing that category's videos. Auto-displayed in the Category Head QC
+// column on the asset table; auto-set when the asset's category changes.
+// Update this map to re-route category ownership; existing rows pick up the
+// new head on next render (no migration needed since this is computed live).
+var CATEGORY_HEADS = {
+  'Sneakers':             'Anand',
+  'TCG':                  'Hanyan',
+  'Stone Island':         'Nazy',
+  'Luxury':               'Cristian',
+  'Vintage':              'Nazy',
+  'Bags and Accessories': 'Nazy',
+  'Y2K':                  'Nazy',
+  'Jewellery':            'Nazy',
+  'Health and Beauty':    'Nazy'
+};
+
+// Returns the assigned head's name for a given category name, or '' if none.
+// Used for the Category Head QC column display.
+function getCategoryHead(category) {
+  if (!category) return '';
+  return CATEGORY_HEADS[category] || '';
+}
 var EDITOR_ALLOWED_DIFF = {
   Zidni: ['Low','Moderate','High','Max'],
   Sharm: ['Low','Moderate','High'],
@@ -2255,7 +2291,7 @@ var VH_SNAPSHOT_FIELDS = [
 ];
 var VH_FIELD_LABELS = {
   name: 'Name', version: 'Version', category: 'Category', difficulty: 'Difficulty',
-  editor: 'Editor', status: 'Status', qc: 'QC',
+  editor: 'Editor', status: 'Status', qc: 'Footage QC',
   rawVideo: 'Drive', editingBrief: 'Brief', finalVideo: 'Video',
   estDelivery: 'ETA', dateApproved: 'Approved', assignedAt: 'Assigned'
 };
@@ -3948,7 +3984,7 @@ function renderCampaignsView() {
   var hideLinkCols = !!camp.hideAssetLinkCols;
   var rows = '';
   if (filtered.length === 0) {
-    rows = '<tr><td colspan="' + (hideLinkCols ? 12 : 14) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
+    rows = '<tr><td colspan="' + (hideLinkCols ? 13 : 15) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
   } else {
     for (var i = 0; i < filtered.length; i++) {
       var a = filtered[i];
@@ -3968,6 +4004,15 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
           '<td>' + renderStatusSelect(a) + '</td>' +
+          '<td>' + (function() {
+            // Category Head QC cell — shows the auto-assigned head's name based on the
+            // asset's category. Read-only display: changing the asset's category will
+            // re-render this cell with the new head. Categories not in CATEGORY_HEADS
+            // (e.g. Essentials, BTS) display an em-dash placeholder.
+            var head = getCategoryHead(a.category);
+            if (!head) return '<span style="color:var(--text3); font-size:11px;">—</span>';
+            return '<span class="cat-head-chip" title="Auto-assigned by category: ' + escapeHtml(a.category) + '">' + escapeHtml(head) + '</span>';
+          })() + '</td>' +
           '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(' + a.id + ')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(' + a.id + ')" title="Duplicate this row">Dup</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(' + a.id + ')" title="Delete this row">Del</button>' : '') + '</div></td>' +
         '</tr>';
     }
@@ -4045,7 +4090,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>QC</th><th>Status</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -5817,6 +5862,14 @@ function loadState() {
     STATE.campaigns.forEach(function(camp) {
       if (camp.category && !findCategory(camp.category)) {
         STATE.categories.push({ name: camp.category, color: pickNextCategoryColor() });
+      }
+    });
+    // Auto-add any DEFAULT_CATEGORIES that aren't yet in STATE.categories. This lets us
+    // ship new built-in categories (e.g. Sneakers, TCG, etc.) and have them appear for
+    // installs that already had the original Luxury/Essentials/BTS trio seeded.
+    DEFAULT_CATEGORIES.forEach(function(def) {
+      if (!findCategory(def.name)) {
+        STATE.categories.push({ name: def.name, color: def.color });
       }
     });
     // Migrate campaign.type (added in this version). Default to 'Paid Ads' since that's
