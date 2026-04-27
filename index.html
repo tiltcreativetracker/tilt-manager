@@ -284,6 +284,7 @@
   .qc-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
   .qc-Draft { background: var(--bg4); color: var(--text3); }
   .qc-Missing_files { background: #412402; color: #fac775; }
+  .qc-Missing_prices { background: #4b1528; color: #f4c0d1; }
   .qc-Ready { background: #04342c; color: #5dcaa5; }
 
   /* ===================== TODAY KANBAN BOARD =====================
@@ -1008,8 +1009,9 @@
     .diff-Max      { background: #ffe0dc; color: #8a2018; }
 
     /* QC pills */
-    .qc-Missing_files { background: #fff0d5; color: #8a4f00; }
-    .qc-Ready         { background: #d4f4e6; color: #0a5040; }
+    .qc-Missing_files  { background: #fff0d5; color: #8a4f00; }
+    .qc-Missing_prices { background: #fde0ea; color: #8a1f3f; }
+    .qc-Ready          { background: #d4f4e6; color: #0a5040; }
 
     /* Notification reason pills */
     .sent-reason-live  { background: #d4f4e6; color: #0a5040; }
@@ -1240,6 +1242,7 @@ var Fb = {
       qcWebhooks: STATE.qcWebhooks,
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
+      editorSlackIds: STATE.editorSlackIds,
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
@@ -1533,7 +1536,7 @@ var CANONICAL_COUNTRIES = [
 var STATUSES = ['Draft', 'Assigned', 'In Progress', 'For Review', 'Needs Revisions', 'Approved'];
 // QC pass/fail tracking \u2014 separate from the workflow status. A video could be 'For Review'
 // but also 'Missing files' from the QC side.
-var QC_VALUES = ['Draft', 'Missing files', 'Ready'];
+var QC_VALUES = ['Draft', 'Missing files', 'Missing prices', 'Ready'];
 var STATUS_MIGRATION = { 'In Review': 'For Review', 'Needs Revision': 'Needs Revisions' };
 
 // Short month names used by the date helpers (parseDate/formatDate/toISODate). Declared
@@ -1622,6 +1625,10 @@ var STATE = {
   noSplit: {},
   slackWorkspace: '',
   editorSlackChannels: { Zidni: '', Sharm: '', Patty: '', Elsa: '' },
+  // Slack member IDs per editor (e.g. 'U07ABC123'). When set, the app emits <@ID>
+  // in messages so the editor actually receives a Slack ping. When blank, falls
+  // back to plain editor name (no ping).
+  editorSlackIds: { Zidni: '', Sharm: '', Patty: '', Elsa: '' },
   schedulerDate: todayISO(),
   schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
@@ -1993,6 +2000,18 @@ function openModal(html, onSubmit) {
   }, 50);
 }
 function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+// Returns the Slack mention syntax for an editor when their member ID is configured,
+// otherwise returns the plain editor name as a fallback. The mention syntax is
+// '<@USERID>' which Slack renders as a clickable @mention AND triggers a real
+// notification on the editor's account. Plain names (no ID) just appear as text.
+// `editorSlackIds` is set per-editor in Config and looks like 'U07ABC123'.
+function mentionEditor(name) {
+  if (!name) return name || '';
+  var ids = (STATE && STATE.editorSlackIds) || {};
+  var id = (ids[name] || '').trim();
+  return id ? '<@' + id + '>' : name;
+}
 
 // Returns a normalized URL if `str` (after trimming) looks like a single URL, or null
 // otherwise. Accepts full http(s) URLs and scheme-less URLs like 'frame.io/...' or
@@ -2800,9 +2819,11 @@ function queueNotification(recipient, changeType, asset, detail) {
     editor: asset.editor || '',
     // Snapshot the raw, brief, and final URLs too, so the batch message can show per-item
     // links even if the asset is edited between queue and send. Read from the asset at
-    // queue time.
-    rawVideo: asset.rawVideo || '',
-    editingBrief: asset.editingBrief || '',
+    // queue time. When the per-asset field is empty, fall back to the campaign-level
+    // raw / brief link (driveId / brief) — that way notifications still carry usable
+    // links when the team is sharing one folder per campaign instead of per video.
+    rawVideo: asset.rawVideo || (camp && camp.driveId) || '',
+    editingBrief: asset.editingBrief || (camp && camp.brief) || '',
     finalVideo: asset.finalVideo || '',
     change: changeType,
     detail: detail || '',
@@ -2832,9 +2853,13 @@ function emitAssetChangeNotifications(asset, ctx) {
   // Fires when: new asset with editor, or editor changed (and someone is assigned), or status flipped to Assigned
   var justAssigned = (ctx.isNew && newEditor) || (editorChanged && newEditor) || (statusChanged && newStatus === 'Assigned' && newEditor);
   if (justAssigned) {
+    // Fall back to campaign-level raw / brief if per-asset fields are empty.
+    var campForDetail = findCampaignById(asset.campaignId);
+    var rawForDetail   = asset.rawVideo     || (campForDetail && campForDetail.driveId) || '';
+    var briefForDetail = asset.editingBrief || (campForDetail && campForDetail.brief)   || '';
     var detailLines = [];
-    if (asset.rawVideo)     detailLines.push('raw: ' + asset.rawVideo);
-    if (asset.editingBrief) detailLines.push('brief: ' + asset.editingBrief);
+    if (rawForDetail)   detailLines.push('raw: ' + rawForDetail);
+    if (briefForDetail) detailLines.push('brief: ' + briefForDetail);
     var assignedDetail = detailLines.length ? detailLines.join(' \u00B7 ') : '(no raw/brief links set)';
     queueNotification(newEditor, 'assigned', asset, assignedDetail);
   }
@@ -3262,7 +3287,14 @@ function showAddSubCampaignModal(forCountry) {
             'title="Field must contain a single URL to open" ' +
             'onclick="App.openLinkFromField(\'f-cbrief\')">open \u2197</button>' +
         '</div>' +
-        '<textarea id="f-cbrief" class="form-textarea" oninput="App.refreshOpenLinkButton(\'f-cbrief\')"></textarea>' +
+        '<input id="f-cbrief" class="form-input" placeholder="https://notion.so/... (campaign-wide brief link)" oninput="App.refreshOpenLinkButton(\'f-cbrief\')">' +
+      '</div>' +
+      '<div class="form-row full">' +
+        '<label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
+          '<input type="checkbox" id="f-chideLinks" style="width:auto; margin:0;">' +
+          '<span>Hide per-video Raw and Brief columns</span>' +
+        '</label>' +
+        '<div style="font-size:11px; color:var(--text3); margin-top:4px; padding-left:24px;">Useful when the team shares one folder + brief per campaign instead of per video. The campaign-level Raw / Brief links above will be used in notifications.</div>' +
       '</div>' +
       '<div class="form-row full">' +
         '<label class="form-label">Slack Webhook Override <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
@@ -3284,7 +3316,8 @@ function showAddSubCampaignModal(forCountry) {
       category: document.getElementById('f-ccat').value,
       type: document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE,
       driveId: document.getElementById('f-cdrive').value,
-      slackOverride: document.getElementById('f-cslack').value
+      slackOverride: document.getElementById('f-cslack').value,
+      hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked
     };
     STATE.campaigns.push(camp);
     reorderCampaigns(true);
@@ -3337,10 +3370,17 @@ function showEditCampaignModal() {
               '<label class="form-label" style="margin:0;">Campaign Brief</label>' +
               briefBtn +
             '</div>' +
-            '<textarea id="f-cbrief" class="form-textarea" oninput="App.refreshOpenLinkButton(\'f-cbrief\')">' + escapeHtml(c.brief) + '</textarea>' +
+            '<input id="f-cbrief" class="form-input" placeholder="https://notion.so/... (campaign-wide brief link)" value="' + escapeHtml(c.brief) + '" oninput="App.refreshOpenLinkButton(\'f-cbrief\')">' +
           '</div>'
         );
       })() +
+      '<div class="form-row full">' +
+        '<label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
+          '<input type="checkbox" id="f-chideLinks" style="width:auto; margin:0;"' + (c.hideAssetLinkCols ? ' checked' : '') + '>' +
+          '<span>Hide per-video Raw and Brief columns</span>' +
+        '</label>' +
+        '<div style="font-size:11px; color:var(--text3); margin-top:4px; padding-left:24px;">Useful when the team shares one folder + brief per campaign instead of per video. The campaign-level Raw / Brief links above will be used in notifications when a video has no per-asset link.</div>' +
+      '</div>' +
       '<div class="form-row full">' +
         '<label class="form-label">Slack Webhook Override <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
         '<input id="f-cslack" class="form-input" placeholder="https://hooks.slack.com/services/... (leave blank to use country/global webhook)" value="' + escapeHtml(c.slackOverride) + '">' +
@@ -3357,6 +3397,7 @@ function showEditCampaignModal() {
     c.type = document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE;
     c.driveId = document.getElementById('f-cdrive').value;
     c.slackOverride = document.getElementById('f-cslack').value;
+    c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
     reorderCampaigns(true);
     STATE.expandedCountries[c.country] = true;
     logAction('updated', 'Campaign "' + c.name + '" edited');
@@ -3900,9 +3941,14 @@ function renderCampaignsView() {
   var totalForCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; }).length;
   var approved = STATE.assets.filter(function(a) { return a.campaignId === camp.id && a.status === 'Approved'; }).length;
 
+  // Per-campaign toggle: when true, hide the per-video Raw + Brief columns. Used
+  // when the campaign relies on the campaign-level Raw Files / Brief links shown
+  // in the header instead of one-link-per-video. The columns are removed from
+  // BOTH the <thead> below and each row, and the empty-state colspan adjusts.
+  var hideLinkCols = !!camp.hideAssetLinkCols;
   var rows = '';
   if (filtered.length === 0) {
-    rows = '<tr><td colspan="14"><div class="empty-state">No assets match your filters</div></td></tr>';
+    rows = '<tr><td colspan="' + (hideLinkCols ? 12 : 14) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
   } else {
     for (var i = 0; i < filtered.length; i++) {
       var a = filtered[i];
@@ -3912,8 +3958,9 @@ function renderCampaignsView() {
           '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + renderVersionHistoryBtn(a) + '</div></td>' +
           '<td><span class="cat-tag">' + escapeHtml(a.category) + '</span></td>' +
           '<td>' + renderEditableCell(a, 'difficulty') + '</td>' +
-          '<td class="link-cell">' + renderEditableCell(a, 'rawVideo') + '</td>' +
-          '<td class="link-cell">' + renderEditableCell(a, 'editingBrief') + '</td>' +
+          (hideLinkCols ? '' :
+            '<td class="link-cell">' + renderEditableCell(a, 'rawVideo') + '</td>' +
+            '<td class="link-cell">' + renderEditableCell(a, 'editingBrief') + '</td>') +
           '<td>' + renderEditableCell(a, 'editor') + '</td>' +
           '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
           '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
@@ -3998,7 +4045,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th><th>Drive</th><th>Brief</th><th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>QC</th><th>Status</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>QC</th><th>Status</th><th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -4632,6 +4679,29 @@ function getLastNWorkdays(n) {
   return days;
 }
 
+// Return Mon-Fri of the current week as LOCAL 'YYYY-MM-DD' strings, chronological
+// order (Mon -> Fri). The Daily Log uses this so the grid is always anchored to a
+// real work week instead of a rolling window — Friday's column never shifts off
+// the right edge mid-week, and a fresh Monday view shows the week ahead.
+//
+// Edge case: on Saturday or Sunday, this returns the just-finished week (the
+// Monday is 5 or 6 days back respectively). This is what people usually mean by
+// "this week" on a weekend; the upcoming week has no data yet anyway.
+function getCurrentWeekWorkdays() {
+  var d = new Date();
+  var dow = d.getDay(); // 0=Sun .. 6=Sat (local)
+  var daysToMonday = dow === 0 ? -6 : (1 - dow);
+  var monday = new Date(d);
+  monday.setDate(d.getDate() + daysToMonday);
+  var days = [];
+  for (var i = 0; i < 5; i++) {
+    var dt = new Date(monday);
+    dt.setDate(monday.getDate() + i);
+    days.push(toLocalISODate(dt));
+  }
+  return days;
+}
+
 // Reconstruct the asset's state at end-of-day on dateISO using versionHistory.
 // Returns a snapshot object (same shape as snapshotAsset). Strategy:
 //   - versionHistory is most-recent-first; each entry's .snapshot is the
@@ -4749,7 +4819,8 @@ function renderDailyLogDayHeader(dateISO) {
 }
 
 function renderDailyLogView() {
-  var days = getLastNWorkdays(DAILY_LOG_WINDOW_WORKDAYS);
+  // Always show Mon-Fri of the current work week (anchored, not a rolling window).
+  var days = getCurrentWeekWorkdays();
   var data = computeDailyLog(days);
   var target = DAILY_EDITOR_APPROVAL_TARGET;
 
@@ -5185,28 +5256,36 @@ function renderNotificationsView() {
       // manually (no batching, no auto-fire).
       var qcCards = STATE.campaigns.map(function(camp) {
         var assetsInCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; });
-        var missing = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
-        var ready   = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
-        if (missing.length === 0 && ready.length === 0) return ''; // skip untouched sub-campaigns
+        var missingFiles  = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
+        var missingPrices = assetsInCamp.filter(function(a) { return a.qc === 'Missing prices'; });
+        var ready         = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
+        var totalMissing = missingFiles.length + missingPrices.length;
+        if (totalMissing === 0 && ready.length === 0) return ''; // skip untouched sub-campaigns
         // Skip cards that were dismissed via a successful send in this session. Refreshing
         // the page clears qcDismissed (non-persisted) so the card reappears.
         if (STATE.qcDismissed && STATE.qcDismissed[camp.id]) return '';
         var qcUrl = resolveQcWebhookForCampaign(camp.id);
         var hasUrl = webhookValid(qcUrl);
-        var canSend = hasUrl && missing.length > 0;
+        var canSend = hasUrl && totalMissing > 0;
         var sendAttrs = canSend
           ? 'class="sent-copy-btn" title="Send QC report for this campaign"'
-          : 'class="sent-copy-btn" title="' + (hasUrl ? 'Add at least one Missing-files video to send a report' : 'No QC webhook resolves for ' + camp.country + ' \u2014 set one in Automations') + '" disabled style="opacity:0.45; cursor:not-allowed;"';
-        var missingList = missing.length > 0
-          ? '<div style="margin-top:6px; font-size:11px; color:var(--amber-text);"><strong>Missing files:</strong> ' + missing.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>'
-          : '';
+          : 'class="sent-copy-btn" title="' + (hasUrl ? 'Add at least one Missing-files or Missing-prices video to send a report' : 'No QC webhook resolves for ' + camp.country + ' \u2014 set one in Automations') + '" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var listParts = [];
+        if (missingFiles.length) {
+          listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--amber-text);"><strong>Missing files:</strong> ' + missingFiles.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
+        }
+        if (missingPrices.length) {
+          listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--pink-text);"><strong>Missing prices:</strong> ' + missingPrices.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
+        }
+        var missingList = listParts.join('');
         return '<div class="batch-card">' +
           '<div class="batch-card-header">' +
             '<div class="country-flag flag-' + camp.country + '">' + camp.country + '</div>' +
             '<div style="flex:1; min-width:0;">' +
               '<div style="font-size:13px; font-weight:600; color:var(--text1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHtml(camp.name) + '">' + escapeHtml(camp.name) + '</div>' +
               '<div style="font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; margin-top:2px;">' +
-                '<span style="color:var(--amber-text);">' + missing.length + ' Missing</span> \u00B7 ' +
+                '<span style="color:var(--amber-text);">' + missingFiles.length + ' Files</span> \u00B7 ' +
+                '<span style="color:var(--pink-text);">' + missingPrices.length + ' Prices</span> \u00B7 ' +
                 '<span style="color:var(--green-text);">' + ready.length + ' Ready</span>' +
               '</div>' +
             '</div>' +
@@ -5219,12 +5298,12 @@ function renderNotificationsView() {
       if (!qcCards) {
         return '<div class="section-title">QC Reports</div>' +
           '<div class="auto-card">' +
-            '<div class="auto-desc" style="margin:0;">No campaigns have QC flagged yet. Set a video\u2019s <strong style="color:var(--text1);">QC</strong> column to <em>Missing files</em> or <em>Ready</em> in the Campaigns tab to see it here.</div>' +
+            '<div class="auto-desc" style="margin:0;">No campaigns have QC flagged yet. Set a video\u2019s <strong style="color:var(--text1);">QC</strong> column to <em>Missing files</em>, <em>Missing prices</em>, or <em>Ready</em> in the Campaigns tab to see it here.</div>' +
           '</div>';
       }
       return '<div class="section-title">QC Reports <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(manual send to the country\u2019s QC webhook)</span></div>' +
         '<div class="auto-card">' +
-          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send is enabled once at least one video is marked <span style="color:var(--amber-text);">Missing files</span>. Ready videos are included as a count in the Slack message.</div>' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send is enabled once at least one video is marked <span style="color:var(--amber-text);">Missing files</span> or <span style="color:var(--pink-text);">Missing prices</span>. Ready videos are included as a count in the Slack message.</div>' +
           '<div class="batch-grid">' + qcCards + '</div>' +
         '</div>';
     })() +
@@ -5370,14 +5449,22 @@ function renderConfigView() {
       '</div></div>';
   }).join('');
 
-  // Per-editor Slack channel rows
+  // Per-editor Slack channel + member ID rows
   var slackRows = EDITORS.map(function(e) {
     var url = (STATE.editorSlackChannels && STATE.editorSlackChannels[e]) || '';
     var urlEsc = escapeHtml(url);
     var hasUrl = !!url;
+    var slackId = (STATE.editorSlackIds && STATE.editorSlackIds[e]) || '';
+    var slackIdEsc = escapeHtml(slackId);
     return '<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">' +
       '<div class="editor-avatar av-' + e + '" style="flex-shrink:0;">' + editorInitials(e) + '</div>' +
       '<div style="font-size:13px; font-weight:600; color:var(--text1); width:60px; flex-shrink:0;">' + e + '</div>' +
+      '<input type="text" id="slack-id-' + e + '" class="form-input" ' +
+        'style="width:140px; flex-shrink:0; font-family:\'JetBrains Mono\', monospace; font-size:12px;" ' +
+        'placeholder="U07ABC123 (member ID)" ' +
+        'title="Slack member ID for ' + e + ' — get it from their Slack profile (… menu → Copy member ID). When set, notifications will @mention them and trigger a Slack ping." ' +
+        'value="' + slackIdEsc + '" ' +
+        'onblur="App.saveEditorSlackId(\'' + e + '\', this.value)">' +
       '<input type="text" id="slack-ch-' + e + '" class="form-input" ' +
         'style="flex:1; font-family:\'JetBrains Mono\', monospace; font-size:12px;" ' +
         'placeholder="https://app.slack.com/client/T.../D... or slack://channel?..." ' +
@@ -5604,6 +5691,7 @@ function saveState() {
       qcWebhooks: STATE.qcWebhooks,
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
+      editorSlackIds: STATE.editorSlackIds,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       countries: STATE.countries,
       categories: STATE.categories,
@@ -5670,11 +5758,13 @@ function loadState() {
         STATE._tabOrderMigratedV3 = true;
       }
     }
-    // Ensure editor batches and Slack channels exist for all editors
+    // Ensure editor batches, Slack channels, and Slack member IDs exist for all editors
     EDITORS.forEach(function(e) {
       if (!STATE.pendingBatches[e]) STATE.pendingBatches[e] = { items: [], firstQueuedAt: null };
       if (!STATE.editorSlackChannels) STATE.editorSlackChannels = {};
       if (STATE.editorSlackChannels[e] === undefined) STATE.editorSlackChannels[e] = '';
+      if (!STATE.editorSlackIds) STATE.editorSlackIds = {};
+      if (STATE.editorSlackIds[e] === undefined) STATE.editorSlackIds[e] = '';
     });
     // Reconcile saved countries with the canonical list: add any missing countries
     // (e.g. US added in this version) and re-order to canonical order.
@@ -6353,20 +6443,36 @@ function buildQcReportMessage(campaignId) {
   var country = getCountryByCode(camp.country);
   var countryName = country ? country.name : camp.country;
   var assetsInCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; });
-  var missing = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
-  var ready   = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
-  if (missing.length === 0) return null; // caller should have prevented this, but double-check
+  var missingFiles  = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
+  var missingPrices = assetsInCamp.filter(function(a) { return a.qc === 'Missing prices'; });
+  var ready         = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
+  if (missingFiles.length === 0 && missingPrices.length === 0) return null; // caller should have prevented this, but double-check
+  var headerParts = [];
+  if (missingFiles.length)  headerParts.push('missing files');
+  if (missingPrices.length) headerParts.push('missing prices');
+  var qcHeaderLabel = headerParts.join(' & ');
   var lines = [];
-  lines.push(':warning: *QC flagged missing files \u2014 ' + countryName + ' \u00B7 ' + camp.name + '*');
-  lines.push('');
-  lines.push('Missing files (' + missing.length + '):');
-  missing.forEach(function(a, i) {
-    var rawUrl = extractSingleUrl(a.rawVideo);
-    var briefUrl = extractSingleUrl(a.editingBrief);
+  lines.push(':warning: *QC flagged ' + qcHeaderLabel + ' \u2014 ' + countryName + ' \u00B7 ' + camp.name + '*');
+  function renderQcItem(a, i) {
+    // Fall back to the campaign-level raw / brief link when the per-asset field is empty.
+    var rawSrc   = a.rawVideo     || camp.driveId || '';
+    var briefSrc = a.editingBrief || camp.brief   || '';
+    var rawUrl = extractSingleUrl(rawSrc);
+    var briefUrl = extractSingleUrl(briefSrc);
     var rawLink  = rawUrl   ? '<' + rawUrl   + '|Drive>'  : '\u2014';
     var briefLink = briefUrl ? '<' + briefUrl + '|Notion>' : '\u2014';
-    lines.push('  ' + (i + 1) + '. ' + a.name + ' \u2014 Raw: ' + rawLink + ' \u00B7 Brief: ' + briefLink);
-  });
+    return '  ' + (i + 1) + '. ' + a.name + ' \u2014 Raw: ' + rawLink + ' \u00B7 Brief: ' + briefLink;
+  }
+  if (missingFiles.length) {
+    lines.push('');
+    lines.push('Missing files (' + missingFiles.length + '):');
+    missingFiles.forEach(function(a, i) { lines.push(renderQcItem(a, i)); });
+  }
+  if (missingPrices.length) {
+    lines.push('');
+    lines.push('Missing prices (' + missingPrices.length + '):');
+    missingPrices.forEach(function(a, i) { lines.push(renderQcItem(a, i)); });
+  }
   lines.push('');
   lines.push('Ready: ' + ready.length + ' video' + (ready.length === 1 ? '' : 's'));
   return lines.join('\n');
@@ -6394,7 +6500,9 @@ function buildBatchMessage(recipient, items, opts) {
     header = ':clapper: *Review queue \u2014 ' + country + '* \u00B7 ' + items.length + ' video' + (items.length > 1 ? 's' : '') + ' ready';
   } else {
     var suffix = opts.countryLabel ? ' (' + opts.countryLabel + ')' : '';
-    header = ':clapper: *' + recipient + '* \u2014 ' + items.length + ' video update' + (items.length > 1 ? 's' : '') + suffix;
+    // mentionEditor(recipient) returns '<@USERID>' if a Slack member ID is configured
+    // for this editor (which auto-pings them), or just the plain name as fallback.
+    header = ':clapper: ' + mentionEditor(recipient) + ' \u2014 ' + items.length + ' video update' + (items.length > 1 ? 's' : '') + suffix;
   }
 
   var lines = [header];
@@ -6429,7 +6537,7 @@ function buildDailyQueueMessage(editor, dateStr) {
     return a.editor === editor && !a.released && a.status !== 'Approved';
   }).sort(function(a, b) { return a.pn - b.pn; });
   if (list.length === 0) return null;
-  var lines = [':clapper: *Daily queue for ' + editor + '*' + (dateStr ? ' (' + dateStr + ')' : '')];
+  var lines = [':clapper: *Daily queue* for ' + mentionEditor(editor) + (dateStr ? ' (' + dateStr + ')' : '')];
   list.slice(0, 10).forEach(function(a, i) {
     lines.push('  ' + (i+1) + '. ' + a.name + '  _(' + a.difficulty + ')_');
   });
@@ -8033,7 +8141,7 @@ var App = {
       return;
     }
     var msg = buildQcReportMessage(campaignId);
-    if (!msg) { toast('Nothing flagged Missing files in this campaign', 'error'); return; }
+    if (!msg) { toast('Nothing flagged Missing files or Missing prices in this campaign', 'error'); return; }
     toast('Sending QC report for ' + camp.name + '...', '');
     postToSlack(url, msg).then(function(r) {
       if (r.ok) {
@@ -8070,7 +8178,7 @@ var App = {
       var camp = findCampaignById(campaignId);
       if (!camp) return;
       var ready = STATE.assets.filter(function(a) { return a.campaignId === camp.id && a.qc === 'Ready'; });
-      msg = ':white_check_mark: *QC \u2014 ' + camp.country + ' \u00B7 ' + camp.name + '*\n\nNo missing files flagged. Ready: ' + ready.length + ' video' + (ready.length === 1 ? '' : 's');
+      msg = ':white_check_mark: *QC \u2014 ' + camp.country + ' \u00B7 ' + camp.name + '*\n\nNo missing files or prices flagged. Ready: ' + ready.length + ' video' + (ready.length === 1 ? '' : 's');
     }
     copyToClipboard(msg, 'QC report copied');
   },
@@ -8149,6 +8257,18 @@ var App = {
     STATE.editorSlackChannels[editor] = trimmed;
     saveState();
     logAction('updated', editor + ' Slack channel URL ' + (trimmed === '' ? 'cleared' : 'updated'));
+    render();
+  },
+  // Save an editor's Slack member ID. When set, notifications addressed to this editor
+  // will use Slack's <@USERID> mention syntax instead of the plain name, which triggers
+  // a real notification on the editor's account.
+  saveEditorSlackId: function(editor, id) {
+    var trimmed = (id || '').trim();
+    if (!STATE.editorSlackIds) STATE.editorSlackIds = {};
+    if (STATE.editorSlackIds[editor] === trimmed) return;
+    STATE.editorSlackIds[editor] = trimmed;
+    saveState();
+    logAction('updated', editor + ' Slack member ID ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
     render();
   },
   saveWorkspace: function(v) {
