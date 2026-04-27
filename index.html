@@ -5158,15 +5158,15 @@ function renderNotificationsView() {
         '<div class="country-flag flag-' + countryCode + '" style="width:20px; height:14px; font-size:8px;">' + countryCode + '</div>' +
         '</div>';
     } else if (isChq) {
-      // CHQ avatar: magnifier glyph + a small category-colored swatch (no text).
-      // The category name lives in the card title, so the avatar stays compact
-      // even when the category name is long like "Bags and Accessories".
+      // CHQ avatar: magnifier glyph + a category-colored chip showing the
+      // category name. The title also shows the category but redundancy is OK
+      // here — the chip is a quick visual scan, the title is descriptive.
       var c = categoryColor(chqCategory);
       var bgL = c.bgLight || c.bg;
       var fgL = c.fgLight || c.fg;
       avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(chqCategory) + (head ? ' (' + head + ')' : '') + '">' +
         '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-        '<div style="width:14px; height:14px; border-radius:3px; background:var(--cat-bg); --cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';"></div>' +
+        '<div class="cat-pill" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + '; height:auto; max-width:90px; font-size:7.5px; padding:1px 4px; line-height:1.15; display:inline-block; white-space:normal; word-break:break-word;">' + escapeHtml(chqCategory) + '</div>' +
         '</div>';
     } else {
       avatarHtml = '<div class="editor-avatar av-' + recipient + '">' + editorInitials(recipient) + '</div>';
@@ -5394,7 +5394,7 @@ function renderNotificationsView() {
           var ecFgL = ec.fgLight || ec.fg;
           avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(entryCategory) + '">' +
             '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
-            '<div style="width:14px; height:14px; border-radius:3px; background:var(--cat-bg); --cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + ';"></div>' +
+            '<div class="cat-pill" style="--cat-bg:' + ec.bg + '; --cat-fg:' + ec.fg + '; --cat-bg-light:' + ecBgL + '; --cat-fg-light:' + ecFgL + '; height:auto; max-width:90px; font-size:7.5px; padding:1px 4px; line-height:1.15; display:inline-block; white-space:normal; word-break:break-word;">' + escapeHtml(entryCategory) + '</div>' +
             '</div>';
         } else {
           avatarHtml = '<div class="editor-avatar av-' + n.editor + '">' + editorInitials(n.editor) + '</div>';
