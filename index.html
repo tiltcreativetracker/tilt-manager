@@ -750,6 +750,13 @@
   .subcamp-context-menu-item:hover { background: var(--accent-dim); color: var(--accent2); }
   .subcamp-context-menu-destructive:hover { background: var(--red-bg); color: var(--red-text); }
 
+  /* Campaign header kebab menu (\u22EE) \u2014 Copy link / Export PDF / Export Slack */
+  .camp-actions-menu-wrap { position: relative; display: inline-block; }
+  .camp-actions-menu-btn { padding: 4px 8px !important; font-size: 14px !important; line-height: 1; }
+  .camp-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 70; min-width: 180px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); font-family: inherit; }
+  .camp-actions-menu-item { display: block; width: 100%; text-align: left; padding: 7px 12px; background: transparent; color: var(--text1); border: none; border-radius: 4px; font-size: 12.5px; font-family: inherit; cursor: pointer; transition: background 0.08s; white-space: nowrap; }
+  .camp-actions-menu-item:hover { background: var(--accent-dim); color: var(--accent2); }
+
   .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.65); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
   .modal-overlay.open { opacity: 1; pointer-events: auto; }
   .modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 22px 24px; width: 580px; max-width: 94vw; max-height: 90vh; overflow-y: auto; transform: translateY(8px); transition: transform 0.15s; }
@@ -4462,7 +4469,7 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '</div>' +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(' + camp.id + ')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(' + camp.id + ')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(' + camp.id + ')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
       : '<div class="camp-brief">' + (camp.brief ? escapeHtml(camp.brief) : '<em style="color:var(--text3)">No brief set</em>') + '</div>') +
@@ -5706,8 +5713,71 @@ function renderNotificationsView() {
         '</div>';
       }).join('');
 
+  // Build QC Reports section first so we can place it at the TOP of the notifications
+  // panel. The same logic used to live inline mid-return; hoisting it lets us keep all
+  // section logic intact while changing only the visual order.
+  var qcReportsHtml = (function() {
+      // Build one QC report card per sub-campaign that has at least one video with
+      // a non-Draft QC state. Cards are derived live from asset.qc on every render \u2014
+      // no separate queue state. Send button builds a dedicated QC message and POSTs
+      // manually (no batching, no auto-fire).
+      var qcCards = STATE.campaigns.map(function(camp) {
+        var assetsInCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; });
+        var missingFiles  = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
+        var missingPrices = assetsInCamp.filter(function(a) { return a.qc === 'Missing prices'; });
+        var ready         = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
+        var totalMissing = missingFiles.length + missingPrices.length;
+        if (totalMissing === 0 && ready.length === 0) return ''; // skip untouched sub-campaigns
+        // Skip cards that were dismissed via a successful send in this session. Refreshing
+        // the page clears qcDismissed (non-persisted) so the card reappears.
+        if (STATE.qcDismissed && STATE.qcDismissed[camp.id]) return '';
+        var qcUrl = resolveQcWebhookForCampaign(camp.id);
+        var hasUrl = webhookValid(qcUrl);
+        var canSend = hasUrl && totalMissing > 0;
+        var sendAttrs = canSend
+          ? 'class="sent-copy-btn" title="Send QC report for this campaign"'
+          : 'class="sent-copy-btn" title="' + (hasUrl ? 'Add at least one Missing-files or Missing-prices video to send a report' : 'No QC webhook resolves for ' + camp.country + ' \u2014 set one in Automations') + '" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var listParts = [];
+        if (missingFiles.length) {
+          listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--amber-text);"><strong>Missing files:</strong> ' + missingFiles.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
+        }
+        if (missingPrices.length) {
+          listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--pink-text);"><strong>Missing prices:</strong> ' + missingPrices.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
+        }
+        var missingList = listParts.join('');
+        return '<div class="batch-card">' +
+          '<div class="batch-card-header">' +
+            '<div class="country-flag flag-' + camp.country + '">' + camp.country + '</div>' +
+            '<div style="flex:1; min-width:0;">' +
+              '<div style="font-size:13px; font-weight:600; color:var(--text1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHtml(camp.name) + '">' + escapeHtml(camp.name) + '</div>' +
+              '<div style="font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; margin-top:2px;">' +
+                '<span style="color:var(--amber-text);">' + missingFiles.length + ' Files</span> \u00B7 ' +
+                '<span style="color:var(--pink-text);">' + missingPrices.length + ' Prices</span> \u00B7 ' +
+                '<span style="color:var(--green-text);">' + ready.length + ' Ready</span>' +
+              '</div>' +
+            '</div>' +
+            '<button ' + sendAttrs + ' onclick="App.sendQcReport(' + camp.id + ')">\u{1F680}</button>' +
+            '<button class="sent-copy-btn" title="Copy QC report" onclick="App.copyQcReport(' + camp.id + ')">\u{1F4CB}</button>' +
+          '</div>' +
+          missingList +
+        '</div>';
+      }).filter(function(s) { return s.length > 0; }).join('');
+      if (!qcCards) {
+        return '<div class="section-title">QC Reports</div>' +
+          '<div class="auto-card">' +
+            '<div class="auto-desc" style="margin:0;">No campaigns have QC flagged yet. Set a video\u2019s <strong style="color:var(--text1);">QC</strong> column to <em>Missing files</em>, <em>Missing prices</em>, or <em>Ready</em> in the Campaigns tab to see it here.</div>' +
+          '</div>';
+      }
+      return '<div class="section-title">QC Reports <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(manual send to the country\u2019s QC webhook)</span></div>' +
+        '<div class="auto-card">' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send is enabled once at least one video is marked <span style="color:var(--amber-text);">Missing files</span> or <span style="color:var(--pink-text);">Missing prices</span>. Ready videos are included as a count in the Slack message.</div>' +
+          '<div class="batch-grid">' + qcCards + '</div>' +
+        '</div>';
+  })();
+
   return '<div class="content"><div class="notif-panel">' +
     fileBanner +
+    qcReportsHtml +
     '<div class="section-title">Pending Batches <button class="run-btn" style="margin-left:auto; padding:5px 12px; font-size:12px;" onclick="App.showExport()">\u{1F4E4} Export for editor</button></div>' +
     '<div class="auto-card">' +
       '<div class="auto-desc" style="margin:0 0 6px;">Notifications queue briefly and fire as a batch Slack message after <strong style="color:var(--text1);">10 seconds</strong> from the first update. Try editing a video in the Campaigns tab to see it queue here.</div>' +
@@ -5781,64 +5851,7 @@ function renderNotificationsView() {
           '<div class="batch-grid">' + tallyCards + '</div>' +
         '</div>';
     })() +
-    (function() {
-      // Build one QC report card per sub-campaign that has at least one video with
-      // a non-Draft QC state. Cards are derived live from asset.qc on every render \u2014
-      // no separate queue state. Send button builds a dedicated QC message and POSTs
-      // manually (no batching, no auto-fire).
-      var qcCards = STATE.campaigns.map(function(camp) {
-        var assetsInCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; });
-        var missingFiles  = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
-        var missingPrices = assetsInCamp.filter(function(a) { return a.qc === 'Missing prices'; });
-        var ready         = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
-        var totalMissing = missingFiles.length + missingPrices.length;
-        if (totalMissing === 0 && ready.length === 0) return ''; // skip untouched sub-campaigns
-        // Skip cards that were dismissed via a successful send in this session. Refreshing
-        // the page clears qcDismissed (non-persisted) so the card reappears.
-        if (STATE.qcDismissed && STATE.qcDismissed[camp.id]) return '';
-        var qcUrl = resolveQcWebhookForCampaign(camp.id);
-        var hasUrl = webhookValid(qcUrl);
-        var canSend = hasUrl && totalMissing > 0;
-        var sendAttrs = canSend
-          ? 'class="sent-copy-btn" title="Send QC report for this campaign"'
-          : 'class="sent-copy-btn" title="' + (hasUrl ? 'Add at least one Missing-files or Missing-prices video to send a report' : 'No QC webhook resolves for ' + camp.country + ' \u2014 set one in Automations') + '" disabled style="opacity:0.45; cursor:not-allowed;"';
-        var listParts = [];
-        if (missingFiles.length) {
-          listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--amber-text);"><strong>Missing files:</strong> ' + missingFiles.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
-        }
-        if (missingPrices.length) {
-          listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--pink-text);"><strong>Missing prices:</strong> ' + missingPrices.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
-        }
-        var missingList = listParts.join('');
-        return '<div class="batch-card">' +
-          '<div class="batch-card-header">' +
-            '<div class="country-flag flag-' + camp.country + '">' + camp.country + '</div>' +
-            '<div style="flex:1; min-width:0;">' +
-              '<div style="font-size:13px; font-weight:600; color:var(--text1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHtml(camp.name) + '">' + escapeHtml(camp.name) + '</div>' +
-              '<div style="font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; margin-top:2px;">' +
-                '<span style="color:var(--amber-text);">' + missingFiles.length + ' Files</span> \u00B7 ' +
-                '<span style="color:var(--pink-text);">' + missingPrices.length + ' Prices</span> \u00B7 ' +
-                '<span style="color:var(--green-text);">' + ready.length + ' Ready</span>' +
-              '</div>' +
-            '</div>' +
-            '<button ' + sendAttrs + ' onclick="App.sendQcReport(' + camp.id + ')">\u{1F680}</button>' +
-            '<button class="sent-copy-btn" title="Copy QC report" onclick="App.copyQcReport(' + camp.id + ')">\u{1F4CB}</button>' +
-          '</div>' +
-          missingList +
-        '</div>';
-      }).filter(function(s) { return s.length > 0; }).join('');
-      if (!qcCards) {
-        return '<div class="section-title">QC Reports</div>' +
-          '<div class="auto-card">' +
-            '<div class="auto-desc" style="margin:0;">No campaigns have QC flagged yet. Set a video\u2019s <strong style="color:var(--text1);">QC</strong> column to <em>Missing files</em>, <em>Missing prices</em>, or <em>Ready</em> in the Campaigns tab to see it here.</div>' +
-          '</div>';
-      }
-      return '<div class="section-title">QC Reports <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(manual send to the country\u2019s QC webhook)</span></div>' +
-        '<div class="auto-card">' +
-          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send is enabled once at least one video is marked <span style="color:var(--amber-text);">Missing files</span> or <span style="color:var(--pink-text);">Missing prices</span>. Ready videos are included as a count in the Slack message.</div>' +
-          '<div class="batch-grid">' + qcCards + '</div>' +
-        '</div>';
-    })() +
+    /* qcReportsHtml \u2014 inserted at the top of the panel, see hoist above the return */
     '<div class="section-title">Sent Notifications (last 20)</div>' +
     '<div class="auto-card"><div class="sent-log">' + sentHtml + '</div></div>' +
   '</div></div>';
@@ -8338,6 +8351,150 @@ var App = {
   deleteCampaign: deleteCampaign,
   reorderCampaigns: reorderCampaigns,
 
+  // --- Campaign actions kebab menu ---
+  // Toggle the dropdown next to Edit/Delete in the campaign header. Lightweight: just
+  // flips visibility on the (always-rendered) #camp-actions-menu div. Closes on outside
+  // click via the document listener at the bottom of the script.
+  toggleCampActionsMenu: function(event) {
+    if (event) event.stopPropagation();
+    var menu = document.getElementById('camp-actions-menu');
+    if (!menu) return;
+    menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+  },
+
+  // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
+  // hash (#campaign=N) so it doesn't collide with Firebase auth's query-string redirects.
+  // Boot logic in attachAuthListener parses this and selects the campaign on load.
+  copyCampaignLink: function(campaignId) {
+    var camp = findCampaignById(campaignId);
+    if (!camp) return;
+    var base = location.origin + location.pathname;
+    var url = base + '#campaign=' + campaignId;
+    copyToClipboard(url, 'Link copied');
+    // Close the menu after action
+    var menu = document.getElementById('camp-actions-menu');
+    if (menu) menu.style.display = 'none';
+  },
+
+  // Open a print-friendly version of the campaign in a new window and trigger the browser's
+  // print dialog. The user can save as PDF from there. No external library needed.
+  exportCampaignPdf: function(campaignId) {
+    var camp = findCampaignById(campaignId);
+    if (!camp) return;
+    var menu = document.getElementById('camp-actions-menu');
+    if (menu) menu.style.display = 'none';
+    var country = getCountryByCode(camp.country);
+    var assets = STATE.assets.filter(function(a) { return a.campaignId === camp.id; })
+                              .sort(function(a, b) { return (a.pn || 0) - (b.pn || 0); });
+    var monthLabel = '';
+    if (/^\d{4}-\d{2}$/.test(camp.monthYear || '')) {
+      monthLabel = MONTH_SHORT[parseInt(camp.monthYear.slice(5, 7), 10) - 1] + ' ' + camp.monthYear.slice(0, 4);
+    }
+    var rows = assets.map(function(a, i) {
+      return '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + escapeHtml(a.name) + '</td>' +
+        '<td>' + escapeHtml(a.editor || '\u2014') + '</td>' +
+        '<td>' + escapeHtml(a.difficulty || '\u2014') + '</td>' +
+        '<td>' + escapeHtml(a.status || 'Draft') + '</td>' +
+        '<td>' + escapeHtml(a.qc || 'Draft') + '</td>' +
+        '<td>' + escapeHtml(a.estDelivery ? formatDate(a.estDelivery) : '\u2014') + '</td>' +
+        '<td>' + escapeHtml(a.dateApproved ? formatDate(a.dateApproved) : '\u2014') + '</td>' +
+      '</tr>';
+    }).join('');
+    var totalCount = assets.length;
+    var approvedCount = assets.filter(function(a) { return a.status === 'Approved'; }).length;
+    var html =
+      '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+      '<title>' + escapeHtml(camp.name) + ' \u2014 Creative Tracker</title>' +
+      '<style>' +
+        'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; padding: 32px; color: #222; max-width: 1100px; margin: 0 auto; }' +
+        'h1 { margin: 0 0 4px; font-size: 22px; }' +
+        '.subhead { color: #666; font-size: 13px; margin-bottom: 18px; }' +
+        '.meta { font-size: 12px; color: #555; margin-bottom: 24px; padding: 10px 14px; background: #f5f5f5; border-radius: 6px; }' +
+        '.meta strong { color: #222; }' +
+        'table { width: 100%; border-collapse: collapse; font-size: 12px; }' +
+        'th { text-align: left; padding: 8px 10px; background: #ececec; border-bottom: 2px solid #999; font-weight: 600; }' +
+        'td { padding: 7px 10px; border-bottom: 1px solid #eaeaea; vertical-align: top; }' +
+        'tr:nth-child(even) td { background: #fafafa; }' +
+        '.footer { margin-top: 24px; font-size: 10px; color: #999; text-align: center; }' +
+        '@media print { body { padding: 16px; } th { background: #ddd; } }' +
+      '</style>' +
+      '</head><body>' +
+      '<h1>' + escapeHtml(camp.name) + '</h1>' +
+      '<div class="subhead">' + (country ? escapeHtml(country.name) : escapeHtml(camp.country)) + ' \u00B7 Campaign #' + camp.rank + (monthLabel ? ' \u00B7 ' + escapeHtml(monthLabel) : '') + '</div>' +
+      '<div class="meta">' +
+        '<strong>Total:</strong> ' + totalCount + ' video' + (totalCount === 1 ? '' : 's') + ' \u00B7 ' +
+        '<strong>Approved:</strong> ' + approvedCount + '/' + totalCount + ' \u00B7 ' +
+        '<strong>Type:</strong> ' + escapeHtml(camp.type || '\u2014') + ' \u00B7 ' +
+        '<strong>Category:</strong> ' + escapeHtml(camp.category || '\u2014') +
+      '</div>' +
+      (totalCount === 0
+        ? '<p style="color:#999; font-style:italic;">No videos in this campaign yet.</p>'
+        : '<table><thead><tr>' +
+            '<th style="width:36px">#</th>' +
+            '<th>Video Name</th>' +
+            '<th>Editor</th>' +
+            '<th>Difficulty</th>' +
+            '<th>Status</th>' +
+            '<th>QC</th>' +
+            '<th>Est. Delivery</th>' +
+            '<th>Approved</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>') +
+      '<div class="footer">Generated ' + new Date().toLocaleString() + ' \u2014 Tilt Creative Tracker</div>' +
+      '<script>window.onload=function(){setTimeout(function(){window.print();},250);};<' + '/script>' +
+      '</body></html>';
+    var win = window.open('', '_blank');
+    if (!win) { toast('Pop-up blocked \u2014 enable pop-ups for this site to export PDF', 'error'); return; }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  },
+
+  // Build a Slack-formatted text summary of the campaign and copy to clipboard. User can
+  // paste directly into Slack to share campaign status. Groups videos by status so the
+  // PM can see at a glance what's done vs. pending.
+  exportCampaignSlack: function(campaignId) {
+    var camp = findCampaignById(campaignId);
+    if (!camp) return;
+    var menu = document.getElementById('camp-actions-menu');
+    if (menu) menu.style.display = 'none';
+    var country = getCountryByCode(camp.country);
+    var assets = STATE.assets.filter(function(a) { return a.campaignId === camp.id; })
+                              .sort(function(a, b) { return (a.pn || 0) - (b.pn || 0); });
+    var monthLabel = '';
+    if (/^\d{4}-\d{2}$/.test(camp.monthYear || '')) {
+      monthLabel = MONTH_SHORT[parseInt(camp.monthYear.slice(5, 7), 10) - 1] + ' ' + camp.monthYear.slice(0, 4);
+    }
+    var lines = [];
+    lines.push(':clapper: *' + (country ? country.name : camp.country) + ' \u00B7 ' + camp.name + '*');
+    var headerBits = [];
+    headerBits.push(':bar_chart: ' + assets.length + ' video' + (assets.length === 1 ? '' : 's'));
+    var approved = assets.filter(function(a) { return a.status === 'Approved'; }).length;
+    headerBits.push(approved + ' approved');
+    if (monthLabel) headerBits.push('Month: ' + monthLabel);
+    lines.push(headerBits.join(' \u00B7 '));
+    // Group by status, in workflow order
+    var statusOrder = ['Approved', 'For Review', 'Needs Revisions', 'Assigned', 'Draft'];
+    statusOrder.forEach(function(status) {
+      var inStatus = assets.filter(function(a) { return (a.status || 'Draft') === status; });
+      if (inStatus.length === 0) return;
+      lines.push('');
+      lines.push('*' + status + ' (' + inStatus.length + '):*');
+      inStatus.forEach(function(a, i) {
+        var line = '  ' + (i + 1) + '. ' + a.name;
+        if (a.editor) line += ' \u2014 _' + a.editor + '_';
+        lines.push(line);
+      });
+    });
+    if (assets.length === 0) {
+      lines.push('');
+      lines.push('_No videos in this campaign yet._');
+    }
+    var msg = lines.join('\n');
+    copyToClipboard(msg, 'Slack message copied');
+  },
+
   // --- Version history panel (Google-Sheets-style) ---
   // Opens the full-width 2-column version-history modal for an asset. Timeline
   // on the left groups entries by Today / Yesterday / date; preview on the right
@@ -9149,6 +9306,19 @@ document.addEventListener('click', function(e) {
   App.hideSubcampContextMenu();
 });
 
+// Dismiss the campaign-header kebab menu on outside-click (same shape as the sidebar one).
+// Walks up from the click target looking for the menu wrapper; if not found, hides menu.
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('camp-actions-menu');
+  if (!menu || menu.style.display === 'none' || !menu.style.display) return;
+  var t = e.target;
+  while (t) {
+    if (t.classList && (t.classList.contains('camp-actions-menu-wrap') || t.classList.contains('camp-actions-menu'))) return;
+    t = t.parentNode;
+  }
+  menu.style.display = 'none';
+});
+
 // ===================== POINTER DRAG =====================
 // Universal drag-to-reorder system using mouse events (not HTML5 DnD). HTML5 drag
 // is unreliable in some Chromium embeds / webviews, so we use mousedown / mousemove /
@@ -9473,6 +9643,32 @@ bootApp = function() {
 
   // Subscribe to the canonical state doc. The first snapshot drives initial load.
   Fb.subscribe(function(hadData) {
+    // Apply deep-link from URL hash on first data load (#campaign=N selects that campaign
+    // and expands its country). Guard ensures this runs only once per session.
+    if (!window.__deepLinkApplied) {
+      window.__deepLinkApplied = true;
+      var match = (location.hash || '').match(/^#campaign=(\d+)/);
+      if (match) {
+        var targetId = parseInt(match[1], 10);
+        var targetCamp = findCampaignById(targetId);
+        if (targetCamp) {
+          STATE.activeSubCampaignId = targetCamp.id;
+          STATE.expandedCountries[targetCamp.country] = true;
+          STATE.tab = 'campaigns';
+          // Save so the deep link state survives a refresh (tab + active id).
+          if (typeof saveState === 'function') saveState();
+          render();
+          // Show a small toast so the user knows the link worked
+          setTimeout(function() {
+            if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
+          }, 400);
+        } else {
+          setTimeout(function() {
+            if (typeof toast === 'function') toast('Linked campaign not found (id ' + targetId + ')', 'error');
+          }, 400);
+        }
+      }
+    }
     if (hadData) {
       // Firestore had data \u2014 STATE was populated by applySnapshot. Just render.
       // applySnapshot already calls render(), so we don't double-render here.
