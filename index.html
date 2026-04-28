@@ -3479,11 +3479,15 @@ function claimTallyLocalOnly(today) {
 // batches, and QC reports. Each kind of send has its own slot key in Firestore
 // so they don't interfere with each other.
 //
-// Slot keys (under collection meta/sendSlots/):
-//   editor:Sharm           \u2014 editor batch for Sharm
-//   pm:UK                  \u2014 PM review batch for UK
-//   chq:Sneakers           \u2014 category-head batch for Sneakers
-//   qc:42                  \u2014 manual QC report for campaign id 42
+// Slot keys (under top-level collection 'sendSlots'):
+//   batch_Sharm           \u2014 editor batch for Sharm
+//   batch_PM_UK           \u2014 PM review batch for UK
+//   batch_CHQ_Sneakers    \u2014 category-head batch for Sneakers
+//   qc_42                 \u2014 manual QC report for campaign id 42
+//
+// NOTE: Firestore document paths must have an even segment count, so we use a
+// top-level collection ('sendSlots') with each slot as a doc. Keys are flattened
+// from "batch:Sharm" to "batch_Sharm" since colons aren't valid in doc IDs anyway.
 //
 // Cooldown: SEND_DEDUPE_WINDOW_MS. If the slot was claimed within this window,
 // the new attempt loses the race and skips. Calls return a Promise<boolean>
@@ -3493,7 +3497,7 @@ function claimTallyLocalOnly(today) {
 // Falls back to a local cooldown map when Firestore is unreachable so the
 // system degrades gracefully (matches the daily-tally fallback behavior).
 var SEND_DEDUPE_WINDOW_MS = 10 * 1000; // 10s \u2014 catches any race the 5s ticker can produce
-var SEND_SLOTS_PARENT = 'meta/sendSlots'; // documents live under this; key after slash
+var SEND_SLOTS_COLLECTION = 'sendSlots'; // top-level collection: sendSlots/{key} is a 2-segment doc path
 
 // Local fallback memory for when Firestore isn't ready. Map of slotKey -> ms
 // timestamp of last successful claim. Cleared on reload (a refreshed browser
@@ -3503,12 +3507,11 @@ var _sendSlotLocalClaims = {};
 function claimSendSlot(slotKey) {
   if (!slotKey || typeof slotKey !== 'string') return Promise.resolve(true);
   var nowMs = Date.now();
-  // Firestore path: each slot is its own document so transactions are tightly scoped.
-  // Slot key may contain colons; replace with underscores so it's a valid doc id.
+  // Slot key may contain colons (e.g. "batch:PM:UK"); replace with underscores so
+  // it's a valid Firestore doc id.
   var safeKey = slotKey.replace(/[^a-zA-Z0-9_-]/g, '_');
-  var docPath = SEND_SLOTS_PARENT + '/' + safeKey;
   if (typeof fbDb !== 'undefined' && fbDb) {
-    var ref = fbDb.doc(docPath);
+    var ref = fbDb.collection(SEND_SLOTS_COLLECTION).doc(safeKey);
     return fbDb.runTransaction(function(tx) {
       return tx.get(ref).then(function(snap) {
         var existing = snap.exists ? (snap.data() || {}) : {};
@@ -7345,7 +7348,7 @@ function sendPendingBatch(editor, opts) {
   // winning browser's onSnapshot listener will sync the moved-to-sent state to all
   // tabs within ~1 second, so the UI converges naturally.
   // Slot key is namespaced under "batch:" to keep editor/PM/CHQ slots distinct from
-  // QC report slots (different keyspace under meta/sendSlots).
+  // QC report slots (different keyspace under sendSlots collection).
   var slotKey = 'batch:' + editor;
   toast('Sending to Slack...', '');
   claimSendSlot(slotKey).then(function(wonClaim) {
