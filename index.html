@@ -848,6 +848,50 @@
   .log-editor-stat.log-editor-miss { background: var(--red-bg); color: var(--red-text); }
   .log-editor-stat.log-editor-hit { background: var(--green-bg); color: var(--green-text); }
 
+  /* New per-day card layout (replaces the old grid-with-day-columns view). One card per
+     workday, listing the videos worked that day with their CURRENT status + category-head info. */
+  .log-day-cards { display: flex; flex-direction: column; gap: 12px; }
+  .log-day-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .log-day-card.is-today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+  .log-day-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+  .log-day-card-date { display: flex; align-items: baseline; gap: 8px; }
+  .log-day-card-dow { font-size: 11px; font-weight: 700; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
+  .log-day-card-num { font-size: 14px; font-weight: 600; color: var(--text1); font-family: 'JetBrains Mono', monospace; }
+  .log-day-today-pill { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; padding: 1px 6px; border-radius: 3px; background: var(--accent); color: #fff; font-family: 'JetBrains Mono', monospace; }
+  .log-day-card-stats { display: flex; align-items: baseline; gap: 4px; padding: 4px 10px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+  .log-day-card-num-big { font-size: 16px; font-weight: 700; }
+  .log-day-card-slash { color: var(--text3); }
+  .log-day-card-target { font-size: 13px; color: var(--text3); }
+  .log-day-card-stats-label { font-size: 10px; color: var(--text3); margin-left: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .log-day-card-stats.log-day-hit { background: var(--green-bg); color: var(--green-text); }
+  .log-day-card-stats.log-day-hit .log-day-card-target,
+  .log-day-card-stats.log-day-hit .log-day-card-stats-label { color: var(--green-text); opacity: 0.8; }
+  .log-day-card-stats.log-day-partial { background: var(--amber-bg); color: var(--amber-text); }
+  .log-day-card-stats.log-day-partial .log-day-card-target,
+  .log-day-card-stats.log-day-partial .log-day-card-stats-label { color: var(--amber-text); opacity: 0.8; }
+  .log-day-card-stats.log-day-miss { background: var(--bg4); color: var(--text3); }
+  .log-day-card-body { display: flex; flex-direction: column; }
+  .log-day-empty { padding: 14px 16px; font-style: italic; color: var(--text3); font-size: 12px; }
+  .log-day-vid-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+  .log-day-vid-row:first-child { border-top: none; }
+  .log-day-vid-row:hover { background: var(--bg3); }
+  .log-day-vid-row.is-done { opacity: 0.6; }
+  .log-day-vid-row.is-done .log-day-vid-title { text-decoration: line-through; }
+  .log-day-vid-name { min-width: 0; }
+  .log-day-vid-title { font-size: 13px; color: var(--text1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-day-vid-ver { display: inline-block; padding: 0 4px; border-radius: 2px; font-size: 9px; font-weight: 700; background: var(--accent-dim); color: var(--accent2); font-family: 'JetBrains Mono', monospace; vertical-align: middle; }
+  .log-day-vid-camp { font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-day-vid-status { display: flex; align-items: center; }
+  /* Category-head two-line cell: head name on top, QC verdict below as a colored pill. */
+  .log-vid-chq { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 110px; }
+  .log-vid-chq-name { font-size: 10.5px; color: var(--text2); font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .log-vid-chq-muted { color: var(--text3); font-style: italic; }
+  .log-vid-chq-status { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
+  .log-vid-chq-status.log-chq-draft { background: var(--bg4); color: var(--text3); }
+  .log-vid-chq-status.log-chq-review { background: var(--blue-bg); color: var(--blue-text); }
+  .log-vid-chq-status.log-chq-revisions { background: var(--amber-bg); color: var(--amber-text); }
+  .log-vid-chq-status.log-chq-approved { background: var(--green-bg); color: var(--green-text); }
+
   /* The table: a single grid with sticky day-header row + sticky approvals row, then video rows. */
   .log-grid { display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .log-grid-row { border-top: 1px solid var(--border); min-height: 40px; transition: background 0.1s; }
@@ -5410,10 +5454,7 @@ function renderDailyLogView() {
     ? STATE.logEditor
     : DAILY_LOG_EDITORS[0];
 
-  // Editor dropdown \u2014 one <option> per tracked editor. Uses native <select> for
-  // reliability; onchange calls back into App.setLogEditor which saves &
-  // re-renders. Shows each editor's total-approved count in the label so you
-  // can see at-a-glance who's behind before even switching.
+  // Editor dropdown \u2014 one <option> per tracked editor with their week total inline.
   var optionsHtml = DAILY_LOG_EDITORS.map(function(e) {
     var row = data[e] || { approvedByDay: [] };
     var total = (row.approvedByDay || []).reduce(function(s, n) { return s + n; }, 0);
@@ -5425,60 +5466,104 @@ function renderDailyLogView() {
     '<select class="log-editor-select" onchange="App.setLogEditor(this.value)">' + optionsHtml + '</select>' +
   '</div>';
 
-  // Day-header row across the grid.
-  var headerCellsHtml = days.map(function(d) { return renderDailyLogDayHeader(d); }).join('');
-
-  // Build the (single) selected editor's section.
+  // Resolve this editor's videos + their approval-by-day counts.
   var row = data[selectedEditor] || { videos: [], approvedByDay: days.map(function() { return 0; }) };
   var totalApproved = row.approvedByDay.reduce(function(s, n) { return s + n; }, 0);
   var daysMissed = row.approvedByDay.filter(function(n) { return n < target; }).length;
   var daysHit = days.length - daysMissed;
 
-  // Per-day approval counts row \u2014 the accountability headline.
-  var approvalCellsHtml = row.approvedByDay.map(function(count, i) {
-    var status = count >= target ? 'hit' : (count > 0 ? 'partial' : 'miss');
-    return '<div class="log-approved-cell log-approved-' + status + '" ' +
-      'title="' + count + ' approved on ' + formatDate(days[i]) + ' \u00B7 target ' + target + '">' +
-      '<span class="log-approved-num">' + count + '</span>' +
-      '<span class="log-approved-slash">/</span>' +
-      '<span class="log-approved-target">' + target + '</span>' +
-    '</div>';
-  }).join('');
+  // Bucket each video into the days it was actively worked on (any non-Draft status
+  // on that day) OR was approved on (dateApproved match). One video can appear in
+  // multiple days; that's fine \u2014 it shows the editor's ongoing work timeline.
+  var videosByDay = days.map(function() { return []; });
+  row.videos.forEach(function(v) {
+    days.forEach(function(d, dayIdx) {
+      var statusThatDay = v.statusByDay[dayIdx] || 'Draft';
+      var approvedOnDay = v.asset.dateApproved === d;
+      // Show under day X if either had a non-Draft status that day, OR was approved on that day
+      if (statusThatDay !== 'Draft' || approvedOnDay) {
+        videosByDay[dayIdx].push(v);
+      }
+    });
+  });
 
-  // One grid row per video: name cell + 7 status cells.
-  var videoRowsHtml;
-  if (row.videos.length === 0) {
-    videoRowsHtml = '<div class="log-empty-editor">No active work in this window for ' + escapeHtml(selectedEditor) + '.</div>';
-  } else {
-    // Sort videos: approved-complete ones at bottom, active ones at top.
-    var sortedVids = row.videos.slice().sort(function(a, b) {
-      var aDone = a.statusByDay[a.statusByDay.length - 1] === 'Approved' ? 1 : 0;
-      var bDone = b.statusByDay[b.statusByDay.length - 1] === 'Approved' ? 1 : 0;
+  // Render one day-card per workday. Each card lists the videos worked that day with
+  // the video's CURRENT status and its category-head info (head name + QC verdict).
+  var dayCardsHtml = days.map(function(dayIso, dayIdx) {
+    var vids = videosByDay[dayIdx];
+    var approvedThatDay = row.approvedByDay[dayIdx];
+    var dateLabel = formatDate(dayIso);
+    var dowLabel = (function() {
+      var d = new Date(dayIso + 'T00:00:00');
+      return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    })();
+    var isToday = (dayIso === todayISO());
+    var hitClass = approvedThatDay >= target ? 'log-day-hit' : (approvedThatDay > 0 ? 'log-day-partial' : 'log-day-miss');
+    // Sort: not-yet-approved first, approved last. Within each group, by name.
+    var sortedVids = vids.slice().sort(function(a, b) {
+      var aDone = a.asset.status === 'Approved' ? 1 : 0;
+      var bDone = b.asset.status === 'Approved' ? 1 : 0;
       if (aDone !== bDone) return aDone - bDone;
       return (a.asset.name || '').localeCompare(b.asset.name || '');
     });
-    videoRowsHtml = sortedVids.map(function(v) {
-      var a = v.asset;
-      var camp = findCampaignById(a.campaignId);
-      var campLabel = camp ? (camp.country + ' \u00B7 ' + camp.name) : '';
-      var cells = v.statusByDay.map(function(s) {
-        return '<div class="log-vid-cell">' + renderDailyLogStatusBadge(s) + '</div>';
-      }).join('');
-      var finalDone = v.statusByDay[v.statusByDay.length - 1] === 'Approved';
-      return '<div class="log-grid-row log-vid-row' + (finalDone ? ' is-done' : '') + '" ' +
-        'onclick="App.editAssetById(' + a.id + ')" ' +
-        'title="Click to open edit modal">' +
-        '<div class="log-vid-name-cell">' +
-          '<div class="log-vid-name">' + escapeHtml(a.name) + '</div>' +
-          '<div class="log-vid-sub">' +
-            '<span class="log-vid-ver">' + escapeHtml(a.version || 'V1') + '</span>' +
-            '<span class="log-vid-camp">' + escapeHtml(campLabel) + '</span>' +
+    var rowsHtml;
+    if (sortedVids.length === 0) {
+      rowsHtml = '<div class="log-day-empty">No work logged on ' + dowLabel + '.</div>';
+    } else {
+      rowsHtml = sortedVids.map(function(v) {
+        var a = v.asset;
+        var camp = findCampaignById(a.campaignId);
+        var campLabel = camp ? (camp.country + ' \u00B7 ' + camp.name) : '';
+        var version = (typeof deriveVersionFromName === 'function') ? deriveVersionFromName(a) : (a.version || 'V1');
+        // Category head info: head name (if any) + their QC status. If no head is
+        // configured for the category, show a muted em-dash for the name but still
+        // surface the QC value (since editors can set it manually).
+        var headName = getCategoryHead(a.category);
+        var headQc = a.categoryHeadQc || 'Draft';
+        var headQcClass = ({
+          'Draft': 'log-chq-draft',
+          'For Review': 'log-chq-review',
+          'Needs Revisions': 'log-chq-revisions',
+          'Approved': 'log-chq-approved'
+        })[headQc] || 'log-chq-draft';
+        var headCell =
+          '<div class="log-vid-chq">' +
+            '<div class="log-vid-chq-name" title="Category head for ' + escapeHtml(a.category || '\u2014') + '">' +
+              (headName ? escapeHtml(headName) : '<span class="log-vid-chq-muted">no head</span>') +
+            '</div>' +
+            '<div class="log-vid-chq-status ' + headQcClass + '" title="Category head QC: ' + escapeHtml(headQc) + '">' +
+              escapeHtml(headQc) +
+            '</div>' +
+          '</div>';
+        var done = a.status === 'Approved';
+        return '<div class="log-day-vid-row' + (done ? ' is-done' : '') + '" ' +
+          'onclick="App.editAssetById(' + a.id + ')" title="Click to open edit modal">' +
+          '<div class="log-day-vid-name">' +
+            '<div class="log-day-vid-title">' + escapeHtml(a.name) + ' <span class="log-day-vid-ver">' + escapeHtml(version) + '</span></div>' +
+            '<div class="log-day-vid-camp">' + escapeHtml(campLabel) + '</div>' +
           '</div>' +
+          '<div class="log-day-vid-status">' + renderDailyLogStatusBadge(a.status || 'Draft') + '</div>' +
+          headCell +
+        '</div>';
+      }).join('');
+    }
+    return '<div class="log-day-card' + (isToday ? ' is-today' : '') + '">' +
+      '<div class="log-day-card-header">' +
+        '<div class="log-day-card-date">' +
+          '<span class="log-day-card-dow">' + dowLabel + '</span>' +
+          '<span class="log-day-card-num">' + escapeHtml(dateLabel) + '</span>' +
+          (isToday ? '<span class="log-day-today-pill">TODAY</span>' : '') +
         '</div>' +
-        cells +
-      '</div>';
-    }).join('');
-  }
+        '<div class="log-day-card-stats ' + hitClass + '" title="' + approvedThatDay + ' approved \u00B7 target ' + target + '">' +
+          '<span class="log-day-card-num-big">' + approvedThatDay + '</span>' +
+          '<span class="log-day-card-slash">/</span>' +
+          '<span class="log-day-card-target">' + target + '</span>' +
+          '<span class="log-day-card-stats-label">approved</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="log-day-card-body">' + rowsHtml + '</div>' +
+    '</div>';
+  }).join('');
 
   // Summary stat bar under the dropdown.
   var summaryHtml = row.videos.length === 0
@@ -5515,17 +5600,7 @@ function renderDailyLogView() {
       '</div>' +
       summaryHtml +
     '</div>' +
-    '<div class="log-grid">' +
-      '<div class="log-grid-row log-day-header-grid-row">' +
-        '<div class="log-vid-name-cell log-vid-name-cell-header log-vid-name-cell-sticky">Video</div>' +
-        headerCellsHtml +
-      '</div>' +
-      '<div class="log-grid-row log-grid-row-header">' +
-        '<div class="log-vid-name-cell log-vid-name-cell-header">Approvals \u2192</div>' +
-        approvalCellsHtml +
-      '</div>' +
-      videoRowsHtml +
-    '</div>' +
+    '<div class="log-day-cards">' + dayCardsHtml + '</div>' +
   '</div>';
 }
 
