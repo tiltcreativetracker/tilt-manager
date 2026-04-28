@@ -1327,14 +1327,19 @@ var Fb = {
 
   // Build the JSON snapshot we persist. Must match the shape that saveState() / loadState()
   // already use, plus a few attribution fields stamped on every write.
+  //
+  // IMPORTANT: this snapshot is the SHARED workspace state synced across all teammates'
+  // browsers via Firestore. Per-user UI preferences (which tab you're on, which campaign
+  // you've selected, which country accordions you have open, your tab arrangement, etc.)
+  // must NOT be in here \u2014 those should stay in localStorage only via saveState() so they
+  // survive YOUR reloads but don't override Sharm's view when she's looking at a different
+  // campaign than you. See the parallel ignore-list in applySnapshot below.
   buildSnapshot: function() {
     return {
-      tabOrder: STATE.tabOrder,
-      activeSubCampaignId: STATE.activeSubCampaignId,
-      expandedCountries: STATE.expandedCountries,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
+      categoryHeadWebhook: STATE.categoryHeadWebhook,
       qcWebhooks: STATE.qcWebhooks,
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
@@ -1385,13 +1390,52 @@ var Fb = {
     Fb._pendingSnapshotData = null;
     Fb._suppressUpload = true;
     try {
-      // Copy known fields onto STATE. Skip metadata fields prefixed with `_`.
+      // Per-user UI fields that must NEVER be overwritten by incoming snapshots, even if
+      // a teammate's browser (running an older version) accidentally uploaded them. These
+      // belong to whoever is looking at this device, not the workspace. Mirrors the
+      // exclusion in buildSnapshot above.
+      var PER_USER_UI_FIELDS = {
+        tab: true,
+        tabOrder: true,
+        activeSubCampaignId: true,
+        expandedCountries: true,
+        sidebarCompact: true,
+        sidebarMonthFilter: true,
+        feedbackName: true,
+        statusFilter: true,
+        editorFilter: true,
+        qcFilter: true,
+        search: true,
+        logEditor: true,
+        schedulerDate: true,
+        qcDismissed: true,
+        noSplit: true
+      };
+      // Copy known fields onto STATE. Skip metadata fields prefixed with `_` and any
+      // per-user UI field (so a teammate's tab/campaign/expansion choices don't override
+      // ours). This is a defense-in-depth pair with buildSnapshot's deliberate exclusion.
       Object.keys(data).forEach(function(k) {
         if (k === '_lastEditedAt' || k === '_lastEditedBy' || k === '_lastEditedByName') return;
+        if (PER_USER_UI_FIELDS[k]) return;
         STATE[k] = data[k];
       });
-      // Mirror to localStorage as a cache so offline reloads still work.
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
+      // Mirror to localStorage as a cache so offline reloads still work. Strip per-user
+      // UI fields from the incoming snapshot, then MERGE into the existing localStorage
+      // copy so we don't clobber the user's locally-saved sidebar/tab state. Without
+      // this merge, an immediate reload after the first snapshot would lose per-user
+      // UI prefs because saveState() hadn't yet had a chance to re-write them.
+      try {
+        var existing = {};
+        try {
+          var raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) existing = JSON.parse(raw) || {};
+        } catch (_) {}
+        Object.keys(data).forEach(function(k) {
+          if (PER_USER_UI_FIELDS[k]) return;
+          existing[k] = data[k];
+        });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
+      } catch (_) {}
       if (typeof render === 'function' && Auth._booted) render();
     } finally {
       // Defer un-suppressing past the synchronous render so any saveState calls fired
@@ -1774,6 +1818,10 @@ var STATE = {
   qcFilter: 'all',
   webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
   countryWebhooks: { UK: '', IT: '', ES: '', US: '', PL: '' },
+  // Single webhook URL for all Category Head QC batches. When set, every CHQ batch
+  // (Sneakers, Bags, Apparel, etc.) routes here regardless of category. When blank,
+  // falls back to the global webhook. Set in Automations under "Category Head QC".
+  categoryHeadWebhook: '',
   // QC-report webhooks \u2014 separate per-country list. Set in Automations. Manual send only
   // (no batching/auto-fire). Falls back to global fallback webhook if a country's slot is
   // empty (same fallback shape as countryWebhooks).
@@ -3168,7 +3216,20 @@ function queueNotification(recipient, changeType, asset, detail, opts) {
   });
   if (batch.firstQueuedAt === null) batch.firstQueuedAt = Date.now();
 
-  logAction('queued', recipient + ': "' + asset.name + '" \u2014 ' + changeType + ' (batch ' + batch.items.length + '/' + BATCH_SIZE_LIMIT + ')');
+  // Build a human-readable recipient label that matches what the Notifications tab
+  // shows. Avoids the redundant "Sharm: ... Sharm" you'd otherwise get when the
+  // editor whose action triggered this is also the recipient (e.g. a PM editing
+  // their own video). The activity log's user chip already shows WHO triggered the
+  // queue, so the message body can focus on WHAT and WHO RECEIVES.
+  var recipientLabel;
+  if (typeof recipient === 'string' && recipient.indexOf('PM:') === 0) {
+    recipientLabel = 'PM \u2014 ' + recipient.slice(3);
+  } else if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
+    recipientLabel = 'Category Head \u2014 ' + recipient.slice(4);
+  } else {
+    recipientLabel = recipient; // editor name as-is
+  }
+  logAction('queued', '"' + asset.name + '" \u2014 ' + changeType + ' \u2192 ' + recipientLabel + ' (batch ' + batch.items.length + ')');
 
   // Check if we should fire
   if (batch.items.length >= BATCH_SIZE_LIMIT) {
@@ -3375,6 +3436,83 @@ function claimTallyLocalOnly(today) {
     localStorage.setItem(TALLY_STORAGE_KEY, today);
     return true;
   } catch (e) { return false; }
+}
+
+// =============================================================================
+// MULTI-BROWSER SEND DEDUPLICATION
+// =============================================================================
+// Generic atomic claim for any notification send. Uses the same pattern as the
+// daily-tally claim (Firestore transaction with last-write-wins + cooldown
+// window), but generalized so it works for editor batches, PM batches, CHQ
+// batches, and QC reports. Each kind of send has its own slot key in Firestore
+// so they don't interfere with each other.
+//
+// Slot keys (under collection meta/sendSlots/):
+//   editor:Sharm           \u2014 editor batch for Sharm
+//   pm:UK                  \u2014 PM review batch for UK
+//   chq:Sneakers           \u2014 category-head batch for Sneakers
+//   qc:42                  \u2014 manual QC report for campaign id 42
+//
+// Cooldown: SEND_DEDUPE_WINDOW_MS. If the slot was claimed within this window,
+// the new attempt loses the race and skips. Calls return a Promise<boolean>
+// where true = "you won, go ahead and POST" and false = "back off, somebody
+// else is sending or just did".
+//
+// Falls back to a local cooldown map when Firestore is unreachable so the
+// system degrades gracefully (matches the daily-tally fallback behavior).
+var SEND_DEDUPE_WINDOW_MS = 10 * 1000; // 10s \u2014 catches any race the 5s ticker can produce
+var SEND_SLOTS_PARENT = 'meta/sendSlots'; // documents live under this; key after slash
+
+// Local fallback memory for when Firestore isn't ready. Map of slotKey -> ms
+// timestamp of last successful claim. Cleared on reload (a refreshed browser
+// re-fetches from Firestore via the listener, so consistency is restored).
+var _sendSlotLocalClaims = {};
+
+function claimSendSlot(slotKey) {
+  if (!slotKey || typeof slotKey !== 'string') return Promise.resolve(true);
+  var nowMs = Date.now();
+  // Firestore path: each slot is its own document so transactions are tightly scoped.
+  // Slot key may contain colons; replace with underscores so it's a valid doc id.
+  var safeKey = slotKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+  var docPath = SEND_SLOTS_PARENT + '/' + safeKey;
+  if (typeof fbDb !== 'undefined' && fbDb) {
+    var ref = fbDb.doc(docPath);
+    return fbDb.runTransaction(function(tx) {
+      return tx.get(ref).then(function(snap) {
+        var existing = snap.exists ? (snap.data() || {}) : {};
+        var lastAt = (existing.lastSentAt && typeof existing.lastSentAt.toMillis === 'function')
+          ? existing.lastSentAt.toMillis()
+          : (typeof existing.lastSentAt === 'number' ? existing.lastSentAt : 0);
+        if (lastAt && (nowMs - lastAt) < SEND_DEDUPE_WINDOW_MS) {
+          return false; // somebody else is sending or just sent within the cooldown
+        }
+        var stamp = {
+          slotKey: slotKey,
+          lastSentAt: firebase.firestore.FieldValue.serverTimestamp(),
+          sentBy: (typeof Auth !== 'undefined' && Auth.user && Auth.user.uid) ? Auth.user.uid : 'unknown'
+        };
+        tx.set(ref, stamp, { merge: true });
+        return true;
+      });
+    }).then(function(won) {
+      if (won) _sendSlotLocalClaims[slotKey] = nowMs; // mirror to local cache
+      return won;
+    }).catch(function(err) {
+      console.warn('claimSendSlot transaction failed for ' + slotKey + ', falling back', err);
+      return claimSendSlotLocal(slotKey, nowMs);
+    });
+  }
+  return Promise.resolve(claimSendSlotLocal(slotKey, nowMs));
+}
+
+// Local fallback: best-effort cooldown using the in-memory map. Won't dedupe
+// across browsers when Firestore is unreachable, but at least dedupes within
+// the same browser tab.
+function claimSendSlotLocal(slotKey, nowMs) {
+  var lastAt = _sendSlotLocalClaims[slotKey] || 0;
+  if (lastAt && (nowMs - lastAt) < SEND_DEDUPE_WINDOW_MS) return false;
+  _sendSlotLocalClaims[slotKey] = nowMs;
+  return true;
 }
 
 function checkDailyTallyCrossover() {
@@ -6115,8 +6253,32 @@ function renderAutomationsView() {
       '<div class="webhook-row"><input type="text" id="webhook-input" value="' + escapeHtml(STATE.webhookUrl) + '" placeholder="https://hooks.slack.com/services/..."><button class="save-btn" onclick="App.saveWebhook()">Save locally</button><button class="edit-btn" onclick="App.testWebhook()" style="margin-left:4px;">\u{1F4E1} Send test ping</button></div>' +
     '</div>' +
 
+    (function() {
+      // Category Head QC webhook \u2014 single URL for ALL category-head batches (Sneakers,
+      // Bags, Apparel, etc.). When set, every CHQ batch routes here regardless of
+      // category. When blank, falls back to the global webhook (04).
+      var chw = STATE.categoryHeadWebhook || '';
+      var chwEsc = escapeHtml(chw);
+      var chwValid = webhookValid(chw);
+      var chwEmpty = !chw;
+      var chwDotClass = chwValid ? 'ok' : (chwEmpty ? '' : 'bad');
+      var chwDotTitle = chwValid
+        ? 'Valid webhook saved for Category Head QC'
+        : (chwEmpty ? 'No webhook \u2014 falls back to the global webhook above' : 'Saved value isn\u2019t a valid webhook URL');
+      return '<div class="auto-card">' +
+        '<div class="auto-header"><div class="auto-icon">05</div><div><div class="auto-title">Slack Webhook \u2014 Category Head QC</div><div class="auto-sub">all category-head review batches route here (Sneakers, Bags, Apparel, etc.)</div></div></div>' +
+        '<div class="auto-desc">A single webhook for all <strong style="color:var(--text1);">Category Head QC</strong> batches. The category head still gets @-mentioned in the message header (so Anand, Hanyan etc. get pinged personally), but the batch lands in this channel instead of your global one. Leave empty to fall back to the global webhook above. Save and Test work the same way.</div>' +
+        '<div class="webhook-row">' +
+          '<span class="webhook-status-dot ' + chwDotClass + '" title="' + chwDotTitle + '"></span>' +
+          '<input type="text" id="cathead-webhook-input" value="' + chwEsc + '" placeholder="https://hooks.slack.com/services/...">' +
+          '<button class="save-btn" onclick="App.saveCategoryHeadWebhook()">Save</button>' +
+          '<button class="edit-btn" onclick="App.testCategoryHeadWebhook()" style="margin-left:4px;">\u{1F4E1} Test</button>' +
+        '</div>' +
+      '</div>';
+    })() +
+
     '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">05</div><div><div class="auto-title">Slack Webhooks \u2014 Per Country</div><div class="auto-sub">PM review pings route here by country; editor batches use these when the batch is single-country</div></div></div>' +
+      '<div class="auto-header"><div class="auto-icon">06</div><div><div class="auto-title">Slack Webhooks \u2014 Per Country</div><div class="auto-sub">PM review pings route here by country; editor batches use these when the batch is single-country</div></div></div>' +
       '<div class="auto-desc">One webhook per country. When a video flips to <strong style="color:var(--text1);">For Review</strong>, the PM review ping goes to that country\u2019s webhook. Editor batches (single-country) also use these. Empty rows fall through to the global fallback above. Save and Test are per-row.</div>' +
       '<div style="margin-top:10px;">' +
         STATE.countries.map(function(c) {
@@ -6147,7 +6309,7 @@ function renderAutomationsView() {
     '</div>' +
 
     '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">06</div><div><div class="auto-title">Slack Webhooks \u2014 QC Reports</div><div class="auto-sub">Manual QC reports route here when you hit Send on a campaign\u2019s QC card</div></div></div>' +
+      '<div class="auto-header"><div class="auto-icon">07</div><div><div class="auto-title">Slack Webhooks \u2014 QC Reports</div><div class="auto-sub">Manual QC reports route here when you hit Send on a campaign\u2019s QC card</div></div></div>' +
       '<div class="auto-desc">One webhook per country, separate from the PM review route above. QC reports are never batched \u2014 you send them manually from the Notifications tab when a campaign is ready for review. Empty rows fall through to the global fallback. Save and Test are per-row.</div>' +
       '<div style="margin-top:10px;">' +
         STATE.countries.map(function(c) {
@@ -6503,6 +6665,7 @@ function saveState() {
       feedbackName: STATE.feedbackName,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
+      categoryHeadWebhook: STATE.categoryHeadWebhook,
       qcWebhooks: STATE.qcWebhooks,
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
@@ -6627,6 +6790,9 @@ function loadState() {
     STATE.countries.forEach(function(c) {
       if (STATE.qcWebhooks[c.code] === undefined) STATE.qcWebhooks[c.code] = '';
     });
+    // Category-head webhook (added in this version). Single URL covering all categories.
+    // Empty string by default \u2014 falls back to global webhook until the user sets one.
+    if (typeof STATE.categoryHeadWebhook !== 'string') STATE.categoryHeadWebhook = '';
     // Reconcile categories (added in this version). Seed defaults if missing; coerce
     // any legacy string-array representations into {name, color} objects; ensure every
     // campaign's current category name still has an entry (auto-create if a campaign
@@ -6826,13 +6992,16 @@ function resolveWebhookForEditor(recipient, items) {
 
   // CHQ:Category (Category Head QC) -> queue is per-category; items can span
   // multiple countries (e.g. UK + US Sneakers in one batch), so per-country
-  // routing doesn't apply. Honors a campaign override if every item shares one
-  // campaign; otherwise routes to the global fallback webhook. Heads get pinged
-  // via the @-mention in the message header regardless of which channel it
-  // lands in.
+  // routing doesn't apply. Routing priority for CHQ:
+  //   1. Campaign-level slackOverride (if every item shares one campaign with one set)
+  //   2. STATE.categoryHeadWebhook (single URL for ALL category-head batches)
+  //   3. STATE.webhookUrl (global fallback)
+  // Heads still get pinged via the @-mention in the message header regardless of
+  // which channel it lands in; this routing controls which channel/Slack workspace.
   if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
     var chqOverride = sharedCampaignOverride(items);
     if (chqOverride) return chqOverride;
+    if (webhookValid(STATE.categoryHeadWebhook)) return STATE.categoryHeadWebhook;
     return fallback;
   }
 
@@ -7138,34 +7307,53 @@ function sendPendingBatch(editor, opts) {
     batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
   }
 
+  // Multi-browser dedupe: claim the send slot atomically so two open browsers can't
+  // POST the same batch twice. The slot key is the editor recipient (e.g. "Sharm",
+  // "PM:UK", "CHQ:Sneakers"). If the claim loses the race, we silently skip \u2014 the
+  // winning browser's onSnapshot listener will sync the moved-to-sent state to all
+  // tabs within ~1 second, so the UI converges naturally.
+  // Slot key is namespaced under "batch:" to keep editor/PM/CHQ slots distinct from
+  // QC report slots (different keyspace under meta/sendSlots).
+  var slotKey = 'batch:' + editor;
   toast('Sending to Slack...', '');
-  postToSlack(url, msg).then(function(r) {
-    if (!r.ok) {
-      toast('Slack rejected the batch: "' + r.body + '"', 'error');
-      logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
+  claimSendSlot(slotKey).then(function(wonClaim) {
+    if (!wonClaim) {
+      // Another browser is already sending this batch (or just sent it within the
+      // dedupe window). Skip silently \u2014 we'd be sending a duplicate.
+      if (!silent) {
+        // Only show toast on manual sends so auto-fires don't nag the user.
+        toast('Already sent by another browser \u2014 check Slack', '');
+      }
       return;
     }
-    markSent('sent-live');
-    logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
-    toast('\u2713 Sent to Slack', 'success');
-    render();
-  }).catch(function(err) {
-    // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
-    fetch(url, {
-      method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: msg })
-    }).then(function() {
-      markSent('sent-blind');
-      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
-      toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
+    return postToSlack(url, msg).then(function(r) {
+      if (!r.ok) {
+        toast('Slack rejected the batch: "' + r.body + '"', 'error');
+        logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
+        return;
+      }
+      markSent('sent-live');
+      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
+      toast('\u2713 Sent to Slack', 'success');
       render();
-    }).catch(function(e2) {
-      var m = (e2 && e2.message) || (err && err.message) || 'network error';
-      var hint = (location.protocol === 'file:')
-        ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
-        : '';
-      toast('Send failed: ' + m + hint, 'error');
+    }).catch(function(err) {
+      // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
+      fetch(url, {
+        method: 'POST', mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: msg })
+      }).then(function() {
+        markSent('sent-blind');
+        logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
+        toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
+        render();
+      }).catch(function(e2) {
+        var m = (e2 && e2.message) || (err && err.message) || 'network error';
+        var hint = (location.protocol === 'file:')
+          ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
+          : '';
+        toast('Send failed: ' + m + hint, 'error');
+      });
     });
   });
 }
@@ -7221,45 +7409,56 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
   }
 
   toast('Sending ' + groups.length + ' country groups to Slack...', '');
-  var promises = groups.map(function(g) { return sendOneGroup(editor, g.items, g.country); });
 
-  Promise.all(promises).then(function(results) {
-    var succeededItems = [];      // items to move to sent log
-    var failedItems = [];          // items to keep in pending
-    var sentLogEntries = [];       // one per successful group
-    var successLabels = [];
-    var failureLabels = [];
+  // Multi-browser dedupe: claim the send slot so two browsers can't send the same
+  // split batch twice. We claim ONE slot for the whole split (not per country group)
+  // so the entire fan-out is atomic from the dedupe perspective \u2014 either this browser
+  // owns the send or it doesn't. Same key shape as the single-send path so the slot
+  // is shared across both code paths for a given editor.
+  var slotKey = 'batch:' + editor;
+  claimSendSlot(slotKey).then(function(wonClaim) {
+    if (!wonClaim) {
+      if (!silent) toast('Already sent by another browser \u2014 check Slack', '');
+      return;
+    }
+    var promises = groups.map(function(g) { return sendOneGroup(editor, g.items, g.country); });
+    Promise.all(promises).then(function(results) {
+      var succeededItems = [];      // items to move to sent log
+      var failedItems = [];          // items to keep in pending
+      var sentLogEntries = [];       // one per successful group
+      var successLabels = [];
+      var failureLabels = [];
 
-    results.forEach(function(res) {
-      if (res.ok) {
-        succeededItems = succeededItems.concat(res.items);
-        sentLogEntries.push({
-          time: timeStamp(),
-          sentAt: Date.now(),
-          editor: editor,
-          items: res.items,
-          reason: res.reason, // 'sent-live' or 'sent-blind'
-          body: res.msg
-        });
-        successLabels.push(res.country + (res.reason === 'sent-blind' ? ' (blind)' : ''));
-      } else {
-        failedItems = failedItems.concat(res.items);
-        failureLabels.push(res.country + ' \u2014 ' + res.err);
-        logAction('deleted', editor + ': split send failed for ' + res.country + ' \u2014 ' + res.err);
-      }
-    });
+      results.forEach(function(res) {
+        if (res.ok) {
+          succeededItems = succeededItems.concat(res.items);
+          sentLogEntries.push({
+            time: timeStamp(),
+            sentAt: Date.now(),
+            editor: editor,
+            items: res.items,
+            reason: res.reason, // 'sent-live' or 'sent-blind'
+            body: res.msg
+          });
+          successLabels.push(res.country + (res.reason === 'sent-blind' ? ' (blind)' : ''));
+        } else {
+          failedItems = failedItems.concat(res.items);
+          failureLabels.push(res.country + ' \u2014 ' + res.err);
+          logAction('deleted', editor + ': split send failed for ' + res.country + ' \u2014 ' + res.err);
+        }
+      });
 
-    // Update pending: keep failed items + any overflow beyond the size window
-    batch.items = failedItems.concat(extraItems);
-    batch.firstQueuedAt = batch.items.length > 0 ? Date.now() : null;
+      // Update pending: keep failed items + any overflow beyond the size window
+      batch.items = failedItems.concat(extraItems);
+      batch.firstQueuedAt = batch.items.length > 0 ? Date.now() : null;
 
-    // Push sent-log entries (newest first, as usual)
-    sentLogEntries.forEach(function(entry) {
-      STATE.sentNotifications.unshift(entry);
-    });
-    while (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+      // Push sent-log entries (newest first, as usual)
+      sentLogEntries.forEach(function(entry) {
+        STATE.sentNotifications.unshift(entry);
+      });
+      while (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
 
-    // Activity log + user-facing toast
+      // Activity log + user-facing toast
     if (successLabels.length > 0) {
       logAction('notified', editor + ' \u2014 split send: ' + successLabels.join(', ') + ' \u2713');
     }
@@ -7271,7 +7470,8 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
       toast(successLabels.length + ' sent \u2713 \u00B7 ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
     }
     render();
-  });
+    }); // close Promise.all().then
+  }); // close claimSendSlot().then
 }
 
 // Re-send an entry from the sent notifications log (idempotent: doesn't modify state).
@@ -9233,6 +9433,56 @@ var App = {
     }
   },
   testWebhook: testWebhookPing,
+
+  // Category-head webhook \u2014 single URL for ALL category-head batches. Save and test
+  // mirror the global webhook flow above; tests POST a short ping with the canonical
+  // helper so the user can verify Slack accepts the channel before live data flows.
+  saveCategoryHeadWebhook: function() {
+    var input = document.getElementById('cathead-webhook-input');
+    if (!input) return;
+    var trimmed = (input.value || '').trim();
+    if (STATE.categoryHeadWebhook === trimmed) {
+      toast('Category Head webhook unchanged', '');
+      return;
+    }
+    STATE.categoryHeadWebhook = trimmed;
+    saveState();
+    logAction('updated', 'Category Head Slack webhook ' + (trimmed === '' ? 'cleared (will fall back to global)' : 'updated'));
+    var msg = trimmed === ''
+      ? 'Category Head webhook cleared \u2014 batches will fall back to the global webhook'
+      : (webhookValid(trimmed) ? 'Category Head webhook saved' : 'Saved, but that URL doesn\u2019t look like a real Slack webhook');
+    toast(msg, webhookValid(trimmed) || trimmed === '' ? 'success' : 'error');
+    render();
+  },
+  testCategoryHeadWebhook: function() {
+    var input = document.getElementById('cathead-webhook-input');
+    var url = input ? input.value.trim() : (STATE.categoryHeadWebhook || '');
+    if (!url) {
+      toast('No Category Head webhook set \u2014 paste one first', 'error');
+      return;
+    }
+    if (!looksLikeWebhookUrl(url)) {
+      toast('That URL doesn\u2019t look like a Slack incoming webhook', 'error');
+      return;
+    }
+    if (isPlaceholderWebhook(url)) {
+      toast('That webhook URL looks like a placeholder', 'error');
+      return;
+    }
+    // Save-then-test, mirroring the per-country flow.
+    if (STATE.categoryHeadWebhook !== url) {
+      STATE.categoryHeadWebhook = url;
+      saveState();
+      logAction('updated', 'Category Head Slack webhook updated (via Test button)');
+    }
+    var msg = ':mag: *Category Head QC test ping* \u2014 if you can see this, the webhook is wired up.';
+    postToSlack(url, msg).then(function(r) {
+      if (r.ok) toast('\u2713 Category Head test ping sent \u2014 check Slack', 'success');
+      else toast('Slack rejected the test ping (HTTP ' + r.status + ')', 'error');
+    }).catch(function(e) {
+      toast('Network error: ' + (e && e.message ? e.message : 'unknown'), 'error');
+    });
+  },
   saveCountryWebhook: function(code, url) {
     var trimmed = (url || '').trim();
     if (!STATE.countryWebhooks) STATE.countryWebhooks = {};
@@ -9342,28 +9592,37 @@ var App = {
     var msg = buildQcReportMessage(campaignId);
     if (!msg) { toast('Nothing flagged Missing files or Missing prices in this campaign', 'error'); return; }
     toast('Sending QC report for ' + camp.name + '...', '');
-    postToSlack(url, msg).then(function(r) {
-      if (r.ok) {
-        // Append to sent log so the QC report has the same audit trail as other sends.
-        // Synthesize a recipient key 'QC:<country>' and a 'manual' reason.
-        STATE.sentNotifications.unshift({
-          time: timeStamp(), sentAt: Date.now(),
-          editor: 'QC:' + camp.country, items: [], reason: 'sent-live', body: msg
-        });
-        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-        // Dismiss this sub-campaign's QC card. Non-persisted \u2014 card reappears on page
-        // refresh, or if any QC value in this sub-campaign changes (handled in setAssetQc).
-        if (!STATE.qcDismissed) STATE.qcDismissed = {};
-        STATE.qcDismissed[camp.id] = Date.now();
-        logAction('notified', 'QC report sent for ' + camp.country + ' \u00B7 ' + camp.name);
-        toast('\u2713 QC report sent for ' + camp.name, 'success');
-        render();
-      } else {
-        toast('Slack rejected the QC report: "' + r.body + '" (HTTP ' + r.status + ')', 'error');
-        logAction('deleted', 'QC report send failed for ' + camp.name + ': ' + r.body);
+    // Multi-browser dedupe: claim the send slot so two PMs clicking simultaneously
+    // don't both POST the same QC report.
+    var slotKey = 'qc:' + campaignId;
+    claimSendSlot(slotKey).then(function(wonClaim) {
+      if (!wonClaim) {
+        toast('QC report for ' + camp.name + ' was just sent by another browser', '');
+        return;
       }
-    }).catch(function(e) {
-      toast('Network error sending QC report: ' + (e && e.message ? e.message : 'unknown'), 'error');
+      return postToSlack(url, msg).then(function(r) {
+        if (r.ok) {
+          // Append to sent log so the QC report has the same audit trail as other sends.
+          // Synthesize a recipient key 'QC:<country>' and a 'manual' reason.
+          STATE.sentNotifications.unshift({
+            time: timeStamp(), sentAt: Date.now(),
+            editor: 'QC:' + camp.country, items: [], reason: 'sent-live', body: msg
+          });
+          if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+          // Dismiss this sub-campaign's QC card. Non-persisted \u2014 card reappears on page
+          // refresh, or if any QC value in this sub-campaign changes (handled in setAssetQc).
+          if (!STATE.qcDismissed) STATE.qcDismissed = {};
+          STATE.qcDismissed[camp.id] = Date.now();
+          logAction('notified', 'QC report sent for ' + camp.country + ' \u00B7 ' + camp.name);
+          toast('\u2713 QC report sent for ' + camp.name, 'success');
+          render();
+        } else {
+          toast('Slack rejected the QC report: "' + r.body + '" (HTTP ' + r.status + ')', 'error');
+          logAction('deleted', 'QC report send failed for ' + camp.name + ': ' + r.body);
+        }
+      }).catch(function(e) {
+        toast('Network error sending QC report: ' + (e && e.message ? e.message : 'unknown'), 'error');
+      });
     });
   },
 
