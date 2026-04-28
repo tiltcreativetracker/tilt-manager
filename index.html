@@ -3476,6 +3476,44 @@ function releaseScheduled() {
 //   \u2022 a \u2715 delete button (disabled when the selected category is in use by any campaign)
 //   \u2022 a "\u2795 New" button that reveals an inline text input for adding a category
 // All three mutate STATE.categories and refresh this picker in-place without closing the modal.
+// Build the Month/Year dropdown for the Add/Edit Campaign modals. Generates 24 options
+// covering the current year and the next year (e.g. Jan 2026 \u2192 Dec 2027). The leading
+// option is "\u2014 No month set \u2014" with empty value, so the field is fully optional.
+// `selected` is an ISO 'YYYY-MM' string (or empty).
+function monthYearPickerHtml(selected) {
+  var now = new Date();
+  var startYear = now.getFullYear();
+  var opts = ['<option value=""' + (!selected ? ' selected' : '') + '>\u2014 No month set \u2014</option>'];
+  for (var y = startYear; y <= startYear + 1; y++) {
+    for (var m = 0; m < 12; m++) {
+      var iso = y + '-' + (m < 9 ? '0' + (m + 1) : (m + 1));
+      var label = MONTH_SHORT[m] + ' ' + y;
+      var sel = (selected === iso) ? ' selected' : '';
+      opts.push('<option value="' + iso + '"' + sel + '>' + label + '</option>');
+    }
+  }
+  // If the selected value is OUTSIDE this 24-month window (legacy campaign in past year
+  // or far future), still show it as an option so we don't silently lose it on save.
+  if (selected) {
+    var inRange = false;
+    for (var yy = startYear; yy <= startYear + 1 && !inRange; yy++) {
+      for (var mm = 0; mm < 12 && !inRange; mm++) {
+        var isoCheck = yy + '-' + (mm < 9 ? '0' + (mm + 1) : (mm + 1));
+        if (isoCheck === selected) inRange = true;
+      }
+    }
+    if (!inRange && /^\d{4}-\d{2}$/.test(selected)) {
+      var sy = selected.slice(0, 4);
+      var sm = parseInt(selected.slice(5, 7), 10) - 1;
+      opts.splice(1, 0, '<option value="' + selected + '" selected>' + MONTH_SHORT[sm] + ' ' + sy + ' (existing)</option>');
+    }
+  }
+  return '<div class="form-row">' +
+    '<label class="form-label">Month / Year <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
+    '<select id="f-cmonth" class="form-select">' + opts.join('') + '</select>' +
+  '</div>';
+}
+
 function categoryPickerHtml(selected) {
   var opts = STATE.categories.length === 0
     ? '<option value="" disabled selected>\u2014 no categories \u2014</option>'
@@ -3584,6 +3622,7 @@ function showAddSubCampaignModal(forCountry) {
       '<div class="form-row"><label class="form-label">Country</label><select id="f-ccountry" class="form-select">' + countryOpts + '</select></div>' +
       '<div class="form-row"><label class="form-label">Type</label><select id="f-ctype" class="form-select">' + typeOpts + '</select></div>' +
       categoryPickerHtml('') +
+      monthYearPickerHtml('') +
       '<div class="form-row full">' +
         '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
           '<label class="form-label" style="margin:0;">Raw Files</label>' +
@@ -3632,6 +3671,7 @@ function showAddSubCampaignModal(forCountry) {
       type: document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE,
       driveId: document.getElementById('f-cdrive').value,
       slackOverride: document.getElementById('f-cslack').value,
+      monthYear: document.getElementById('f-cmonth').value || '',
       hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked
     };
     STATE.campaigns.push(camp);
@@ -3663,6 +3703,7 @@ function showEditCampaignModal() {
       '<div class="form-row"><label class="form-label">Country</label><select id="f-ccountry" class="form-select">' + countryOpts + '</select></div>' +
       '<div class="form-row"><label class="form-label">Type</label><select id="f-ctype" class="form-select">' + typeOpts + '</select></div>' +
       categoryPickerHtml(c.category) +
+      monthYearPickerHtml(c.monthYear || '') +
       (function() {
         var briefUrl = extractSingleUrl(c.brief);
         var driveUrl = extractSingleUrl(c.driveId);
@@ -3712,6 +3753,7 @@ function showEditCampaignModal() {
     c.type = document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE;
     c.driveId = document.getElementById('f-cdrive').value;
     c.slackOverride = document.getElementById('f-cslack').value;
+    c.monthYear = document.getElementById('f-cmonth').value || '';
     c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
     reorderCampaigns(true);
     STATE.expandedCountries[c.country] = true;
@@ -4143,32 +4185,27 @@ function renderTopbar() {
 
 function renderSidebar() {
   var compact = !!STATE.sidebarCompact;
-  // Build the set of months that exist across all videos' estDelivery dates. Used to
-  // populate the month-filter dropdown so we don't list months with zero activity.
-  // Each entry is an ISO 'YYYY-MM' string. Sorted ascending.
+  // Build the set of months that exist across all campaigns' explicit monthYear field.
+  // Used to populate the month-filter dropdown so we don't list months with zero
+  // assigned campaigns. Each entry is an ISO 'YYYY-MM' string. Sorted ascending.
   var monthSet = {};
   var hasAnyUndated = false;
-  STATE.assets.forEach(function(a) {
-    var iso = (a.estDelivery || '').slice(0, 7); // 'YYYY-MM'
+  STATE.campaigns.forEach(function(c) {
+    var iso = (c.monthYear || '').slice(0, 7);
     if (iso && /^\d{4}-\d{2}$/.test(iso)) monthSet[iso] = true;
     else hasAnyUndated = true;
   });
   var months = Object.keys(monthSet).sort();
   var activeFilter = STATE.sidebarMonthFilter || 'all';
 
-  // Helper: does a campaign contain any asset whose estDelivery month matches the active
-  // filter? 'all' = always yes. 'none' = matches if any asset has no estDelivery. 'YYYY-MM'
-  // = matches if any asset's estDelivery starts with that string.
-  function campMatchesMonthFilter(campaignId) {
+  // Helper: does this campaign's monthYear match the active filter?
+  // 'all' = always yes. 'none' = matches if campaign has no monthYear set.
+  // 'YYYY-MM' = matches if campaign.monthYear equals it exactly.
+  function campMatchesMonthFilter(campaign) {
     if (activeFilter === 'all') return true;
-    var assetsInCamp = STATE.assets.filter(function(a) { return a.campaignId === campaignId; });
-    if (assetsInCamp.length === 0) return false; // empty campaign \u2014 no videos to match
-    if (activeFilter === 'none') {
-      return assetsInCamp.some(function(a) { return !a.estDelivery; });
-    }
-    return assetsInCamp.some(function(a) {
-      return (a.estDelivery || '').slice(0, 7) === activeFilter;
-    });
+    var cm = (campaign.monthYear || '').slice(0, 7);
+    if (activeFilter === 'none') return !cm;
+    return cm === activeFilter;
   }
 
   var html = '';
@@ -4177,7 +4214,7 @@ function renderSidebar() {
     var allSubs = getSubCampaignsForCountry(country.code);
     // Apply the month filter to get what's actually visible. We render the country header
     // only if at least one of its campaigns survives the filter (avoids empty country rows).
-    var subs = allSubs.filter(function(s) { return campMatchesMonthFilter(s.id); });
+    var subs = allSubs.filter(function(s) { return campMatchesMonthFilter(s); });
     if (activeFilter !== 'all' && subs.length === 0) continue; // hide empty country in filter mode
     var isOpen = STATE.expandedCountries[country.code];
     var chevron = isOpen ? '\u25BE' : '\u25B8';
@@ -4396,6 +4433,14 @@ function renderCampaignsView() {
     '<span class="meta-chip"><span class="meta-chip-label">rank</span>' + camp.rank + ' / ' + getSubCampaignsForCountry(camp.country).length + '</span>' +
     '<span class="meta-chip"><span class="meta-chip-label">assets</span>' + totalForCamp + '</span>' +
     '<span class="meta-chip"><span class="meta-chip-label">approved</span>' + approved + '/' + totalForCamp + '</span>' +
+    (function() {
+      // Month/Year chip \u2014 only shown if the campaign has one set. Format 'YYYY-MM' \u2192 'Apr 2026'.
+      var my = (camp.monthYear || '').trim();
+      if (!/^\d{4}-\d{2}$/.test(my)) return '';
+      var y = my.slice(0, 4);
+      var m = parseInt(my.slice(5, 7), 10) - 1;
+      return '<span class="meta-chip"><span class="meta-chip-label">month</span>' + MONTH_SHORT[m] + ' ' + y + '</span>';
+    })() +
     drivePill +
     briefPill +
     (function() {
@@ -8715,6 +8760,11 @@ var App = {
       category: source.category,
       rank: 0, // will be fixed by reorderCampaigns below
       driveId: source.driveId || '',
+      brief: source.brief || '',
+      type: source.type || DEFAULT_CAMPAIGN_TYPE,
+      monthYear: source.monthYear || '',
+      slackOverride: source.slackOverride || '',
+      hideAssetLinkCols: !!source.hideAssetLinkCols,
       notionBrief: source.notionBrief || '',
       finalVideoUrl: source.finalVideoUrl || ''
     };
