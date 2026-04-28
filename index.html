@@ -110,7 +110,7 @@
   .rank-badge { width: 20px; height: 20px; border-radius: 4px; background: var(--bg4); color: var(--text2); font-size: 10.5px; font-weight: 600; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
   .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
+  .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); line-height: 1.25; text-align: center; max-width: 96px; word-break: break-word; overflow-wrap: break-word; hyphens: none; }
   /* Editable variant — pill is a visible div (sizes naturally to its content)
      with an invisible <select> overlaid on top for click handling. Sidesteps
      the native <select> sizing problem where the element is sized to fit the
@@ -573,6 +573,9 @@
      without it being visually loud. Edit-mode input uses accent-colored border + focus ring. */
   .editable-cell { cursor: text; padding: 3px 6px; margin: -3px -6px; border-radius: 4px; border: 1px solid transparent; transition: background 0.1s, border-color 0.1s; min-height: 24px; display: block; }
   .editable-cell:hover { background: var(--bg3); border-color: var(--border); }
+  /* Read-only cells (e.g. derived version pill) don't get the click-to-edit affordance */
+  .editable-cell-readonly { cursor: default; padding: 3px 6px; margin: -3px -6px; min-height: 24px; display: block; }
+  .editable-cell-readonly:hover { background: transparent; border-color: transparent; }
   .inline-edit-input { width: 100%; padding: 4px 7px; border-radius: 4px; border: 1px solid var(--accent); background: var(--bg3); color: var(--text1); font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; box-sizing: border-box; }
   .inline-edit-input:focus { border-color: var(--accent2); box-shadow: 0 0 0 2px var(--accent-dim); }
   .inline-edit-input[type="date"] { min-width: 130px; }
@@ -2221,6 +2224,51 @@ function statusClass(s) { return 'st-' + s.replace(/ /g, '_'); }
 // Cleared after commit/cancel. Not persisted \u2014 purely a UI mode.
 var EditState = { assetId: null, field: null };
 
+// Undo system for video-field edits. Each user-initiated mutation snapshots the asset's
+// pre-change values onto a stack; Ctrl+Z (or Cmd+Z) pops the most recent snapshot and
+// restores those fields. Capped at 30 entries so memory stays bounded. The stack is
+// session-only \u2014 not persisted to localStorage or Firestore (undo across reloads would
+// clash with cross-user state, since other people's edits arrive via onSnapshot too).
+var UndoStack = [];
+var _undoSuppressRecording = false; // set during undo() so we don't record the restore as a new edit
+var UNDO_STACK_LIMIT = 30;
+
+// Record a pre-change snapshot for one asset. Call BEFORE mutating the fields.
+//   asset:  the asset object being mutated
+//   fields: array of field names whose previous values to capture (e.g. ['status'])
+//   label:  short human-readable description for the toast (e.g. 'status: Approved \u2192 For Review')
+function recordUndo(asset, fields, label) {
+  if (_undoSuppressRecording) return; // ignore recording during undo()
+  if (!asset || !fields || !fields.length) return;
+  var snap = { assetId: asset.id, fields: {}, label: label || 'edit', at: Date.now() };
+  fields.forEach(function(f) { snap.fields[f] = asset[f]; });
+  UndoStack.push(snap);
+  if (UndoStack.length > UNDO_STACK_LIMIT) UndoStack.shift();
+}
+
+// Pop the most recent snapshot and restore its fields onto the asset. No-ops if the
+// stack is empty or the asset has been deleted.
+function undoLastEdit() {
+  if (UndoStack.length === 0) { toast('Nothing to undo', ''); return; }
+  var snap = UndoStack.pop();
+  var asset = null;
+  for (var i = 0; i < STATE.assets.length; i++) {
+    if (STATE.assets[i].id === snap.assetId) { asset = STATE.assets[i]; break; }
+  }
+  if (!asset) { toast('Cannot undo \u2014 video was deleted', 'error'); return; }
+  _undoSuppressRecording = true;
+  try {
+    Object.keys(snap.fields).forEach(function(k) { asset[k] = snap.fields[k]; });
+  } finally {
+    _undoSuppressRecording = false;
+  }
+  logAction('updated', 'Undo: "' + asset.name + '" \u2014 ' + snap.label);
+  toast('Undone: ' + snap.label, 'success');
+  // Persist the restored value (saveState() flushes to Firestore + localStorage)
+  if (typeof saveState === 'function') saveState();
+  render();
+}
+
 // Transient state for the Today kanban drag-and-drop. Holds the id of the asset
 // currently being dragged. Cleared on dragend or successful drop. Not persisted.
 var TodayDragState = { assetId: null };
@@ -2239,10 +2287,14 @@ var EDITABLE_FIELDS = {
   },
   version: {
     kind: 'text',
-    // Rendered next to the name cell in the row template as its own click target so
-    // users can edit the version tag independently without triggering name editing.
-    display: function(a) { return '<span class="version-tag">' + escapeHtml(a.version) + '</span>'; },
-    value: function(a) { return a.version; },
+    // Variation/version is now DERIVED from the asset name. Look for the last `_V\d+`
+    // token (case-insensitive) in the name, e.g. 'Luxury_1N_..._V2' -> 'V2'. If the name
+    // has no version token, fall back to the stored asset.version (legacy data) or 'V1'.
+    // The pill is rendered as read-only \u2014 inline editing is disabled because the value
+    // is sourced from the filename. To change the version, rename the file.
+    display: function(a) { return '<span class="version-tag" title="Derived from file name. Rename the file to change.">' + escapeHtml(deriveVersionFromName(a)) + '</span>'; },
+    value: function(a) { return deriveVersionFromName(a); },
+    readOnly: true,
     appMethod: 'setAssetVersion'
   },
   difficulty: {
@@ -2338,6 +2390,27 @@ var EDITABLE_FIELDS = {
 // Render a <td>'s inner content for an editable field. When not in edit mode, wraps the
 // read-only display in a clickable overlay. When in edit mode, renders the matching input.
 // The whole cell commits on Enter/blur (per user spec), cancels on Escape.
+// Extract the variation/version label from an asset's file name. Looks for the LAST
+// `_V<digits>` token in the name (case-insensitive). Examples:
+//   'Luxury_1N_PrivilegeSupply_GRWM_V2'  -> 'V2'
+//   'Bags_5_Apparel_Lookbook_V10'        -> 'V10'
+//   'something_v3_extra_v5_final'        -> 'V5' (last match wins)
+//   'no_version_in_this_one'             -> falls back to a.version || 'V1'
+// If the name yields no match, we fall back to the stored asset.version (legacy data
+// migrated from when this was an editable field) or 'V1' as the ultimate default.
+function deriveVersionFromName(asset) {
+  if (!asset) return 'V1';
+  var name = asset.name || '';
+  // Match underscore-V-digits, case-insensitive, capturing the digits. Use g flag and
+  // walk all matches to pick the LAST one \u2014 robust against unusual filenames where the
+  // variation marker isn't the very last token.
+  var re = /_v(\d+)/gi;
+  var match, last = null;
+  while ((match = re.exec(name)) !== null) last = match;
+  if (last) return 'V' + last[1];
+  return asset.version || 'V1';
+}
+
 function renderEditableCell(asset, field) {
   var def = EDITABLE_FIELDS[field];
   if (!def) return '';
@@ -2359,6 +2432,11 @@ function renderEditableCell(asset, field) {
   }
 
   if (!editing) {
+    // readOnly fields render the display only; no click-to-edit (e.g. version pill is
+    // derived from filename, edit happens by renaming).
+    if (def.readOnly) {
+      return '<div class="editable-cell editable-cell-readonly">' + def.display(asset) + '</div>';
+    }
     return '<div class="editable-cell" onclick="App.startEdit(' + asset.id + ', \'' + field + '\')" title="Click to edit ' + field + '">' +
       def.display(asset) +
     '</div>';
@@ -4561,6 +4639,55 @@ function renderSchedulerView() {
     '</div></div>';
 }
 
+// Drag-lock for To Do columns is now persisted as `a.dragLocked: true` on each asset.
+// When the user drops a card into a manual position within the To Do column, that flag
+// is set, and the ETA-based sort below respects the manual position. The flag rides
+// through saveState() to Firestore + localStorage, so all teammates see the same
+// custom order. Cleared automatically when the card transitions OUT of Assigned status
+// (since it leaves the To Do column entirely and the lock is no longer meaningful).
+
+// Sort the To Do column items by Estimated Delivery (soonest first) while preserving
+// the position of items that have no ETA OR have been manually drag-positioned. The
+// algorithm is a stable partition + merge:
+//
+//   1. Walk items keeping track of (item, originalIndex)
+//   2. Partition into "sortable" (has ETA, not drag-locked) and "preserved" (everything
+//      else, with their original index recorded)
+//   3. Sort the sortable bucket by ETA ascending
+//   4. Re-assemble: build a result array of the same length, drop preserved items at
+//      their original indices, then fill the gaps with sorted sortable items in order
+//
+// Result: cards with an ETA and no manual drag get reorganized soonest-first; cards
+// without an ETA or that were drag-positioned keep their slot.
+function sortTodoBucketByEta(items) {
+  if (!items || items.length < 2) return items;
+  var sortable = [];
+  var preserved = []; // {item, idx}
+  items.forEach(function(a, i) {
+    var isLocked = !!a.dragLocked;
+    if (!a.estDelivery || isLocked) preserved.push({ item: a, idx: i });
+    else sortable.push(a);
+  });
+  // Sort sortable items by ETA ascending. Stable: same-ETA items keep their original order
+  // (Array.prototype.sort is stable in all evergreen browsers).
+  sortable.sort(function(a, b) {
+    if (a.estDelivery < b.estDelivery) return -1;
+    if (a.estDelivery > b.estDelivery) return 1;
+    return 0;
+  });
+  // Reassemble into the final output: preserved items keep their original index,
+  // sortable items fill the remaining slots in their newly-sorted order.
+  var out = new Array(items.length);
+  preserved.forEach(function(p) { out[p.idx] = p.item; });
+  var s = 0;
+  for (var i = 0; i < out.length; i++) {
+    if (out[i] === undefined) {
+      out[i] = sortable[s++];
+    }
+  }
+  return out;
+}
+
 // ===================== TODAY KANBAN BOARD =====================
 // Four columns on one board: To Do Today, In Progress, Done for Review, Approved.
 // Cards are draggable between columns \u2014 dropping flips the asset's status and fires
@@ -4590,6 +4717,9 @@ function getTodayBoardBuckets() {
     else if (a.status === 'For Review' || a.status === 'Needs Revisions') buckets.review.items.push(a);
     else if (a.status === 'Approved' && a.dateApproved === today) buckets.approved.items.push(a);
   });
+  // Sort the To Do column by Estimated Delivery (soonest first), preserving manually-
+  // dragged items and items without an ETA. Other columns keep their natural array order.
+  buckets.todo.items = sortTodoBucketByEta(buckets.todo.items);
   return buckets;
 }
 
@@ -4624,6 +4754,9 @@ function getThisWeekBoardBuckets() {
       buckets.approved.items.push(a);
     }
   });
+  // Sort the To Do This Week column by Estimated Delivery (soonest first). Other columns
+  // keep their natural array order so drag-to-reorder behaves as expected.
+  buckets.todo.items = sortTodoBucketByEta(buckets.todo.items);
   return buckets;
 }
 
@@ -4773,6 +4906,11 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
     if (targetStatus === 'Approved' && oldStatus !== 'Approved' && !a.dateApproved) {
       a.dateApproved = todayISO();
     }
+    // Card is leaving the To Do column \u2014 clear any drag-lock so it doesn't follow the
+    // card around to other columns. Drag-lock only makes sense within Assigned/To Do.
+    if (oldStatus === 'Assigned' && targetStatus !== 'Assigned') {
+      a.dragLocked = false;
+    }
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + targetStatus);
     emitAssetChangeNotifications(a, { oldEditor: oldEditor, oldStatus: oldStatus });
   }
@@ -4789,6 +4927,12 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   } else {
     // 'end' or any unknown placement \u2014 just append.
     STATE.assets.push(a);
+  }
+  // Mark this asset as drag-locked so subsequent renders preserve the manual position
+  // against the To Do column's ETA-sort. Only meaningful while the card is Assigned;
+  // status change to anything else clears the flag (above).
+  if (a.status === 'Assigned') {
+    a.dragLocked = true;
   }
   render();
 }
@@ -5204,33 +5348,22 @@ function computeDailyLog(days) {
     // are ignored \u2014 the tab is for tracking per-editor accountability on live work.
     if (!a.editor || DAILY_LOG_EDITORS.indexOf(a.editor) < 0) return;
     var statusByDay = days.map(function(d) { return getAssetStateOnDay(a, d).status || 'Draft'; });
-    // Only include videos that had SOMETHING going on during the window
-    // (i.e. not just Draft for every day). Otherwise long-inactive drafts
-    // would clutter the view.
+    // Show this video in the editor's list if EITHER:
+    //   (a) it had any non-Draft status during the visible week (in flight), OR
+    //   (b) it was approved on a day in the visible week (dateApproved match)
     var hadActivity = false;
     for (var i = 0; i < statusByDay.length; i++) {
       if (statusByDay[i] && statusByDay[i] !== 'Draft') { hadActivity = true; break; }
     }
-    if (!hadActivity) return;
+    var approvedThisWeek = a.dateApproved && days.indexOf(a.dateApproved) >= 0;
+    if (!hadActivity && !approvedThisWeek) return;
     byEditor[a.editor].videos.push({ asset: a, statusByDay: statusByDay });
-    // Count approvals per day: video transitioned INTO Approved ON that day.
-    // Approximation: if statusByDay[i] === 'Approved' and statusByDay[i-1] !== 'Approved'.
-    // For the first day (no prior), only count if dateApproved === days[0].
-    for (var j = 0; j < statusByDay.length; j++) {
-      if (statusByDay[j] === 'Approved') {
-        var prior = j > 0 ? statusByDay[j - 1] : null;
-        if (prior !== 'Approved') {
-          // Was it newly approved this day? Use dateApproved as tie-breaker.
-          if (j === 0) {
-            // First day in window: count only if dateApproved matches this day.
-            if (a.dateApproved === days[0]) {
-              byEditor[a.editor].approvedByDay[j]++;
-            }
-          } else {
-            byEditor[a.editor].approvedByDay[j]++;
-          }
-        }
-      }
+    // Per-day approval count: strictly based on the asset's dateApproved field. If the
+    // editor approves a video and stamps dateApproved=2026-04-28, that's the day it
+    // counts \u2014 not the day status flipped (those can disagree). One video = one day.
+    if (a.dateApproved) {
+      var idx = days.indexOf(a.dateApproved);
+      if (idx >= 0) byEditor[a.editor].approvedByDay[idx]++;
     }
   });
 
@@ -7545,6 +7678,7 @@ var App = {
       return;
     }
     var oldStatus = a.status;
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
     // Capture pre-change snapshot BEFORE mutating, then determine what the
     // full change-set ended up being (status can also cascade into assignedAt
     // and dateApproved). Push the version after the mutation is complete.
@@ -7558,6 +7692,12 @@ var App = {
     // daily / weekly / monthly tally math.
     if (newStatus === 'Approved' && oldStatus !== 'Approved' && !a.dateApproved) {
       a.dateApproved = todayISO();
+    }
+    // Card leaving the To Do column \u2014 clear drag-lock so it doesn't follow the card to
+    // other status columns. Also clear when card transitions INTO Assigned from elsewhere
+    // (it should sort by ETA cleanly when freshly arriving).
+    if ((oldStatus === 'Assigned' && newStatus !== 'Assigned') || (newStatus === 'Assigned' && oldStatus !== 'Assigned')) {
+      a.dragLocked = false;
     }
     pushVersion(a, vhPre, diffSnapshots(vhPre, snapshotAsset(a)));
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + newStatus);
@@ -7778,6 +7918,7 @@ var App = {
     if (!trimmed) { toast('Video name cannot be empty', 'error'); render(); return; }
     if (a.name === trimmed) { render(); return; }
     var old = a.name;
+    recordUndo(a, ['name'], 'name: "' + old + '" \u2192 "' + trimmed + '"');
     var vhPre = snapshotAsset(a);
     a.name = trimmed;
     pushVersion(a, vhPre, ['name']);
@@ -7805,6 +7946,7 @@ var App = {
     if (DIFFICULTIES.indexOf(newDiff) < 0) { render(); return; } // invalid \u2014 ignore
     if (a.difficulty === newDiff) { render(); return; }
     var old = a.difficulty;
+    recordUndo(a, ['difficulty'], 'difficulty: ' + old + ' \u2192 ' + newDiff);
     var vhPre = snapshotAsset(a);
     a.difficulty = newDiff;
     pushVersion(a, vhPre, ['difficulty']);
@@ -7824,6 +7966,7 @@ var App = {
     if (validNames.indexOf(newCat) < 0) { render(); return; } // unknown \u2014 ignore
     if (a.category === newCat) { render(); return; }
     var old = a.category;
+    recordUndo(a, ['category'], 'category: ' + old + ' \u2192 ' + newCat);
     var vhPre = snapshotAsset(a);
     a.category = newCat;
     pushVersion(a, vhPre, ['category']);
@@ -7843,6 +7986,7 @@ var App = {
     if (a.editor === cleanEditor) { render(); return; }
     var oldEditor = a.editor;
     var oldStatus = a.status;
+    recordUndo(a, ['editor', 'status', 'assignedAt'], 'editor: ' + (oldEditor || 'unassigned') + ' \u2192 ' + (cleanEditor || 'unassigned'));
     // Same auto-status rules as the modal (applyEditorAutoStatus).
     // Note: applyEditorAutoStatus expects (oldEditor, newEditor, oldStatus, chosenStatus).
     // In inline-edit context, "chosenStatus" is the current status (user isn't changing it here).
@@ -7870,6 +8014,7 @@ var App = {
     // <input type="date"> gives us 'YYYY-MM-DD' or '' directly. Normalize defensively anyway.
     var iso = toISODate(newDate);
     if (a.estDelivery === iso) { render(); return; }
+    recordUndo(a, ['estDelivery'], 'ETA: ' + (a.estDelivery ? formatDate(a.estDelivery) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     var vhPre = snapshotAsset(a);
     a.estDelivery = iso;
     pushVersion(a, vhPre, ['estDelivery']);
@@ -7883,6 +8028,7 @@ var App = {
     if (!a) return;
     var iso = toISODate(newDate);
     if (a.dateApproved === iso) { render(); return; }
+    recordUndo(a, ['dateApproved'], 'date approved: ' + (a.dateApproved ? formatDate(a.dateApproved) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     var vhPre = snapshotAsset(a);
     a.dateApproved = iso;
     pushVersion(a, vhPre, ['dateApproved']);
@@ -7906,6 +8052,7 @@ var App = {
       render();
       return;
     }
+    recordUndo(a, ['rawVideo'], 'raw video link');
     var vhPre = snapshotAsset(a);
     a.rawVideo = trimmed;
     pushVersion(a, vhPre, ['rawVideo']);
@@ -7925,6 +8072,7 @@ var App = {
       render();
       return;
     }
+    recordUndo(a, ['editingBrief'], 'editing brief link');
     var vhPre = snapshotAsset(a);
     a.editingBrief = trimmed;
     pushVersion(a, vhPre, ['editingBrief']);
@@ -7944,6 +8092,7 @@ var App = {
       render();
       return;
     }
+    recordUndo(a, ['finalVideo'], 'final video link');
     // Auto-snapshot: capture the full pre-change state so the user can restore
     // any prior delivery. See VERSION HISTORY HELPERS comment block above.
     var vhPre = snapshotAsset(a);
@@ -7962,6 +8111,7 @@ var App = {
     if (QC_VALUES.indexOf(newQc) < 0) { render(); return; }
     var old = a.qc || 'Draft';
     if (old === newQc) { render(); return; }
+    recordUndo(a, ['qc'], 'QC: ' + old + ' \u2192 ' + newQc);
     var vhPre = snapshotAsset(a);
     a.qc = newQc;
     pushVersion(a, vhPre, ['qc']);
@@ -9291,6 +9441,23 @@ document.addEventListener('keydown', function(e) {
     if (SidebarEditState.renameCampId !== null) { App.cancelRenameSubcamp(); return; }
     if (ContextMenuState.subcampId !== null) { App.hideSubcampContextMenu(); return; }
     closeModal();
+    return;
+  }
+  // Cmd+Z (Mac) or Ctrl+Z (Windows/Linux) \u2014 undo most recent video field edit. Skip when
+  // the user is typing in an input/textarea/select/contenteditable so native undo for the
+  // text input still works. Shift+Cmd+Z (which would normally be redo) is left alone since
+  // we don't currently support redo.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    var t = e.target;
+    var inEditable = false;
+    if (t && t.tagName) {
+      var tag = t.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') inEditable = true;
+      if (t.isContentEditable) inEditable = true;
+    }
+    if (inEditable) return; // let native undo handle text editing
+    e.preventDefault();
+    undoLastEdit();
   }
 });
 // Dismiss the right-click menu on any click outside it. Listener is in the capture phase
