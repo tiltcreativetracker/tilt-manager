@@ -54,6 +54,15 @@
   .sidebar-toggle { background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text3); cursor: pointer; font-size: 12px; padding: 2px 7px; font-family: 'JetBrains Mono', monospace; transition: all 0.12s; line-height: 1; }
   .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
 
+  /* Sidebar month filter \u2014 sits at the top of .sidebar-scroll, hidden in compact mode */
+  .sidebar-month-filter { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 5px; border-bottom: 1px solid var(--border); margin-bottom: 8px; position: relative; }
+  .sidebar-month-label { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text3); }
+  .sidebar-month-select { width: 100%; padding: 6px 8px; background: var(--bg3); color: var(--text1); border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 12px; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23999' d='M0 0l5 6 5-6z'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px; }
+  .sidebar-month-select:hover { border-color: var(--accent); }
+  .sidebar-month-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  .sidebar-month-clear { position: absolute; top: 30px; right: 28px; background: transparent; border: none; color: var(--text3); cursor: pointer; font-size: 11px; padding: 2px 4px; line-height: 1; transition: color 0.12s; }
+  .sidebar-month-clear:hover { color: var(--red-text); }
+
   /* Compact sidebar: narrower column, trimmed content. Country name hidden, sub-campaign
      name hidden, drag handle hidden. Tooltips provide discoverability. */
   .sidebar.sidebar-compact { width: 110px; }
@@ -1698,6 +1707,11 @@ var STATE = {
   // UI preference: when true, sidebar collapses to a compact strip showing only flags +
   // counts (country rows) or flag + rank + category pill (sub-campaign rows). Persisted.
   sidebarCompact: false,
+  // Optional month filter for the sidebar. 'all' shows everything (default); an ISO
+  // month string like '2026-04' filters campaigns to those with at least one video
+  // whose estDelivery falls in that month; 'none' shows campaigns whose videos have
+  // no delivery date set yet. Persisted so it survives reloads.
+  sidebarMonthFilter: 'all',
   // Remembered feedback sender name \u2014 optional, persists across sessions for convenience.
   feedbackName: '',
   search: '',
@@ -3131,15 +3145,48 @@ function clearBatch(recipient) {
 // race-check without parsing the full state blob. Will migrate to Firestore once the
 // Firebase wiring lands (shared flag eliminates duplicate-browser sends entirely).
 var TALLY_STORAGE_KEY = 'tilt-creative-tracker-last-tally-date';
+// Firestore doc path for the shared tally race flag. When Firebase is connected, this is
+// the source of truth: a transactional write determines which browser fires the tally,
+// and all other browsers atomically lose the race and skip. Falls back to localStorage
+// when Firestore is unreachable (offline mode).
+var TALLY_FIRESTORE_DOC = 'meta/dailyTally';
+// Cached value of the Firestore-shared lastSentDate. Updated by an onSnapshot listener
+// (set up on app boot, see attachTallyListener). Until the listener delivers its first
+// snapshot, this is null and we fall back to localStorage.
+var _tallySharedLastSent = null;
+var _tallySharedReady = false; // becomes true after the first onSnapshot landing
+var _tallySharedUnsub = null;
 // Transient: when the ticker first notices a date change, it stamps a "fire at" time
-// 0\u201330 seconds in the future. This jitter reduces duplicate sends when multiple team
-// members have the app open \u2014 whichever browser wins the race writes the storage key,
-// and the others see the updated date and skip. Not bulletproof without Firestore;
-// occasional duplicates are possible. Cleared after fire or when date matches.
+// 0\u201330 seconds in the future. This jitter spreads firing across browsers so the
+// transactional Firestore write resolves cleanly with one winner.
 var _tallyFireAt = null;
 
+// Subscribe to the shared tally date in Firestore so all browsers see writes within ~1s.
+// Called once after Firebase initialization. Idempotent \u2014 safe to call multiple times.
+function attachTallyListener() {
+  if (typeof fbDb === 'undefined' || !fbDb) return; // Firebase not loaded
+  if (_tallySharedUnsub) return; // already subscribed
+  try {
+    _tallySharedUnsub = fbDb.doc(TALLY_FIRESTORE_DOC).onSnapshot(function(snap) {
+      if (snap && snap.exists) {
+        var data = snap.data() || {};
+        _tallySharedLastSent = data.lastSentDate || null;
+      } else {
+        _tallySharedLastSent = null; // doc doesn't exist yet \u2014 treat as never sent
+      }
+      _tallySharedReady = true;
+    }, function(err) {
+      console.warn('Tally listener error', err);
+      _tallySharedReady = false; // fall back to localStorage
+    });
+  } catch (e) {
+    console.warn('Failed to attach tally listener', e);
+  }
+}
+
 // Initialize the stored date on first load if blank so we don't fire immediately on
-// first run (we only want to fire on a genuine midnight crossover).
+// first run (we only want to fire on a genuine midnight crossover). Stamps localStorage
+// only \u2014 the Firestore doc gets stamped on the first real send via transaction.
 function initTallyDate() {
   try {
     if (!localStorage.getItem(TALLY_STORAGE_KEY)) {
@@ -3148,25 +3195,87 @@ function initTallyDate() {
   } catch (e) { /* localStorage may be blocked */ }
 }
 
+// Read the most authoritative "last sent date" we have. Prefers the live Firestore value;
+// falls back to localStorage when Firestore isn't ready (first-load grace period or offline).
+function readLastTallyDate() {
+  if (_tallySharedReady) return _tallySharedLastSent; // even null is authoritative once Firestore has spoken
+  try { return localStorage.getItem(TALLY_STORAGE_KEY); } catch (e) { return null; }
+}
+
+// Atomically claim today's tally slot in Firestore. Returns a promise resolving to true
+// if THIS browser won the race (and should fire the tally), false if someone else got
+// there first. Falls back to a localStorage write when Firestore is unreachable.
+function claimTallySlot(today) {
+  // Firestore transactional path
+  if (_tallySharedReady && typeof fbDb !== 'undefined' && fbDb) {
+    var ref = fbDb.doc(TALLY_FIRESTORE_DOC);
+    return fbDb.runTransaction(function(tx) {
+      return tx.get(ref).then(function(snap) {
+        var existing = snap.exists ? (snap.data() || {}).lastSentDate : null;
+        if (existing === today) {
+          return false; // someone else already won today
+        }
+        var stamp = {
+          lastSentDate: today,
+          sentBy: (typeof Auth !== 'undefined' && Auth.user && Auth.user.uid) ? Auth.user.uid : 'unknown',
+          sentAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        tx.set(ref, stamp, { merge: true });
+        return true;
+      });
+    }).then(function(won) {
+      // Mirror to localStorage so this tab also short-circuits without waiting for the
+      // onSnapshot echo.
+      if (won) { try { localStorage.setItem(TALLY_STORAGE_KEY, today); } catch (e) {} }
+      return won;
+    }).catch(function(err) {
+      console.warn('Tally transaction failed, falling back to localStorage', err);
+      return claimTallyLocalOnly(today);
+    });
+  }
+  // Firestore unavailable (offline / not loaded) \u2014 use local-only flag
+  return Promise.resolve(claimTallyLocalOnly(today));
+}
+
+// Local-only fallback when Firestore can't help. Best-effort; may double-send across
+// disconnected browsers (which is the existing pre-Firestore behavior).
+function claimTallyLocalOnly(today) {
+  try {
+    var current = localStorage.getItem(TALLY_STORAGE_KEY);
+    if (current === today) return false;
+    localStorage.setItem(TALLY_STORAGE_KEY, today);
+    return true;
+  } catch (e) { return false; }
+}
+
 function checkDailyTallyCrossover() {
   try {
     var today = todayISO();
-    var last = localStorage.getItem(TALLY_STORAGE_KEY);
-    if (!last) { localStorage.setItem(TALLY_STORAGE_KEY, today); _tallyFireAt = null; return; }
+    var last = readLastTallyDate();
+    // First-ever load (Firestore says nothing AND localStorage empty): stamp localStorage
+    // so we don't immediately fire. Firestore stamps on first real send.
+    if (!last) {
+      try { localStorage.setItem(TALLY_STORAGE_KEY, today); } catch (e) {}
+      _tallyFireAt = null;
+      return;
+    }
     if (last === today) { _tallyFireAt = null; return; }
-    // Date has rolled forward. Arm a jitter window if not already armed.
+    // Date has rolled forward. Arm a jitter window if not already armed. Jitter spreads
+    // browsers' firing attempts so Firestore's atomic write resolves with one winner
+    // and the others silently lose (rather than all firing within milliseconds).
     if (_tallyFireAt === null) {
       _tallyFireAt = Date.now() + Math.floor(Math.random() * 30000);
       return;
     }
     if (Date.now() < _tallyFireAt) return;
-    // Re-read in case another tab / browser beat us during the jitter window.
-    last = localStorage.getItem(TALLY_STORAGE_KEY);
-    if (last === today) { _tallyFireAt = null; return; }
-    // We won the race. Stamp first so a re-entry from the next tick sees today.
-    localStorage.setItem(TALLY_STORAGE_KEY, today);
+    // Jitter elapsed \u2014 attempt the atomic claim.
     _tallyFireAt = null;
-    sendDailyTally('auto');
+    claimTallySlot(today).then(function(wonRace) {
+      if (wonRace) {
+        sendDailyTally('auto');
+      }
+      // If we lost, do nothing \u2014 another browser already fired.
+    });
   } catch (e) {
     console.warn('Daily tally check failed', e);
   }
@@ -4034,10 +4143,42 @@ function renderTopbar() {
 
 function renderSidebar() {
   var compact = !!STATE.sidebarCompact;
+  // Build the set of months that exist across all videos' estDelivery dates. Used to
+  // populate the month-filter dropdown so we don't list months with zero activity.
+  // Each entry is an ISO 'YYYY-MM' string. Sorted ascending.
+  var monthSet = {};
+  var hasAnyUndated = false;
+  STATE.assets.forEach(function(a) {
+    var iso = (a.estDelivery || '').slice(0, 7); // 'YYYY-MM'
+    if (iso && /^\d{4}-\d{2}$/.test(iso)) monthSet[iso] = true;
+    else hasAnyUndated = true;
+  });
+  var months = Object.keys(monthSet).sort();
+  var activeFilter = STATE.sidebarMonthFilter || 'all';
+
+  // Helper: does a campaign contain any asset whose estDelivery month matches the active
+  // filter? 'all' = always yes. 'none' = matches if any asset has no estDelivery. 'YYYY-MM'
+  // = matches if any asset's estDelivery starts with that string.
+  function campMatchesMonthFilter(campaignId) {
+    if (activeFilter === 'all') return true;
+    var assetsInCamp = STATE.assets.filter(function(a) { return a.campaignId === campaignId; });
+    if (assetsInCamp.length === 0) return false; // empty campaign \u2014 no videos to match
+    if (activeFilter === 'none') {
+      return assetsInCamp.some(function(a) { return !a.estDelivery; });
+    }
+    return assetsInCamp.some(function(a) {
+      return (a.estDelivery || '').slice(0, 7) === activeFilter;
+    });
+  }
+
   var html = '';
   for (var i = 0; i < STATE.countries.length; i++) {
     var country = STATE.countries[i];
-    var subs = getSubCampaignsForCountry(country.code);
+    var allSubs = getSubCampaignsForCountry(country.code);
+    // Apply the month filter to get what's actually visible. We render the country header
+    // only if at least one of its campaigns survives the filter (avoids empty country rows).
+    var subs = allSubs.filter(function(s) { return campMatchesMonthFilter(s.id); });
+    if (activeFilter !== 'all' && subs.length === 0) continue; // hide empty country in filter mode
     var isOpen = STATE.expandedCountries[country.code];
     var chevron = isOpen ? '\u25BE' : '\u25B8';
     // Compact country row: hide the country name; keep chevron, flag, count. Title attribute
@@ -4063,7 +4204,8 @@ function renderSidebar() {
     if (isOpen) {
       html += '<div class="subcamp-list open" data-country="' + country.code + '">';
       // In compact mode, only show the currently-selected sub-campaign for this country.
-      // Full mode keeps showing every sub-campaign as before.
+      // Full mode keeps showing every sub-campaign as before. `subs` is already filtered
+      // by the month dropdown if active.
       var subsToRender = compact
         ? subs.filter(function(s) { return s.id === STATE.activeSubCampaignId; })
         : subs;
@@ -4129,6 +4271,39 @@ function renderSidebar() {
     }
     html += '</div>';
   }
+  // Build the month-filter dropdown HTML. Hidden in compact mode (no room to render
+  // a useful select). When the filter is active, append a "(filter active)" hint to
+  // the sidebar header for visibility.
+  var monthFilterHtml = '';
+  if (!compact) {
+    var monthLabels = {
+      'all': 'All months',
+      'none': 'No date set'
+    };
+    months.forEach(function(m) {
+      // 'YYYY-MM' \u2192 'Apr 2026'
+      var year = m.slice(0, 4);
+      var monthIdx = parseInt(m.slice(5, 7), 10) - 1;
+      monthLabels[m] = MONTH_SHORT[monthIdx] + ' ' + year;
+    });
+    var optionsHtml = '<option value="all"' + (activeFilter === 'all' ? ' selected' : '') + '>All months</option>';
+    months.forEach(function(m) {
+      optionsHtml += '<option value="' + m + '"' + (activeFilter === m ? ' selected' : '') + '>' + escapeHtml(monthLabels[m]) + '</option>';
+    });
+    if (hasAnyUndated) {
+      optionsHtml += '<option value="none"' + (activeFilter === 'none' ? ' selected' : '') + '>No date set</option>';
+    }
+    monthFilterHtml =
+      '<div class="sidebar-month-filter">' +
+        '<label class="sidebar-month-label">FILTER BY MONTH</label>' +
+        '<select class="sidebar-month-select" onchange="App.setSidebarMonthFilter(this.value)">' +
+          optionsHtml +
+        '</select>' +
+        (activeFilter !== 'all'
+          ? '<button class="sidebar-month-clear" onclick="App.setSidebarMonthFilter(\'all\')" title="Clear filter">\u2715</button>'
+          : '') +
+      '</div>';
+  }
   var toggleIcon = compact ? '\u00BB' : '\u00AB'; // >> in compact to suggest "expand"; << in full to suggest "collapse"
   var toggleTitle = compact ? 'Expand sidebar' : 'Collapse sidebar';
   var headerInner = compact
@@ -4137,7 +4312,7 @@ function renderSidebar() {
       '<button class="sidebar-toggle" onclick="App.toggleSidebarCompact()" title="' + toggleTitle + '">' + toggleIcon + '</button>';
   return '<div class="sidebar ' + (compact ? 'sidebar-compact' : '') + '">' +
     '<div class="sidebar-header">' + headerInner + '</div>' +
-    '<div class="sidebar-scroll">' + html + '</div></div>';
+    '<div class="sidebar-scroll">' + monthFilterHtml + html + '</div></div>';
 }
 
 function renderCampaignsView() {
@@ -5517,18 +5692,28 @@ function renderNotificationsView() {
       try { lastSent = localStorage.getItem(TALLY_STORAGE_KEY) || ''; } catch (e) { lastSent = ''; }
       var lastSentLabel = lastSent ? formatDate(lastSent) : 'never';
       var tallyCards = STATE.countries.map(function(c) {
+        // *** UK-ONLY GATE *** \u2014 the daily tally is currently wired only for UK. Other
+        // country cards are rendered greyed out with a "coming soon" tooltip. To enable
+        // a country, also remove the gate in sendDailyTally() above.
+        var isWired = (c.code === 'UK');
         var tally = buildDailyTallyForCountry(c.code);
         var total = tally.counts.Assigned + tally.counts['Needs Revisions'] + tally.counts.Approved;
-        var url = resolveDailyTallyWebhook(c.code);
-        var hasUrl = webhookValid(url);
-        var canSend = hasUrl && total > 0;
-        var sendTitle = !hasUrl
-          ? 'No webhook resolves for ' + c.code + ' \u2014 set one in Automations'
-          : (total === 0 ? 'No activity for ' + c.code + ' yet' : 'Send today\u2019s tally to Slack');
+        var url = isWired ? resolveDailyTallyWebhook(c.code) : '';
+        var hasUrl = isWired && webhookValid(url);
+        var canSend = isWired && hasUrl && total > 0;
+        var sendTitle = !isWired
+          ? c.name + ' \u2014 daily tally is coming soon (UK only for now)'
+          : (!hasUrl
+            ? 'No webhook resolves for ' + c.code + ' \u2014 set one in Automations'
+            : (total === 0 ? 'No activity for ' + c.code + ' yet' : 'Send today\u2019s tally to Slack'));
         var sendAttrs = canSend
           ? 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '"'
           : 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '" disabled style="opacity:0.45; cursor:not-allowed;"';
-        return '<div class="batch-card">' +
+        var copyAttrs = isWired
+          ? 'class="sent-copy-btn" title="Copy today\u2019s tally to clipboard"'
+          : 'class="sent-copy-btn" title="Coming soon" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var cardStyle = isWired ? '' : 'opacity:0.45;';
+        return '<div class="batch-card" style="' + cardStyle + '">' +
           '<div class="batch-card-header">' +
             '<div class="country-flag flag-' + c.code + '">' + c.code + '</div>' +
             '<div style="flex:1; min-width:0;">' +
@@ -5540,13 +5725,13 @@ function renderNotificationsView() {
               '</div>' +
             '</div>' +
             '<button ' + sendAttrs + ' onclick="App.sendDailyTallyForCountry(\'' + c.code + '\')">\u{1F680}</button>' +
-            '<button class="sent-copy-btn" title="Copy today\u2019s tally to clipboard" onclick="App.copyDailyTally(\'' + c.code + '\')">\u{1F4CB}</button>' +
+            '<button ' + copyAttrs + ' onclick="App.copyDailyTally(\'' + c.code + '\')">\u{1F4CB}</button>' +
           '</div>' +
         '</div>';
       }).join('');
       return '<div class="section-title">Daily Tally <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(auto-fires at local midnight \u00B7 last sent: ' + escapeHtml(lastSentLabel) + ')</span></div>' +
         '<div class="auto-card">' +
-          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One message per country with every video currently in <span style="color:var(--blue-text);">Assigned</span>, <span style="color:var(--amber-text);">Needs Revisions</span>, and <span style="color:var(--green-text);">Approved</span>. Auto-fires at <strong style="color:var(--text1);">local midnight (00:00)</strong> with a 0\u201330s jitter so multiple open tabs don\'t duplicate the send. Caveat: if no team member has the app open at midnight, that day is skipped \u2014 this will become bulletproof once Firebase Cloud Functions are wired up.</div>' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One message per country with every video currently in <span style="color:var(--blue-text);">Assigned</span>, <span style="color:var(--amber-text);">Needs Revisions</span>, and <span style="color:var(--green-text);">Approved</span>. Auto-fires at <strong style="color:var(--text1);">local midnight (00:00)</strong> with a 0\u201330s jitter window. Race-prevention is now coordinated via Firestore so multiple open browsers won\'t double-send. Caveat: if nobody has the app open at midnight, that day is still skipped \u2014 a future Firebase Cloud Function will close that gap.</div>' +
           '<div style="margin-bottom:10px;"><button class="run-btn" onclick="App.sendDailyTallyAll()" style="background:var(--accent-dim); color:var(--accent2); border-color:var(--border2);">\u{1F680} Send all countries now</button></div>' +
           '<div class="batch-grid">' + tallyCards + '</div>' +
         '</div>';
@@ -6048,6 +6233,7 @@ function saveState() {
       activeSubCampaignId: STATE.activeSubCampaignId,
       expandedCountries: STATE.expandedCountries,
       sidebarCompact: STATE.sidebarCompact,
+      sidebarMonthFilter: STATE.sidebarMonthFilter,
       feedbackName: STATE.feedbackName,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
@@ -6548,7 +6734,11 @@ function resolveDailyTallyWebhook(countryCode) {
 function sendDailyTally(triggerKind) {
   var kind = triggerKind || 'auto';
   var sentCount = 0, skippedNoActivity = 0, skippedNoWebhook = 0;
-  STATE.countries.forEach(function(c) {
+  // *** UK-ONLY GATE *** \u2014 daily tally is currently restricted to UK. To re-enable for
+  // other countries, change this list (or revert to STATE.countries) when you're ready.
+  // Affects both the auto-fire (midnight ticker) and the "Send all countries now" button.
+  var enabledCountries = STATE.countries.filter(function(c) { return c.code === 'UK'; });
+  enabledCountries.forEach(function(c) {
     var msg = buildDailyTallyMessage(c.code);
     if (!msg) { skippedNoActivity++; return; }
     var url = resolveDailyTallyWebhook(c.code);
@@ -7269,6 +7459,10 @@ var App = {
   toggleCountry: function(code) { STATE.expandedCountries[code] = !STATE.expandedCountries[code]; render(); },
   // Flip the compact/full sidebar mode. Persists via saveState() inside render().
   toggleSidebarCompact: function() { STATE.sidebarCompact = !STATE.sidebarCompact; render(); },
+  setSidebarMonthFilter: function(value) {
+    STATE.sidebarMonthFilter = value || 'all';
+    render();
+  },
   addSub: function(code) { showAddSubCampaignModal(code); },
   editAssetById: function(id) {
     for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { showAssetModal(STATE.assets[i]); return; }
@@ -8237,7 +8431,13 @@ var App = {
   },
 
   // Fire the tally for one country only. Useful for testing a single webhook.
+  // *** UK-ONLY GATE *** \u2014 currently restricted to UK. To re-enable for others,
+  // remove this guard and the matching ones in sendDailyTally() and the card render.
   sendDailyTallyForCountry: function(countryCode) {
+    if (countryCode !== 'UK') {
+      toast(countryCode + ' daily tally is coming soon \u2014 only UK is wired up for now', 'error');
+      return;
+    }
     var msg = buildDailyTallyMessage(countryCode);
     if (!msg) { toast('No activity in ' + countryCode + ' to send', 'error'); return; }
     var url = resolveDailyTallyWebhook(countryCode);
@@ -9204,6 +9404,9 @@ bootApp = function() {
   // Seed the daily-tally date flag on first run so we don't fire on first load.
   // Lives outside STATE because the scheduler runs across tabs.
   initTallyDate();
+  // Start listening to the shared Firestore tally flag so all browsers see the same
+  // "last sent" date in real time and only one of them wins the midnight race.
+  attachTallyListener();
 
   // Upsert the user profile doc (idempotent), then start listening to it so
   // role changes (e.g. an admin promoting them) propagate live without a refresh.
