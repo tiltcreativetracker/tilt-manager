@@ -193,6 +193,11 @@
   .video-name-cell { max-width: 260px; display: flex; align-items: center; gap: 6px; }
   .video-name-cell > .editable-cell:first-child { flex: 1; min-width: 0; overflow: hidden; }
   .video-name-cell > .editable-cell:last-child { flex-shrink: 0; }
+  /* When the name field is in edit mode, the rendered <input> replaces the .editable-cell
+     wrapper. Without this rule, the input has no flex sizing and collapses to its content
+     width \u2014 which for a freshly-clicked empty cell is nearly 0px. Mirror the same flex+
+     min-width recipe so the input fills the same horizontal space as the display state. */
+  .video-name-cell > .inline-edit-input { flex: 1; min-width: 0; }
   .video-name-text { font-size: 13px; color: var(--text1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', monospace; }
   .version-tag { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; background: var(--accent-dim); color: var(--accent2); flex-shrink: 0; }
   /* Version history clock icon next to the version tag. Always rendered (even with no
@@ -1625,6 +1630,22 @@ var Fb = {
 };
 
 window.addEventListener('error', function(e) {
+  // Browsers report cross-origin script errors with no useful info \u2014 the message is
+  // the literal string "Script error.", line/col are 0, and e.error is null. These
+  // come from things like Slack's CORS pre-flight rejection during a fetch, browser
+  // extensions, or third-party scripts. Wiping the app for these is overkill since
+  // we have no actionable info AND the app itself is fine.
+  // Only show the runtime error screen for SAME-ORIGIN errors where we have real
+  // information to display \u2014 otherwise log to console and let the app keep running.
+  var isOpaqueCrossOrigin = (
+    (!e.message || e.message === 'Script error.' || /^Script error/.test(e.message)) &&
+    !e.error &&
+    (!e.lineno || e.lineno === 0)
+  );
+  if (isOpaqueCrossOrigin) {
+    console.warn('[ignored cross-origin error]', e);
+    return; // app stays up
+  }
   var app = document.getElementById('app');
   if (app) {
     app.innerHTML = '<div style="padding:40px;color:#f09595;font-family:monospace;font-size:12px;">' +
@@ -1632,8 +1653,19 @@ window.addEventListener('error', function(e) {
       '<div><strong>Message:</strong> ' + (e.message || '(unknown)') + '</div>' +
       '<div><strong>Line:</strong> ' + (e.lineno || '?') + ':' + (e.colno || '?') + '</div>' +
       (e.error && e.error.stack ? '<pre style="margin-top:12px;white-space:pre-wrap;">' + e.error.stack + '</pre>' : '') +
+      '<div style="margin-top:16px;color:#888;font-family:sans-serif;"><a href="javascript:location.reload()" style="color:#aab;">Reload</a> to recover.</div>' +
     '</div>';
   }
+});
+
+// Same treatment for unhandled promise rejections \u2014 these often come from network
+// failures (fetch to Slack, Firebase calls under poor connectivity) and shouldn't
+// nuke the entire app. The local catch handlers in each promise chain already
+// surface user-facing toasts where appropriate.
+window.addEventListener('unhandledrejection', function(e) {
+  console.warn('[unhandled promise rejection]', e.reason);
+  // Don't preventDefault \u2014 still lets the browser log the rejection so we have
+  // the trace in devtools, but we don't surface a UI-breaking error screen.
 });
 
 // ===================== STATUS ABBREVIATIONS =====================
