@@ -54,6 +54,15 @@
   .sidebar-toggle { background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text3); cursor: pointer; font-size: 12px; padding: 2px 7px; font-family: 'JetBrains Mono', monospace; transition: all 0.12s; line-height: 1; }
   .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
 
+  /* Sidebar month filter \u2014 sits at the top of .sidebar-scroll, hidden in compact mode */
+  .sidebar-month-filter { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 5px; border-bottom: 1px solid var(--border); margin-bottom: 8px; position: relative; }
+  .sidebar-month-label { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text3); }
+  .sidebar-month-select { width: 100%; padding: 6px 8px; background: var(--bg3); color: var(--text1); border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 12px; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23999' d='M0 0l5 6 5-6z'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px; }
+  .sidebar-month-select:hover { border-color: var(--accent); }
+  .sidebar-month-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  .sidebar-month-clear { position: absolute; top: 30px; right: 28px; background: transparent; border: none; color: var(--text3); cursor: pointer; font-size: 11px; padding: 2px 4px; line-height: 1; transition: color 0.12s; }
+  .sidebar-month-clear:hover { color: var(--red-text); }
+
   /* Compact sidebar: narrower column, trimmed content. Country name hidden, sub-campaign
      name hidden, drag handle hidden. Tooltips provide discoverability. */
   .sidebar.sidebar-compact { width: 110px; }
@@ -101,7 +110,7 @@
   .rank-badge { width: 20px; height: 20px; border-radius: 4px; background: var(--bg4); color: var(--text2); font-size: 10.5px; font-weight: 600; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .subcamp-item.active .rank-badge { background: var(--accent); color: #fff; }
   .subcamp-name { font-size: 12.5px; font-weight: 500; color: var(--text1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); }
+  .cat-pill { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.04em; text-transform: uppercase; background: var(--cat-bg); color: var(--cat-fg); line-height: 1.25; text-align: center; max-width: 96px; word-break: break-word; overflow-wrap: break-word; hyphens: none; }
   /* Editable variant — pill is a visible div (sizes naturally to its content)
      with an invisible <select> overlaid on top for click handling. Sidesteps
      the native <select> sizing problem where the element is sized to fit the
@@ -184,6 +193,11 @@
   .video-name-cell { max-width: 260px; display: flex; align-items: center; gap: 6px; }
   .video-name-cell > .editable-cell:first-child { flex: 1; min-width: 0; overflow: hidden; }
   .video-name-cell > .editable-cell:last-child { flex-shrink: 0; }
+  /* When the name field is in edit mode, the rendered <input> replaces the .editable-cell
+     wrapper. Without this rule, the input has no flex sizing and collapses to its content
+     width \u2014 which for a freshly-clicked empty cell is nearly 0px. Mirror the same flex+
+     min-width recipe so the input fills the same horizontal space as the display state. */
+  .video-name-cell > .inline-edit-input { flex: 1; min-width: 0; }
   .video-name-text { font-size: 13px; color: var(--text1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', monospace; }
   .version-tag { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; background: var(--accent-dim); color: var(--accent2); flex-shrink: 0; }
   /* Version history clock icon next to the version tag. Always rendered (even with no
@@ -564,6 +578,9 @@
      without it being visually loud. Edit-mode input uses accent-colored border + focus ring. */
   .editable-cell { cursor: text; padding: 3px 6px; margin: -3px -6px; border-radius: 4px; border: 1px solid transparent; transition: background 0.1s, border-color 0.1s; min-height: 24px; display: block; }
   .editable-cell:hover { background: var(--bg3); border-color: var(--border); }
+  /* Read-only cells (e.g. derived version pill) don't get the click-to-edit affordance */
+  .editable-cell-readonly { cursor: default; padding: 3px 6px; margin: -3px -6px; min-height: 24px; display: block; }
+  .editable-cell-readonly:hover { background: transparent; border-color: transparent; }
   .inline-edit-input { width: 100%; padding: 4px 7px; border-radius: 4px; border: 1px solid var(--accent); background: var(--bg3); color: var(--text1); font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; box-sizing: border-box; }
   .inline-edit-input:focus { border-color: var(--accent2); box-shadow: 0 0 0 2px var(--accent-dim); }
   .inline-edit-input[type="date"] { min-width: 130px; }
@@ -741,6 +758,13 @@
   .subcamp-context-menu-item:hover { background: var(--accent-dim); color: var(--accent2); }
   .subcamp-context-menu-destructive:hover { background: var(--red-bg); color: var(--red-text); }
 
+  /* Campaign header kebab menu (\u22EE) \u2014 Copy link / Export PDF / Export Slack */
+  .camp-actions-menu-wrap { position: relative; display: inline-block; }
+  .camp-actions-menu-btn { padding: 4px 8px !important; font-size: 14px !important; line-height: 1; }
+  .camp-actions-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 70; min-width: 180px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); font-family: inherit; }
+  .camp-actions-menu-item { display: block; width: 100%; text-align: left; padding: 7px 12px; background: transparent; color: var(--text1); border: none; border-radius: 4px; font-size: 12.5px; font-family: inherit; cursor: pointer; transition: background 0.08s; white-space: nowrap; }
+  .camp-actions-menu-item:hover { background: var(--accent-dim); color: var(--accent2); }
+
   .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.65); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
   .modal-overlay.open { opacity: 1; pointer-events: auto; }
   .modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 22px 24px; width: 580px; max-width: 94vw; max-height: 90vh; overflow-y: auto; transform: translateY(8px); transition: transform 0.15s; }
@@ -828,6 +852,50 @@
   .log-editor-stat b { color: var(--text1); font-weight: 600; }
   .log-editor-stat.log-editor-miss { background: var(--red-bg); color: var(--red-text); }
   .log-editor-stat.log-editor-hit { background: var(--green-bg); color: var(--green-text); }
+
+  /* New per-day card layout (replaces the old grid-with-day-columns view). One card per
+     workday, listing the videos worked that day with their CURRENT status + category-head info. */
+  .log-day-cards { display: flex; flex-direction: column; gap: 12px; }
+  .log-day-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .log-day-card.is-today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+  .log-day-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+  .log-day-card-date { display: flex; align-items: baseline; gap: 8px; }
+  .log-day-card-dow { font-size: 11px; font-weight: 700; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
+  .log-day-card-num { font-size: 14px; font-weight: 600; color: var(--text1); font-family: 'JetBrains Mono', monospace; }
+  .log-day-today-pill { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; padding: 1px 6px; border-radius: 3px; background: var(--accent); color: #fff; font-family: 'JetBrains Mono', monospace; }
+  .log-day-card-stats { display: flex; align-items: baseline; gap: 4px; padding: 4px 10px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+  .log-day-card-num-big { font-size: 16px; font-weight: 700; }
+  .log-day-card-slash { color: var(--text3); }
+  .log-day-card-target { font-size: 13px; color: var(--text3); }
+  .log-day-card-stats-label { font-size: 10px; color: var(--text3); margin-left: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .log-day-card-stats.log-day-hit { background: var(--green-bg); color: var(--green-text); }
+  .log-day-card-stats.log-day-hit .log-day-card-target,
+  .log-day-card-stats.log-day-hit .log-day-card-stats-label { color: var(--green-text); opacity: 0.8; }
+  .log-day-card-stats.log-day-partial { background: var(--amber-bg); color: var(--amber-text); }
+  .log-day-card-stats.log-day-partial .log-day-card-target,
+  .log-day-card-stats.log-day-partial .log-day-card-stats-label { color: var(--amber-text); opacity: 0.8; }
+  .log-day-card-stats.log-day-miss { background: var(--bg4); color: var(--text3); }
+  .log-day-card-body { display: flex; flex-direction: column; }
+  .log-day-empty { padding: 14px 16px; font-style: italic; color: var(--text3); font-size: 12px; }
+  .log-day-vid-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+  .log-day-vid-row:first-child { border-top: none; }
+  .log-day-vid-row:hover { background: var(--bg3); }
+  .log-day-vid-row.is-done { opacity: 0.6; }
+  .log-day-vid-row.is-done .log-day-vid-title { text-decoration: line-through; }
+  .log-day-vid-name { min-width: 0; }
+  .log-day-vid-title { font-size: 13px; color: var(--text1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-day-vid-ver { display: inline-block; padding: 0 4px; border-radius: 2px; font-size: 9px; font-weight: 700; background: var(--accent-dim); color: var(--accent2); font-family: 'JetBrains Mono', monospace; vertical-align: middle; }
+  .log-day-vid-camp { font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-day-vid-status { display: flex; align-items: center; }
+  /* Category-head two-line cell: head name on top, QC verdict below as a colored pill. */
+  .log-vid-chq { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 110px; }
+  .log-vid-chq-name { font-size: 10.5px; color: var(--text2); font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .log-vid-chq-muted { color: var(--text3); font-style: italic; }
+  .log-vid-chq-status { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
+  .log-vid-chq-status.log-chq-draft { background: var(--bg4); color: var(--text3); }
+  .log-vid-chq-status.log-chq-review { background: var(--blue-bg); color: var(--blue-text); }
+  .log-vid-chq-status.log-chq-revisions { background: var(--amber-bg); color: var(--amber-text); }
+  .log-vid-chq-status.log-chq-approved { background: var(--green-bg); color: var(--green-text); }
 
   /* The table: a single grid with sticky day-header row + sticky approvals row, then video rows. */
   .log-grid { display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -1264,14 +1332,19 @@ var Fb = {
 
   // Build the JSON snapshot we persist. Must match the shape that saveState() / loadState()
   // already use, plus a few attribution fields stamped on every write.
+  //
+  // IMPORTANT: this snapshot is the SHARED workspace state synced across all teammates'
+  // browsers via Firestore. Per-user UI preferences (which tab you're on, which campaign
+  // you've selected, which country accordions you have open, your tab arrangement, etc.)
+  // must NOT be in here \u2014 those should stay in localStorage only via saveState() so they
+  // survive YOUR reloads but don't override Sharm's view when she's looking at a different
+  // campaign than you. See the parallel ignore-list in applySnapshot below.
   buildSnapshot: function() {
     return {
-      tabOrder: STATE.tabOrder,
-      activeSubCampaignId: STATE.activeSubCampaignId,
-      expandedCountries: STATE.expandedCountries,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
+      categoryHeadWebhook: STATE.categoryHeadWebhook,
       qcWebhooks: STATE.qcWebhooks,
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
@@ -1322,30 +1395,52 @@ var Fb = {
     Fb._pendingSnapshotData = null;
     Fb._suppressUpload = true;
     try {
-      // Copy known fields onto STATE. Skip metadata fields prefixed with `_`.
+      // Per-user UI fields that must NEVER be overwritten by incoming snapshots, even if
+      // a teammate's browser (running an older version) accidentally uploaded them. These
+      // belong to whoever is looking at this device, not the workspace. Mirrors the
+      // exclusion in buildSnapshot above.
+      var PER_USER_UI_FIELDS = {
+        tab: true,
+        tabOrder: true,
+        activeSubCampaignId: true,
+        expandedCountries: true,
+        sidebarCompact: true,
+        sidebarMonthFilter: true,
+        feedbackName: true,
+        statusFilter: true,
+        editorFilter: true,
+        qcFilter: true,
+        search: true,
+        logEditor: true,
+        schedulerDate: true,
+        qcDismissed: true,
+        noSplit: true
+      };
+      // Copy known fields onto STATE. Skip metadata fields prefixed with `_` and any
+      // per-user UI field (so a teammate's tab/campaign/expansion choices don't override
+      // ours). This is a defense-in-depth pair with buildSnapshot's deliberate exclusion.
       Object.keys(data).forEach(function(k) {
         if (k === '_lastEditedAt' || k === '_lastEditedBy' || k === '_lastEditedByName') return;
-        // Special handling for pendingBatches: if an incoming batch has items with a
-        // firstQueuedAt older than the fire threshold, reset it to now. This prevents
-        // multiple open browsers from all firing the same stale batch simultaneously —
-        // the original sender's Fb.uploadNow() will clear the batch in Firestore within
-        // ~600ms, and the refreshed timer gives it time to propagate before others fire.
-        if (k === 'pendingBatches') {
-          var pb = data[k] || {};
-          Object.keys(pb).forEach(function(r) {
-            var b = pb[r];
-            if (b && b.items && b.items.length > 0 && b.firstQueuedAt &&
-                (Date.now() - b.firstQueuedAt > BATCH_TIME_LIMIT_MS)) {
-              pb[r] = { items: b.items, firstQueuedAt: Date.now() };
-            }
-          });
-          STATE[k] = pb;
-          return;
-        }
+        if (PER_USER_UI_FIELDS[k]) return;
         STATE[k] = data[k];
       });
-      // Mirror to localStorage as a cache so offline reloads still work.
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
+      // Mirror to localStorage as a cache so offline reloads still work. Strip per-user
+      // UI fields from the incoming snapshot, then MERGE into the existing localStorage
+      // copy so we don't clobber the user's locally-saved sidebar/tab state. Without
+      // this merge, an immediate reload after the first snapshot would lose per-user
+      // UI prefs because saveState() hadn't yet had a chance to re-write them.
+      try {
+        var existing = {};
+        try {
+          var raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) existing = JSON.parse(raw) || {};
+        } catch (_) {}
+        Object.keys(data).forEach(function(k) {
+          if (PER_USER_UI_FIELDS[k]) return;
+          existing[k] = data[k];
+        });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
+      } catch (_) {}
       if (typeof render === 'function' && Auth._booted) render();
     } finally {
       // Defer un-suppressing past the synchronous render so any saveState calls fired
@@ -1535,6 +1630,22 @@ var Fb = {
 };
 
 window.addEventListener('error', function(e) {
+  // Browsers report cross-origin script errors with no useful info \u2014 the message is
+  // the literal string "Script error.", line/col are 0, and e.error is null. These
+  // come from things like Slack's CORS pre-flight rejection during a fetch, browser
+  // extensions, or third-party scripts. Wiping the app for these is overkill since
+  // we have no actionable info AND the app itself is fine.
+  // Only show the runtime error screen for SAME-ORIGIN errors where we have real
+  // information to display \u2014 otherwise log to console and let the app keep running.
+  var isOpaqueCrossOrigin = (
+    (!e.message || e.message === 'Script error.' || /^Script error/.test(e.message)) &&
+    !e.error &&
+    (!e.lineno || e.lineno === 0)
+  );
+  if (isOpaqueCrossOrigin) {
+    console.warn('[ignored cross-origin error]', e);
+    return; // app stays up
+  }
   var app = document.getElementById('app');
   if (app) {
     app.innerHTML = '<div style="padding:40px;color:#f09595;font-family:monospace;font-size:12px;">' +
@@ -1542,8 +1653,19 @@ window.addEventListener('error', function(e) {
       '<div><strong>Message:</strong> ' + (e.message || '(unknown)') + '</div>' +
       '<div><strong>Line:</strong> ' + (e.lineno || '?') + ':' + (e.colno || '?') + '</div>' +
       (e.error && e.error.stack ? '<pre style="margin-top:12px;white-space:pre-wrap;">' + e.error.stack + '</pre>' : '') +
+      '<div style="margin-top:16px;color:#888;font-family:sans-serif;"><a href="javascript:location.reload()" style="color:#aab;">Reload</a> to recover.</div>' +
     '</div>';
   }
+});
+
+// Same treatment for unhandled promise rejections \u2014 these often come from network
+// failures (fetch to Slack, Firebase calls under poor connectivity) and shouldn't
+// nuke the entire app. The local catch handlers in each promise chain already
+// surface user-facing toasts where appropriate.
+window.addEventListener('unhandledrejection', function(e) {
+  console.warn('[unhandled promise rejection]', e.reason);
+  // Don't preventDefault \u2014 still lets the browser log the rejection so we have
+  // the trace in devtools, but we don't surface a UI-breaking error screen.
 });
 
 // ===================== STATUS ABBREVIATIONS =====================
@@ -1715,6 +1837,11 @@ var STATE = {
   // UI preference: when true, sidebar collapses to a compact strip showing only flags +
   // counts (country rows) or flag + rank + category pill (sub-campaign rows). Persisted.
   sidebarCompact: false,
+  // Optional month filter for the sidebar. 'all' shows everything (default); an ISO
+  // month string like '2026-04' filters campaigns to those with at least one video
+  // whose estDelivery falls in that month; 'none' shows campaigns whose videos have
+  // no delivery date set yet. Persisted so it survives reloads.
+  sidebarMonthFilter: 'all',
   // Remembered feedback sender name \u2014 optional, persists across sessions for convenience.
   feedbackName: '',
   search: '',
@@ -1723,6 +1850,10 @@ var STATE = {
   qcFilter: 'all',
   webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
   countryWebhooks: { UK: '', IT: '', ES: '', US: '', PL: '' },
+  // Single webhook URL for all Category Head QC batches. When set, every CHQ batch
+  // (Sneakers, Bags, Apparel, etc.) routes here regardless of category. When blank,
+  // falls back to the global webhook. Set in Automations under "Category Head QC".
+  categoryHeadWebhook: '',
   // QC-report webhooks \u2014 separate per-country list. Set in Automations. Manual send only
   // (no batching/auto-fire). Falls back to global fallback webhook if a country's slot is
   // empty (same fallback shape as countryWebhooks).
@@ -2217,6 +2348,51 @@ function statusClass(s) { return 'st-' + s.replace(/ /g, '_'); }
 // Cleared after commit/cancel. Not persisted \u2014 purely a UI mode.
 var EditState = { assetId: null, field: null };
 
+// Undo system for video-field edits. Each user-initiated mutation snapshots the asset's
+// pre-change values onto a stack; Ctrl+Z (or Cmd+Z) pops the most recent snapshot and
+// restores those fields. Capped at 30 entries so memory stays bounded. The stack is
+// session-only \u2014 not persisted to localStorage or Firestore (undo across reloads would
+// clash with cross-user state, since other people's edits arrive via onSnapshot too).
+var UndoStack = [];
+var _undoSuppressRecording = false; // set during undo() so we don't record the restore as a new edit
+var UNDO_STACK_LIMIT = 30;
+
+// Record a pre-change snapshot for one asset. Call BEFORE mutating the fields.
+//   asset:  the asset object being mutated
+//   fields: array of field names whose previous values to capture (e.g. ['status'])
+//   label:  short human-readable description for the toast (e.g. 'status: Approved \u2192 For Review')
+function recordUndo(asset, fields, label) {
+  if (_undoSuppressRecording) return; // ignore recording during undo()
+  if (!asset || !fields || !fields.length) return;
+  var snap = { assetId: asset.id, fields: {}, label: label || 'edit', at: Date.now() };
+  fields.forEach(function(f) { snap.fields[f] = asset[f]; });
+  UndoStack.push(snap);
+  if (UndoStack.length > UNDO_STACK_LIMIT) UndoStack.shift();
+}
+
+// Pop the most recent snapshot and restore its fields onto the asset. No-ops if the
+// stack is empty or the asset has been deleted.
+function undoLastEdit() {
+  if (UndoStack.length === 0) { toast('Nothing to undo', ''); return; }
+  var snap = UndoStack.pop();
+  var asset = null;
+  for (var i = 0; i < STATE.assets.length; i++) {
+    if (STATE.assets[i].id === snap.assetId) { asset = STATE.assets[i]; break; }
+  }
+  if (!asset) { toast('Cannot undo \u2014 video was deleted', 'error'); return; }
+  _undoSuppressRecording = true;
+  try {
+    Object.keys(snap.fields).forEach(function(k) { asset[k] = snap.fields[k]; });
+  } finally {
+    _undoSuppressRecording = false;
+  }
+  logAction('updated', 'Undo: "' + asset.name + '" \u2014 ' + snap.label);
+  toast('Undone: ' + snap.label, 'success');
+  // Persist the restored value (saveState() flushes to Firestore + localStorage)
+  if (typeof saveState === 'function') saveState();
+  render();
+}
+
 // Transient state for the Today kanban drag-and-drop. Holds the id of the asset
 // currently being dragged. Cleared on dragend or successful drop. Not persisted.
 var TodayDragState = { assetId: null };
@@ -2235,10 +2411,14 @@ var EDITABLE_FIELDS = {
   },
   version: {
     kind: 'text',
-    // Rendered next to the name cell in the row template as its own click target so
-    // users can edit the version tag independently without triggering name editing.
-    display: function(a) { return '<span class="version-tag">' + escapeHtml(a.version) + '</span>'; },
-    value: function(a) { return a.version; },
+    // Variation/version is now DERIVED from the asset name. Look for the last `_V\d+`
+    // token (case-insensitive) in the name, e.g. 'Luxury_1N_..._V2' -> 'V2'. If the name
+    // has no version token, fall back to the stored asset.version (legacy data) or 'V1'.
+    // The pill is rendered as read-only \u2014 inline editing is disabled because the value
+    // is sourced from the filename. To change the version, rename the file.
+    display: function(a) { return '<span class="version-tag" title="Derived from file name. Rename the file to change.">' + escapeHtml(deriveVersionFromName(a)) + '</span>'; },
+    value: function(a) { return deriveVersionFromName(a); },
+    readOnly: true,
     appMethod: 'setAssetVersion'
   },
   difficulty: {
@@ -2334,6 +2514,27 @@ var EDITABLE_FIELDS = {
 // Render a <td>'s inner content for an editable field. When not in edit mode, wraps the
 // read-only display in a clickable overlay. When in edit mode, renders the matching input.
 // The whole cell commits on Enter/blur (per user spec), cancels on Escape.
+// Extract the variation/version label from an asset's file name. Looks for the LAST
+// `_V<digits>` token in the name (case-insensitive). Examples:
+//   'Luxury_1N_PrivilegeSupply_GRWM_V2'  -> 'V2'
+//   'Bags_5_Apparel_Lookbook_V10'        -> 'V10'
+//   'something_v3_extra_v5_final'        -> 'V5' (last match wins)
+//   'no_version_in_this_one'             -> falls back to a.version || 'V1'
+// If the name yields no match, we fall back to the stored asset.version (legacy data
+// migrated from when this was an editable field) or 'V1' as the ultimate default.
+function deriveVersionFromName(asset) {
+  if (!asset) return 'V1';
+  var name = asset.name || '';
+  // Match underscore-V-digits, case-insensitive, capturing the digits. Use g flag and
+  // walk all matches to pick the LAST one \u2014 robust against unusual filenames where the
+  // variation marker isn't the very last token.
+  var re = /_v(\d+)/gi;
+  var match, last = null;
+  while ((match = re.exec(name)) !== null) last = match;
+  if (last) return 'V' + last[1];
+  return asset.version || 'V1';
+}
+
 function renderEditableCell(asset, field) {
   var def = EDITABLE_FIELDS[field];
   if (!def) return '';
@@ -2355,6 +2556,11 @@ function renderEditableCell(asset, field) {
   }
 
   if (!editing) {
+    // readOnly fields render the display only; no click-to-edit (e.g. version pill is
+    // derived from filename, edit happens by renaming).
+    if (def.readOnly) {
+      return '<div class="editable-cell editable-cell-readonly">' + def.display(asset) + '</div>';
+    }
     return '<div class="editable-cell" onclick="App.startEdit(' + asset.id + ', \'' + field + '\')" title="Click to edit ' + field + '">' +
       def.display(asset) +
     '</div>';
@@ -3011,12 +3217,6 @@ function queueNotification(recipient, changeType, asset, detail, opts) {
     STATE.pendingBatches[recipient] = { items: [], firstQueuedAt: null };
   }
   var batch = STATE.pendingBatches[recipient];
-  // Dedup: skip if the same asset+change is already waiting in this batch.
-  // Prevents double-queuing when the same save triggers multiple code paths.
-  var alreadyQueued = batch.items.some(function(item) {
-    return item.assetId === asset.id && item.change === changeType;
-  });
-  if (alreadyQueued) return;
   var camp = findCampaignById(asset.campaignId);
   // `opts.statusLabel` overrides the snapshot status — used by CHQ batches so
   // the message shows the categoryHeadQc value (e.g. "For Review") instead of
@@ -3048,7 +3248,20 @@ function queueNotification(recipient, changeType, asset, detail, opts) {
   });
   if (batch.firstQueuedAt === null) batch.firstQueuedAt = Date.now();
 
-  logAction('queued', recipient + ': "' + asset.name + '" \u2014 ' + changeType + ' (batch ' + batch.items.length + '/' + BATCH_SIZE_LIMIT + ')');
+  // Build a human-readable recipient label that matches what the Notifications tab
+  // shows. Avoids the redundant "Sharm: ... Sharm" you'd otherwise get when the
+  // editor whose action triggered this is also the recipient (e.g. a PM editing
+  // their own video). The activity log's user chip already shows WHO triggered the
+  // queue, so the message body can focus on WHAT and WHO RECEIVES.
+  var recipientLabel;
+  if (typeof recipient === 'string' && recipient.indexOf('PM:') === 0) {
+    recipientLabel = 'PM \u2014 ' + recipient.slice(3);
+  } else if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
+    recipientLabel = 'Category Head \u2014 ' + recipient.slice(4);
+  } else {
+    recipientLabel = recipient; // editor name as-is
+  }
+  logAction('queued', '"' + asset.name + '" \u2014 ' + changeType + ' \u2192 ' + recipientLabel + ' (batch ' + batch.items.length + ')');
 
   // Check if we should fire
   if (batch.items.length >= BATCH_SIZE_LIMIT) {
@@ -3154,15 +3367,48 @@ function clearBatch(recipient) {
 // race-check without parsing the full state blob. Will migrate to Firestore once the
 // Firebase wiring lands (shared flag eliminates duplicate-browser sends entirely).
 var TALLY_STORAGE_KEY = 'tilt-creative-tracker-last-tally-date';
+// Firestore doc path for the shared tally race flag. When Firebase is connected, this is
+// the source of truth: a transactional write determines which browser fires the tally,
+// and all other browsers atomically lose the race and skip. Falls back to localStorage
+// when Firestore is unreachable (offline mode).
+var TALLY_FIRESTORE_DOC = 'meta/dailyTally';
+// Cached value of the Firestore-shared lastSentDate. Updated by an onSnapshot listener
+// (set up on app boot, see attachTallyListener). Until the listener delivers its first
+// snapshot, this is null and we fall back to localStorage.
+var _tallySharedLastSent = null;
+var _tallySharedReady = false; // becomes true after the first onSnapshot landing
+var _tallySharedUnsub = null;
 // Transient: when the ticker first notices a date change, it stamps a "fire at" time
-// 0\u201330 seconds in the future. This jitter reduces duplicate sends when multiple team
-// members have the app open \u2014 whichever browser wins the race writes the storage key,
-// and the others see the updated date and skip. Not bulletproof without Firestore;
-// occasional duplicates are possible. Cleared after fire or when date matches.
+// 0\u201330 seconds in the future. This jitter spreads firing across browsers so the
+// transactional Firestore write resolves cleanly with one winner.
 var _tallyFireAt = null;
 
+// Subscribe to the shared tally date in Firestore so all browsers see writes within ~1s.
+// Called once after Firebase initialization. Idempotent \u2014 safe to call multiple times.
+function attachTallyListener() {
+  if (typeof fbDb === 'undefined' || !fbDb) return; // Firebase not loaded
+  if (_tallySharedUnsub) return; // already subscribed
+  try {
+    _tallySharedUnsub = fbDb.doc(TALLY_FIRESTORE_DOC).onSnapshot(function(snap) {
+      if (snap && snap.exists) {
+        var data = snap.data() || {};
+        _tallySharedLastSent = data.lastSentDate || null;
+      } else {
+        _tallySharedLastSent = null; // doc doesn't exist yet \u2014 treat as never sent
+      }
+      _tallySharedReady = true;
+    }, function(err) {
+      console.warn('Tally listener error', err);
+      _tallySharedReady = false; // fall back to localStorage
+    });
+  } catch (e) {
+    console.warn('Failed to attach tally listener', e);
+  }
+}
+
 // Initialize the stored date on first load if blank so we don't fire immediately on
-// first run (we only want to fire on a genuine midnight crossover).
+// first run (we only want to fire on a genuine midnight crossover). Stamps localStorage
+// only \u2014 the Firestore doc gets stamped on the first real send via transaction.
 function initTallyDate() {
   try {
     if (!localStorage.getItem(TALLY_STORAGE_KEY)) {
@@ -3171,25 +3417,167 @@ function initTallyDate() {
   } catch (e) { /* localStorage may be blocked */ }
 }
 
+// Read the most authoritative "last sent date" we have. Prefers the live Firestore value;
+// falls back to localStorage when Firestore isn't ready (first-load grace period or offline).
+function readLastTallyDate() {
+  if (_tallySharedReady) return _tallySharedLastSent; // even null is authoritative once Firestore has spoken
+  try { return localStorage.getItem(TALLY_STORAGE_KEY); } catch (e) { return null; }
+}
+
+// Atomically claim today's tally slot in Firestore. Returns a promise resolving to true
+// if THIS browser won the race (and should fire the tally), false if someone else got
+// there first. Falls back to a localStorage write when Firestore is unreachable.
+function claimTallySlot(today) {
+  // Firestore transactional path
+  if (_tallySharedReady && typeof fbDb !== 'undefined' && fbDb) {
+    var ref = fbDb.doc(TALLY_FIRESTORE_DOC);
+    return fbDb.runTransaction(function(tx) {
+      return tx.get(ref).then(function(snap) {
+        var existing = snap.exists ? (snap.data() || {}).lastSentDate : null;
+        if (existing === today) {
+          return false; // someone else already won today
+        }
+        var stamp = {
+          lastSentDate: today,
+          sentBy: (typeof Auth !== 'undefined' && Auth.user && Auth.user.uid) ? Auth.user.uid : 'unknown',
+          sentAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        tx.set(ref, stamp, { merge: true });
+        return true;
+      });
+    }).then(function(won) {
+      // Mirror to localStorage so this tab also short-circuits without waiting for the
+      // onSnapshot echo.
+      if (won) { try { localStorage.setItem(TALLY_STORAGE_KEY, today); } catch (e) {} }
+      return won;
+    }).catch(function(err) {
+      console.warn('Tally transaction failed, falling back to localStorage', err);
+      return claimTallyLocalOnly(today);
+    });
+  }
+  // Firestore unavailable (offline / not loaded) \u2014 use local-only flag
+  return Promise.resolve(claimTallyLocalOnly(today));
+}
+
+// Local-only fallback when Firestore can't help. Best-effort; may double-send across
+// disconnected browsers (which is the existing pre-Firestore behavior).
+function claimTallyLocalOnly(today) {
+  try {
+    var current = localStorage.getItem(TALLY_STORAGE_KEY);
+    if (current === today) return false;
+    localStorage.setItem(TALLY_STORAGE_KEY, today);
+    return true;
+  } catch (e) { return false; }
+}
+
+// =============================================================================
+// MULTI-BROWSER SEND DEDUPLICATION
+// =============================================================================
+// Generic atomic claim for any notification send. Uses the same pattern as the
+// daily-tally claim (Firestore transaction with last-write-wins + cooldown
+// window), but generalized so it works for editor batches, PM batches, CHQ
+// batches, and QC reports. Each kind of send has its own slot key in Firestore
+// so they don't interfere with each other.
+//
+// Slot keys (under top-level collection 'sendSlots'):
+//   batch_Sharm           \u2014 editor batch for Sharm
+//   batch_PM_UK           \u2014 PM review batch for UK
+//   batch_CHQ_Sneakers    \u2014 category-head batch for Sneakers
+//   qc_42                 \u2014 manual QC report for campaign id 42
+//
+// NOTE: Firestore document paths must have an even segment count, so we use a
+// top-level collection ('sendSlots') with each slot as a doc. Keys are flattened
+// from "batch:Sharm" to "batch_Sharm" since colons aren't valid in doc IDs anyway.
+//
+// Cooldown: SEND_DEDUPE_WINDOW_MS. If the slot was claimed within this window,
+// the new attempt loses the race and skips. Calls return a Promise<boolean>
+// where true = "you won, go ahead and POST" and false = "back off, somebody
+// else is sending or just did".
+//
+// Falls back to a local cooldown map when Firestore is unreachable so the
+// system degrades gracefully (matches the daily-tally fallback behavior).
+var SEND_DEDUPE_WINDOW_MS = 10 * 1000; // 10s \u2014 catches any race the 5s ticker can produce
+var SEND_SLOTS_COLLECTION = 'sendSlots'; // top-level collection: sendSlots/{key} is a 2-segment doc path
+
+// Local fallback memory for when Firestore isn't ready. Map of slotKey -> ms
+// timestamp of last successful claim. Cleared on reload (a refreshed browser
+// re-fetches from Firestore via the listener, so consistency is restored).
+var _sendSlotLocalClaims = {};
+
+function claimSendSlot(slotKey) {
+  if (!slotKey || typeof slotKey !== 'string') return Promise.resolve(true);
+  var nowMs = Date.now();
+  // Slot key may contain colons (e.g. "batch:PM:UK"); replace with underscores so
+  // it's a valid Firestore doc id.
+  var safeKey = slotKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (typeof fbDb !== 'undefined' && fbDb) {
+    var ref = fbDb.collection(SEND_SLOTS_COLLECTION).doc(safeKey);
+    return fbDb.runTransaction(function(tx) {
+      return tx.get(ref).then(function(snap) {
+        var existing = snap.exists ? (snap.data() || {}) : {};
+        var lastAt = (existing.lastSentAt && typeof existing.lastSentAt.toMillis === 'function')
+          ? existing.lastSentAt.toMillis()
+          : (typeof existing.lastSentAt === 'number' ? existing.lastSentAt : 0);
+        if (lastAt && (nowMs - lastAt) < SEND_DEDUPE_WINDOW_MS) {
+          return false; // somebody else is sending or just sent within the cooldown
+        }
+        var stamp = {
+          slotKey: slotKey,
+          lastSentAt: firebase.firestore.FieldValue.serverTimestamp(),
+          sentBy: (typeof Auth !== 'undefined' && Auth.user && Auth.user.uid) ? Auth.user.uid : 'unknown'
+        };
+        tx.set(ref, stamp, { merge: true });
+        return true;
+      });
+    }).then(function(won) {
+      if (won) _sendSlotLocalClaims[slotKey] = nowMs; // mirror to local cache
+      return won;
+    }).catch(function(err) {
+      console.warn('claimSendSlot transaction failed for ' + slotKey + ', falling back', err);
+      return claimSendSlotLocal(slotKey, nowMs);
+    });
+  }
+  return Promise.resolve(claimSendSlotLocal(slotKey, nowMs));
+}
+
+// Local fallback: best-effort cooldown using the in-memory map. Won't dedupe
+// across browsers when Firestore is unreachable, but at least dedupes within
+// the same browser tab.
+function claimSendSlotLocal(slotKey, nowMs) {
+  var lastAt = _sendSlotLocalClaims[slotKey] || 0;
+  if (lastAt && (nowMs - lastAt) < SEND_DEDUPE_WINDOW_MS) return false;
+  _sendSlotLocalClaims[slotKey] = nowMs;
+  return true;
+}
+
 function checkDailyTallyCrossover() {
   try {
     var today = todayISO();
-    var last = localStorage.getItem(TALLY_STORAGE_KEY);
-    if (!last) { localStorage.setItem(TALLY_STORAGE_KEY, today); _tallyFireAt = null; return; }
+    var last = readLastTallyDate();
+    // First-ever load (Firestore says nothing AND localStorage empty): stamp localStorage
+    // so we don't immediately fire. Firestore stamps on first real send.
+    if (!last) {
+      try { localStorage.setItem(TALLY_STORAGE_KEY, today); } catch (e) {}
+      _tallyFireAt = null;
+      return;
+    }
     if (last === today) { _tallyFireAt = null; return; }
-    // Date has rolled forward. Arm a jitter window if not already armed.
+    // Date has rolled forward. Arm a jitter window if not already armed. Jitter spreads
+    // browsers' firing attempts so Firestore's atomic write resolves with one winner
+    // and the others silently lose (rather than all firing within milliseconds).
     if (_tallyFireAt === null) {
       _tallyFireAt = Date.now() + Math.floor(Math.random() * 30000);
       return;
     }
     if (Date.now() < _tallyFireAt) return;
-    // Re-read in case another tab / browser beat us during the jitter window.
-    last = localStorage.getItem(TALLY_STORAGE_KEY);
-    if (last === today) { _tallyFireAt = null; return; }
-    // We won the race. Stamp first so a re-entry from the next tick sees today.
-    localStorage.setItem(TALLY_STORAGE_KEY, today);
+    // Jitter elapsed \u2014 attempt the atomic claim.
     _tallyFireAt = null;
-    sendDailyTally('auto');
+    claimTallySlot(today).then(function(wonRace) {
+      if (wonRace) {
+        sendDailyTally('auto');
+      }
+      // If we lost, do nothing \u2014 another browser already fired.
+    });
   } catch (e) {
     console.warn('Daily tally check failed', e);
   }
@@ -3390,6 +3778,44 @@ function releaseScheduled() {
 //   \u2022 a \u2715 delete button (disabled when the selected category is in use by any campaign)
 //   \u2022 a "\u2795 New" button that reveals an inline text input for adding a category
 // All three mutate STATE.categories and refresh this picker in-place without closing the modal.
+// Build the Month/Year dropdown for the Add/Edit Campaign modals. Generates 24 options
+// covering the current year and the next year (e.g. Jan 2026 \u2192 Dec 2027). The leading
+// option is "\u2014 No month set \u2014" with empty value, so the field is fully optional.
+// `selected` is an ISO 'YYYY-MM' string (or empty).
+function monthYearPickerHtml(selected) {
+  var now = new Date();
+  var startYear = now.getFullYear();
+  var opts = ['<option value=""' + (!selected ? ' selected' : '') + '>\u2014 No month set \u2014</option>'];
+  for (var y = startYear; y <= startYear + 1; y++) {
+    for (var m = 0; m < 12; m++) {
+      var iso = y + '-' + (m < 9 ? '0' + (m + 1) : (m + 1));
+      var label = MONTH_SHORT[m] + ' ' + y;
+      var sel = (selected === iso) ? ' selected' : '';
+      opts.push('<option value="' + iso + '"' + sel + '>' + label + '</option>');
+    }
+  }
+  // If the selected value is OUTSIDE this 24-month window (legacy campaign in past year
+  // or far future), still show it as an option so we don't silently lose it on save.
+  if (selected) {
+    var inRange = false;
+    for (var yy = startYear; yy <= startYear + 1 && !inRange; yy++) {
+      for (var mm = 0; mm < 12 && !inRange; mm++) {
+        var isoCheck = yy + '-' + (mm < 9 ? '0' + (mm + 1) : (mm + 1));
+        if (isoCheck === selected) inRange = true;
+      }
+    }
+    if (!inRange && /^\d{4}-\d{2}$/.test(selected)) {
+      var sy = selected.slice(0, 4);
+      var sm = parseInt(selected.slice(5, 7), 10) - 1;
+      opts.splice(1, 0, '<option value="' + selected + '" selected>' + MONTH_SHORT[sm] + ' ' + sy + ' (existing)</option>');
+    }
+  }
+  return '<div class="form-row">' +
+    '<label class="form-label">Month / Year <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
+    '<select id="f-cmonth" class="form-select">' + opts.join('') + '</select>' +
+  '</div>';
+}
+
 function categoryPickerHtml(selected) {
   var opts = STATE.categories.length === 0
     ? '<option value="" disabled selected>\u2014 no categories \u2014</option>'
@@ -3498,6 +3924,7 @@ function showAddSubCampaignModal(forCountry) {
       '<div class="form-row"><label class="form-label">Country</label><select id="f-ccountry" class="form-select">' + countryOpts + '</select></div>' +
       '<div class="form-row"><label class="form-label">Type</label><select id="f-ctype" class="form-select">' + typeOpts + '</select></div>' +
       categoryPickerHtml('') +
+      monthYearPickerHtml('') +
       '<div class="form-row full">' +
         '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
           '<label class="form-label" style="margin:0;">Raw Files</label>' +
@@ -3546,6 +3973,7 @@ function showAddSubCampaignModal(forCountry) {
       type: document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE,
       driveId: document.getElementById('f-cdrive').value,
       slackOverride: document.getElementById('f-cslack').value,
+      monthYear: document.getElementById('f-cmonth').value || '',
       hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked
     };
     STATE.campaigns.push(camp);
@@ -3577,6 +4005,7 @@ function showEditCampaignModal() {
       '<div class="form-row"><label class="form-label">Country</label><select id="f-ccountry" class="form-select">' + countryOpts + '</select></div>' +
       '<div class="form-row"><label class="form-label">Type</label><select id="f-ctype" class="form-select">' + typeOpts + '</select></div>' +
       categoryPickerHtml(c.category) +
+      monthYearPickerHtml(c.monthYear || '') +
       (function() {
         var briefUrl = extractSingleUrl(c.brief);
         var driveUrl = extractSingleUrl(c.driveId);
@@ -3626,6 +4055,7 @@ function showEditCampaignModal() {
     c.type = document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE;
     c.driveId = document.getElementById('f-cdrive').value;
     c.slackOverride = document.getElementById('f-cslack').value;
+    c.monthYear = document.getElementById('f-cmonth').value || '';
     c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
     reorderCampaigns(true);
     STATE.expandedCountries[c.country] = true;
@@ -4057,10 +4487,37 @@ function renderTopbar() {
 
 function renderSidebar() {
   var compact = !!STATE.sidebarCompact;
+  // Build the set of months that exist across all campaigns' explicit monthYear field.
+  // Used to populate the month-filter dropdown so we don't list months with zero
+  // assigned campaigns. Each entry is an ISO 'YYYY-MM' string. Sorted ascending.
+  var monthSet = {};
+  var hasAnyUndated = false;
+  STATE.campaigns.forEach(function(c) {
+    var iso = (c.monthYear || '').slice(0, 7);
+    if (iso && /^\d{4}-\d{2}$/.test(iso)) monthSet[iso] = true;
+    else hasAnyUndated = true;
+  });
+  var months = Object.keys(monthSet).sort();
+  var activeFilter = STATE.sidebarMonthFilter || 'all';
+
+  // Helper: does this campaign's monthYear match the active filter?
+  // 'all' = always yes. 'none' = matches if campaign has no monthYear set.
+  // 'YYYY-MM' = matches if campaign.monthYear equals it exactly.
+  function campMatchesMonthFilter(campaign) {
+    if (activeFilter === 'all') return true;
+    var cm = (campaign.monthYear || '').slice(0, 7);
+    if (activeFilter === 'none') return !cm;
+    return cm === activeFilter;
+  }
+
   var html = '';
   for (var i = 0; i < STATE.countries.length; i++) {
     var country = STATE.countries[i];
-    var subs = getSubCampaignsForCountry(country.code);
+    var allSubs = getSubCampaignsForCountry(country.code);
+    // Apply the month filter to get what's actually visible. We render the country header
+    // only if at least one of its campaigns survives the filter (avoids empty country rows).
+    var subs = allSubs.filter(function(s) { return campMatchesMonthFilter(s); });
+    if (activeFilter !== 'all' && subs.length === 0) continue; // hide empty country in filter mode
     var isOpen = STATE.expandedCountries[country.code];
     var chevron = isOpen ? '\u25BE' : '\u25B8';
     // Compact country row: hide the country name; keep chevron, flag, count. Title attribute
@@ -4086,7 +4543,8 @@ function renderSidebar() {
     if (isOpen) {
       html += '<div class="subcamp-list open" data-country="' + country.code + '">';
       // In compact mode, only show the currently-selected sub-campaign for this country.
-      // Full mode keeps showing every sub-campaign as before.
+      // Full mode keeps showing every sub-campaign as before. `subs` is already filtered
+      // by the month dropdown if active.
       var subsToRender = compact
         ? subs.filter(function(s) { return s.id === STATE.activeSubCampaignId; })
         : subs;
@@ -4152,6 +4610,39 @@ function renderSidebar() {
     }
     html += '</div>';
   }
+  // Build the month-filter dropdown HTML. Hidden in compact mode (no room to render
+  // a useful select). When the filter is active, append a "(filter active)" hint to
+  // the sidebar header for visibility.
+  var monthFilterHtml = '';
+  if (!compact) {
+    var monthLabels = {
+      'all': 'All months',
+      'none': 'No date set'
+    };
+    months.forEach(function(m) {
+      // 'YYYY-MM' \u2192 'Apr 2026'
+      var year = m.slice(0, 4);
+      var monthIdx = parseInt(m.slice(5, 7), 10) - 1;
+      monthLabels[m] = MONTH_SHORT[monthIdx] + ' ' + year;
+    });
+    var optionsHtml = '<option value="all"' + (activeFilter === 'all' ? ' selected' : '') + '>All months</option>';
+    months.forEach(function(m) {
+      optionsHtml += '<option value="' + m + '"' + (activeFilter === m ? ' selected' : '') + '>' + escapeHtml(monthLabels[m]) + '</option>';
+    });
+    if (hasAnyUndated) {
+      optionsHtml += '<option value="none"' + (activeFilter === 'none' ? ' selected' : '') + '>No date set</option>';
+    }
+    monthFilterHtml =
+      '<div class="sidebar-month-filter">' +
+        '<label class="sidebar-month-label">FILTER BY MONTH</label>' +
+        '<select class="sidebar-month-select" onchange="App.setSidebarMonthFilter(this.value)">' +
+          optionsHtml +
+        '</select>' +
+        (activeFilter !== 'all'
+          ? '<button class="sidebar-month-clear" onclick="App.setSidebarMonthFilter(\'all\')" title="Clear filter">\u2715</button>'
+          : '') +
+      '</div>';
+  }
   var toggleIcon = compact ? '\u00BB' : '\u00AB'; // >> in compact to suggest "expand"; << in full to suggest "collapse"
   var toggleTitle = compact ? 'Expand sidebar' : 'Collapse sidebar';
   var headerInner = compact
@@ -4160,7 +4651,7 @@ function renderSidebar() {
       '<button class="sidebar-toggle" onclick="App.toggleSidebarCompact()" title="' + toggleTitle + '">' + toggleIcon + '</button>';
   return '<div class="sidebar ' + (compact ? 'sidebar-compact' : '') + '">' +
     '<div class="sidebar-header">' + headerInner + '</div>' +
-    '<div class="sidebar-scroll">' + html + '</div></div>';
+    '<div class="sidebar-scroll">' + monthFilterHtml + html + '</div></div>';
 }
 
 function renderCampaignsView() {
@@ -4244,6 +4735,14 @@ function renderCampaignsView() {
     '<span class="meta-chip"><span class="meta-chip-label">rank</span>' + camp.rank + ' / ' + getSubCampaignsForCountry(camp.country).length + '</span>' +
     '<span class="meta-chip"><span class="meta-chip-label">assets</span>' + totalForCamp + '</span>' +
     '<span class="meta-chip"><span class="meta-chip-label">approved</span>' + approved + '/' + totalForCamp + '</span>' +
+    (function() {
+      // Month/Year chip \u2014 only shown if the campaign has one set. Format 'YYYY-MM' \u2192 'Apr 2026'.
+      var my = (camp.monthYear || '').trim();
+      if (!/^\d{4}-\d{2}$/.test(my)) return '';
+      var y = my.slice(0, 4);
+      var m = parseInt(my.slice(5, 7), 10) - 1;
+      return '<span class="meta-chip"><span class="meta-chip-label">month</span>' + MONTH_SHORT[m] + ' ' + y + '</span>';
+    })() +
     drivePill +
     briefPill +
     (function() {
@@ -4265,7 +4764,7 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '</div>' +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(' + camp.id + ')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(' + camp.id + ')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(' + camp.id + ')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
       : '<div class="camp-brief">' + (camp.brief ? escapeHtml(camp.brief) : '<em style="color:var(--text3)">No brief set</em>') + '</div>') +
@@ -4357,6 +4856,55 @@ function renderSchedulerView() {
     '</div></div>';
 }
 
+// Drag-lock for To Do columns is now persisted as `a.dragLocked: true` on each asset.
+// When the user drops a card into a manual position within the To Do column, that flag
+// is set, and the ETA-based sort below respects the manual position. The flag rides
+// through saveState() to Firestore + localStorage, so all teammates see the same
+// custom order. Cleared automatically when the card transitions OUT of Assigned status
+// (since it leaves the To Do column entirely and the lock is no longer meaningful).
+
+// Sort the To Do column items by Estimated Delivery (soonest first) while preserving
+// the position of items that have no ETA OR have been manually drag-positioned. The
+// algorithm is a stable partition + merge:
+//
+//   1. Walk items keeping track of (item, originalIndex)
+//   2. Partition into "sortable" (has ETA, not drag-locked) and "preserved" (everything
+//      else, with their original index recorded)
+//   3. Sort the sortable bucket by ETA ascending
+//   4. Re-assemble: build a result array of the same length, drop preserved items at
+//      their original indices, then fill the gaps with sorted sortable items in order
+//
+// Result: cards with an ETA and no manual drag get reorganized soonest-first; cards
+// without an ETA or that were drag-positioned keep their slot.
+function sortTodoBucketByEta(items) {
+  if (!items || items.length < 2) return items;
+  var sortable = [];
+  var preserved = []; // {item, idx}
+  items.forEach(function(a, i) {
+    var isLocked = !!a.dragLocked;
+    if (!a.estDelivery || isLocked) preserved.push({ item: a, idx: i });
+    else sortable.push(a);
+  });
+  // Sort sortable items by ETA ascending. Stable: same-ETA items keep their original order
+  // (Array.prototype.sort is stable in all evergreen browsers).
+  sortable.sort(function(a, b) {
+    if (a.estDelivery < b.estDelivery) return -1;
+    if (a.estDelivery > b.estDelivery) return 1;
+    return 0;
+  });
+  // Reassemble into the final output: preserved items keep their original index,
+  // sortable items fill the remaining slots in their newly-sorted order.
+  var out = new Array(items.length);
+  preserved.forEach(function(p) { out[p.idx] = p.item; });
+  var s = 0;
+  for (var i = 0; i < out.length; i++) {
+    if (out[i] === undefined) {
+      out[i] = sortable[s++];
+    }
+  }
+  return out;
+}
+
 // ===================== TODAY KANBAN BOARD =====================
 // Four columns on one board: To Do Today, In Progress, Done for Review, Approved.
 // Cards are draggable between columns \u2014 dropping flips the asset's status and fires
@@ -4386,6 +4934,9 @@ function getTodayBoardBuckets() {
     else if (a.status === 'For Review' || a.status === 'Needs Revisions') buckets.review.items.push(a);
     else if (a.status === 'Approved' && a.dateApproved === today) buckets.approved.items.push(a);
   });
+  // Sort the To Do column by Estimated Delivery (soonest first), preserving manually-
+  // dragged items and items without an ETA. Other columns keep their natural array order.
+  buckets.todo.items = sortTodoBucketByEta(buckets.todo.items);
   return buckets;
 }
 
@@ -4420,6 +4971,9 @@ function getThisWeekBoardBuckets() {
       buckets.approved.items.push(a);
     }
   });
+  // Sort the To Do This Week column by Estimated Delivery (soonest first). Other columns
+  // keep their natural array order so drag-to-reorder behaves as expected.
+  buckets.todo.items = sortTodoBucketByEta(buckets.todo.items);
   return buckets;
 }
 
@@ -4569,6 +5123,11 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
     if (targetStatus === 'Approved' && oldStatus !== 'Approved' && !a.dateApproved) {
       a.dateApproved = todayISO();
     }
+    // Card is leaving the To Do column \u2014 clear any drag-lock so it doesn't follow the
+    // card around to other columns. Drag-lock only makes sense within Assigned/To Do.
+    if (oldStatus === 'Assigned' && targetStatus !== 'Assigned') {
+      a.dragLocked = false;
+    }
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + targetStatus);
     emitAssetChangeNotifications(a, { oldEditor: oldEditor, oldStatus: oldStatus });
   }
@@ -4585,6 +5144,12 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   } else {
     // 'end' or any unknown placement \u2014 just append.
     STATE.assets.push(a);
+  }
+  // Mark this asset as drag-locked so subsequent renders preserve the manual position
+  // against the To Do column's ETA-sort. Only meaningful while the card is Assigned;
+  // status change to anything else clears the flag (above).
+  if (a.status === 'Assigned') {
+    a.dragLocked = true;
   }
   render();
 }
@@ -5000,33 +5565,22 @@ function computeDailyLog(days) {
     // are ignored \u2014 the tab is for tracking per-editor accountability on live work.
     if (!a.editor || DAILY_LOG_EDITORS.indexOf(a.editor) < 0) return;
     var statusByDay = days.map(function(d) { return getAssetStateOnDay(a, d).status || 'Draft'; });
-    // Only include videos that had SOMETHING going on during the window
-    // (i.e. not just Draft for every day). Otherwise long-inactive drafts
-    // would clutter the view.
+    // Show this video in the editor's list if EITHER:
+    //   (a) it had any non-Draft status during the visible week (in flight), OR
+    //   (b) it was approved on a day in the visible week (dateApproved match)
     var hadActivity = false;
     for (var i = 0; i < statusByDay.length; i++) {
       if (statusByDay[i] && statusByDay[i] !== 'Draft') { hadActivity = true; break; }
     }
-    if (!hadActivity) return;
+    var approvedThisWeek = a.dateApproved && days.indexOf(a.dateApproved) >= 0;
+    if (!hadActivity && !approvedThisWeek) return;
     byEditor[a.editor].videos.push({ asset: a, statusByDay: statusByDay });
-    // Count approvals per day: video transitioned INTO Approved ON that day.
-    // Approximation: if statusByDay[i] === 'Approved' and statusByDay[i-1] !== 'Approved'.
-    // For the first day (no prior), only count if dateApproved === days[0].
-    for (var j = 0; j < statusByDay.length; j++) {
-      if (statusByDay[j] === 'Approved') {
-        var prior = j > 0 ? statusByDay[j - 1] : null;
-        if (prior !== 'Approved') {
-          // Was it newly approved this day? Use dateApproved as tie-breaker.
-          if (j === 0) {
-            // First day in window: count only if dateApproved matches this day.
-            if (a.dateApproved === days[0]) {
-              byEditor[a.editor].approvedByDay[j]++;
-            }
-          } else {
-            byEditor[a.editor].approvedByDay[j]++;
-          }
-        }
-      }
+    // Per-day approval count: strictly based on the asset's dateApproved field. If the
+    // editor approves a video and stamps dateApproved=2026-04-28, that's the day it
+    // counts \u2014 not the day status flipped (those can disagree). One video = one day.
+    if (a.dateApproved) {
+      var idx = days.indexOf(a.dateApproved);
+      if (idx >= 0) byEditor[a.editor].approvedByDay[idx]++;
     }
   });
 
@@ -5073,10 +5627,7 @@ function renderDailyLogView() {
     ? STATE.logEditor
     : DAILY_LOG_EDITORS[0];
 
-  // Editor dropdown \u2014 one <option> per tracked editor. Uses native <select> for
-  // reliability; onchange calls back into App.setLogEditor which saves &
-  // re-renders. Shows each editor's total-approved count in the label so you
-  // can see at-a-glance who's behind before even switching.
+  // Editor dropdown \u2014 one <option> per tracked editor with their week total inline.
   var optionsHtml = DAILY_LOG_EDITORS.map(function(e) {
     var row = data[e] || { approvedByDay: [] };
     var total = (row.approvedByDay || []).reduce(function(s, n) { return s + n; }, 0);
@@ -5088,60 +5639,104 @@ function renderDailyLogView() {
     '<select class="log-editor-select" onchange="App.setLogEditor(this.value)">' + optionsHtml + '</select>' +
   '</div>';
 
-  // Day-header row across the grid.
-  var headerCellsHtml = days.map(function(d) { return renderDailyLogDayHeader(d); }).join('');
-
-  // Build the (single) selected editor's section.
+  // Resolve this editor's videos + their approval-by-day counts.
   var row = data[selectedEditor] || { videos: [], approvedByDay: days.map(function() { return 0; }) };
   var totalApproved = row.approvedByDay.reduce(function(s, n) { return s + n; }, 0);
   var daysMissed = row.approvedByDay.filter(function(n) { return n < target; }).length;
   var daysHit = days.length - daysMissed;
 
-  // Per-day approval counts row \u2014 the accountability headline.
-  var approvalCellsHtml = row.approvedByDay.map(function(count, i) {
-    var status = count >= target ? 'hit' : (count > 0 ? 'partial' : 'miss');
-    return '<div class="log-approved-cell log-approved-' + status + '" ' +
-      'title="' + count + ' approved on ' + formatDate(days[i]) + ' \u00B7 target ' + target + '">' +
-      '<span class="log-approved-num">' + count + '</span>' +
-      '<span class="log-approved-slash">/</span>' +
-      '<span class="log-approved-target">' + target + '</span>' +
-    '</div>';
-  }).join('');
+  // Bucket each video into the days it was actively worked on (any non-Draft status
+  // on that day) OR was approved on (dateApproved match). One video can appear in
+  // multiple days; that's fine \u2014 it shows the editor's ongoing work timeline.
+  var videosByDay = days.map(function() { return []; });
+  row.videos.forEach(function(v) {
+    days.forEach(function(d, dayIdx) {
+      var statusThatDay = v.statusByDay[dayIdx] || 'Draft';
+      var approvedOnDay = v.asset.dateApproved === d;
+      // Show under day X if either had a non-Draft status that day, OR was approved on that day
+      if (statusThatDay !== 'Draft' || approvedOnDay) {
+        videosByDay[dayIdx].push(v);
+      }
+    });
+  });
 
-  // One grid row per video: name cell + 7 status cells.
-  var videoRowsHtml;
-  if (row.videos.length === 0) {
-    videoRowsHtml = '<div class="log-empty-editor">No active work in this window for ' + escapeHtml(selectedEditor) + '.</div>';
-  } else {
-    // Sort videos: approved-complete ones at bottom, active ones at top.
-    var sortedVids = row.videos.slice().sort(function(a, b) {
-      var aDone = a.statusByDay[a.statusByDay.length - 1] === 'Approved' ? 1 : 0;
-      var bDone = b.statusByDay[b.statusByDay.length - 1] === 'Approved' ? 1 : 0;
+  // Render one day-card per workday. Each card lists the videos worked that day with
+  // the video's CURRENT status and its category-head info (head name + QC verdict).
+  var dayCardsHtml = days.map(function(dayIso, dayIdx) {
+    var vids = videosByDay[dayIdx];
+    var approvedThatDay = row.approvedByDay[dayIdx];
+    var dateLabel = formatDate(dayIso);
+    var dowLabel = (function() {
+      var d = new Date(dayIso + 'T00:00:00');
+      return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    })();
+    var isToday = (dayIso === todayISO());
+    var hitClass = approvedThatDay >= target ? 'log-day-hit' : (approvedThatDay > 0 ? 'log-day-partial' : 'log-day-miss');
+    // Sort: not-yet-approved first, approved last. Within each group, by name.
+    var sortedVids = vids.slice().sort(function(a, b) {
+      var aDone = a.asset.status === 'Approved' ? 1 : 0;
+      var bDone = b.asset.status === 'Approved' ? 1 : 0;
       if (aDone !== bDone) return aDone - bDone;
       return (a.asset.name || '').localeCompare(b.asset.name || '');
     });
-    videoRowsHtml = sortedVids.map(function(v) {
-      var a = v.asset;
-      var camp = findCampaignById(a.campaignId);
-      var campLabel = camp ? (camp.country + ' \u00B7 ' + camp.name) : '';
-      var cells = v.statusByDay.map(function(s) {
-        return '<div class="log-vid-cell">' + renderDailyLogStatusBadge(s) + '</div>';
-      }).join('');
-      var finalDone = v.statusByDay[v.statusByDay.length - 1] === 'Approved';
-      return '<div class="log-grid-row log-vid-row' + (finalDone ? ' is-done' : '') + '" ' +
-        'onclick="App.editAssetById(' + a.id + ')" ' +
-        'title="Click to open edit modal">' +
-        '<div class="log-vid-name-cell">' +
-          '<div class="log-vid-name">' + escapeHtml(a.name) + '</div>' +
-          '<div class="log-vid-sub">' +
-            '<span class="log-vid-ver">' + escapeHtml(a.version || 'V1') + '</span>' +
-            '<span class="log-vid-camp">' + escapeHtml(campLabel) + '</span>' +
+    var rowsHtml;
+    if (sortedVids.length === 0) {
+      rowsHtml = '<div class="log-day-empty">No work logged on ' + dowLabel + '.</div>';
+    } else {
+      rowsHtml = sortedVids.map(function(v) {
+        var a = v.asset;
+        var camp = findCampaignById(a.campaignId);
+        var campLabel = camp ? (camp.country + ' \u00B7 ' + camp.name) : '';
+        var version = (typeof deriveVersionFromName === 'function') ? deriveVersionFromName(a) : (a.version || 'V1');
+        // Category head info: head name (if any) + their QC status. If no head is
+        // configured for the category, show a muted em-dash for the name but still
+        // surface the QC value (since editors can set it manually).
+        var headName = getCategoryHead(a.category);
+        var headQc = a.categoryHeadQc || 'Draft';
+        var headQcClass = ({
+          'Draft': 'log-chq-draft',
+          'For Review': 'log-chq-review',
+          'Needs Revisions': 'log-chq-revisions',
+          'Approved': 'log-chq-approved'
+        })[headQc] || 'log-chq-draft';
+        var headCell =
+          '<div class="log-vid-chq">' +
+            '<div class="log-vid-chq-name" title="Category head for ' + escapeHtml(a.category || '\u2014') + '">' +
+              (headName ? escapeHtml(headName) : '<span class="log-vid-chq-muted">no head</span>') +
+            '</div>' +
+            '<div class="log-vid-chq-status ' + headQcClass + '" title="Category head QC: ' + escapeHtml(headQc) + '">' +
+              escapeHtml(headQc) +
+            '</div>' +
+          '</div>';
+        var done = a.status === 'Approved';
+        return '<div class="log-day-vid-row' + (done ? ' is-done' : '') + '" ' +
+          'onclick="App.editAssetById(' + a.id + ')" title="Click to open edit modal">' +
+          '<div class="log-day-vid-name">' +
+            '<div class="log-day-vid-title">' + escapeHtml(a.name) + ' <span class="log-day-vid-ver">' + escapeHtml(version) + '</span></div>' +
+            '<div class="log-day-vid-camp">' + escapeHtml(campLabel) + '</div>' +
           '</div>' +
+          '<div class="log-day-vid-status">' + renderDailyLogStatusBadge(a.status || 'Draft') + '</div>' +
+          headCell +
+        '</div>';
+      }).join('');
+    }
+    return '<div class="log-day-card' + (isToday ? ' is-today' : '') + '">' +
+      '<div class="log-day-card-header">' +
+        '<div class="log-day-card-date">' +
+          '<span class="log-day-card-dow">' + dowLabel + '</span>' +
+          '<span class="log-day-card-num">' + escapeHtml(dateLabel) + '</span>' +
+          (isToday ? '<span class="log-day-today-pill">TODAY</span>' : '') +
         '</div>' +
-        cells +
-      '</div>';
-    }).join('');
-  }
+        '<div class="log-day-card-stats ' + hitClass + '" title="' + approvedThatDay + ' approved \u00B7 target ' + target + '">' +
+          '<span class="log-day-card-num-big">' + approvedThatDay + '</span>' +
+          '<span class="log-day-card-slash">/</span>' +
+          '<span class="log-day-card-target">' + target + '</span>' +
+          '<span class="log-day-card-stats-label">approved</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="log-day-card-body">' + rowsHtml + '</div>' +
+    '</div>';
+  }).join('');
 
   // Summary stat bar under the dropdown.
   var summaryHtml = row.videos.length === 0
@@ -5178,17 +5773,7 @@ function renderDailyLogView() {
       '</div>' +
       summaryHtml +
     '</div>' +
-    '<div class="log-grid">' +
-      '<div class="log-grid-row log-day-header-grid-row">' +
-        '<div class="log-vid-name-cell log-vid-name-cell-header log-vid-name-cell-sticky">Video</div>' +
-        headerCellsHtml +
-      '</div>' +
-      '<div class="log-grid-row log-grid-row-header">' +
-        '<div class="log-vid-name-cell log-vid-name-cell-header">Approvals \u2192</div>' +
-        approvalCellsHtml +
-      '</div>' +
-      videoRowsHtml +
-    '</div>' +
+    '<div class="log-day-cards">' + dayCardsHtml + '</div>' +
   '</div>';
 }
 
@@ -5509,72 +6094,10 @@ function renderNotificationsView() {
         '</div>';
       }).join('');
 
-  return '<div class="content"><div class="notif-panel">' +
-    fileBanner +
-    '<div class="section-title">Pending Batches <button class="run-btn" style="margin-left:auto; padding:5px 12px; font-size:12px;" onclick="App.showExport()">\u{1F4E4} Export for editor</button></div>' +
-    '<div class="auto-card">' +
-      '<div class="auto-desc" style="margin:0 0 6px;">Notifications queue briefly and fire as a batch Slack message after <strong style="color:var(--text1);">10 seconds</strong> from the first update. Try editing a video in the Campaigns tab to see it queue here.</div>' +
-      '<div class="auto-desc" style="margin:0; font-size:11.5px; color:var(--text3);"><strong style="color:var(--text2);">Button legend:</strong> \u{1F680} POST to Slack via webhook \u00B7 \u{1F4CB} copy to clipboard \u00B7 \u{1F517} open Slack channel \u00B7 \u{1F4E8} mark sent in-app without posting (dry-run) \u00B7 Clear discards the batch. ' +
-        (anyWebhookReady ? '' : '<span style="color:var(--amber-text);">\u26A0 No webhooks configured yet \u2014 set a global fallback or per-country webhook in Automations to enable \u{1F680} Send.</span>') +
-      '</div>' +
-      '<div class="batch-grid">' + editorCards + '</div>' +
-    '</div>' +
-    '<div class="section-title">PM Review Queues <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires to country webhook when a video flips to For Review)</span></div>' +
-    '<div class="auto-card">' +
-      '<div class="batch-grid">' + pmCards + '</div>' +
-    '</div>' +
-    '<div class="section-title">Category Head QC Queues <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires when a video’s Category Head QC flips to For Review — @-mentions the assigned head)</span></div>' +
-    '<div class="auto-card">' +
-      '<div class="batch-grid">' + chqCards + '</div>' +
-    '</div>' +
-    '<div class="section-title">Category Head Approved <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires when a video’s Category Head QC flips to Approved — pings country PM with the video link)</span></div>' +
-    '<div class="auto-card">' +
-      '<div class="batch-grid">' + chaCards + '</div>' +
-    '</div>' +
-    (function() {
-      // Daily tally \u2014 one card per country with the current count breakdown and a
-      // per-country manual fire button. Auto-fires at local midnight via the ticker
-      // (see checkDailyTallyCrossover). The "last sent" date comes from localStorage so
-      // the value survives reloads and can race-check against other browser tabs.
-      var lastSent = '';
-      try { lastSent = localStorage.getItem(TALLY_STORAGE_KEY) || ''; } catch (e) { lastSent = ''; }
-      var lastSentLabel = lastSent ? formatDate(lastSent) : 'never';
-      var tallyCards = STATE.countries.map(function(c) {
-        var tally = buildDailyTallyForCountry(c.code);
-        var total = tally.counts.Assigned + tally.counts['Needs Revisions'] + tally.counts.Approved;
-        var url = resolveDailyTallyWebhook(c.code);
-        var hasUrl = webhookValid(url);
-        var canSend = hasUrl && total > 0;
-        var sendTitle = !hasUrl
-          ? 'No webhook resolves for ' + c.code + ' \u2014 set one in Automations'
-          : (total === 0 ? 'No activity for ' + c.code + ' yet' : 'Send today\u2019s tally to Slack');
-        var sendAttrs = canSend
-          ? 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '"'
-          : 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '" disabled style="opacity:0.45; cursor:not-allowed;"';
-        return '<div class="batch-card">' +
-          '<div class="batch-card-header">' +
-            '<div class="country-flag flag-' + c.code + '">' + c.code + '</div>' +
-            '<div style="flex:1; min-width:0;">' +
-              '<div style="font-size:13px; font-weight:600; color:var(--text1);">' + escapeHtml(c.name) + '</div>' +
-              '<div style="font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; margin-top:2px;">' +
-                '<span style="color:var(--blue-text);">' + tally.counts.Assigned + ' Assigned</span> \u00B7 ' +
-                '<span style="color:var(--amber-text);">' + tally.counts['Needs Revisions'] + ' Revisions</span> \u00B7 ' +
-                '<span style="color:var(--green-text);">' + tally.counts.Approved + ' Approved</span>' +
-              '</div>' +
-            '</div>' +
-            '<button ' + sendAttrs + ' onclick="App.sendDailyTallyForCountry(\'' + c.code + '\')">\u{1F680}</button>' +
-            '<button class="sent-copy-btn" title="Copy today\u2019s tally to clipboard" onclick="App.copyDailyTally(\'' + c.code + '\')">\u{1F4CB}</button>' +
-          '</div>' +
-        '</div>';
-      }).join('');
-      return '<div class="section-title">Daily Tally <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(auto-fires at local midnight \u00B7 last sent: ' + escapeHtml(lastSentLabel) + ')</span></div>' +
-        '<div class="auto-card">' +
-          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One message per country with every video currently in <span style="color:var(--blue-text);">Assigned</span>, <span style="color:var(--amber-text);">Needs Revisions</span>, and <span style="color:var(--green-text);">Approved</span>. Auto-fires at <strong style="color:var(--text1);">local midnight (00:00)</strong> with a 0\u201330s jitter so multiple open tabs don\'t duplicate the send. Caveat: if no team member has the app open at midnight, that day is skipped \u2014 this will become bulletproof once Firebase Cloud Functions are wired up.</div>' +
-          '<div style="margin-bottom:10px;"><button class="run-btn" onclick="App.sendDailyTallyAll()" style="background:var(--accent-dim); color:var(--accent2); border-color:var(--border2);">\u{1F680} Send all countries now</button></div>' +
-          '<div class="batch-grid">' + tallyCards + '</div>' +
-        '</div>';
-    })() +
-    (function() {
+  // Build QC Reports section first so we can place it at the TOP of the notifications
+  // panel. The same logic used to live inline mid-return; hoisting it lets us keep all
+  // section logic intact while changing only the visual order.
+  var qcReportsHtml = (function() {
       // Build one QC report card per sub-campaign that has at least one video with
       // a non-Draft QC state. Cards are derived live from asset.qc on every render \u2014
       // no separate queue state. Send button builds a dedicated QC message and POSTs
@@ -5631,7 +6154,85 @@ function renderNotificationsView() {
           '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send is enabled once at least one video is marked <span style="color:var(--amber-text);">Missing files</span> or <span style="color:var(--pink-text);">Missing prices</span>. Ready videos are included as a count in the Slack message.</div>' +
           '<div class="batch-grid">' + qcCards + '</div>' +
         '</div>';
+  })();
+
+  return '<div class="content"><div class="notif-panel">' +
+    fileBanner +
+    qcReportsHtml +
+    '<div class="section-title">Pending Batches <button class="run-btn" style="margin-left:auto; padding:5px 12px; font-size:12px;" onclick="App.showExport()">\u{1F4E4} Export for editor</button></div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-desc" style="margin:0 0 6px;">Notifications queue briefly and fire as a batch Slack message after <strong style="color:var(--text1);">10 seconds</strong> from the first update. Try editing a video in the Campaigns tab to see it queue here.</div>' +
+      '<div class="auto-desc" style="margin:0; font-size:11.5px; color:var(--text3);"><strong style="color:var(--text2);">Button legend:</strong> \u{1F680} POST to Slack via webhook \u00B7 \u{1F4CB} copy to clipboard \u00B7 \u{1F517} open Slack channel \u00B7 \u{1F4E8} mark sent in-app without posting (dry-run) \u00B7 Clear discards the batch. ' +
+        (anyWebhookReady ? '' : '<span style="color:var(--amber-text);">\u26A0 No webhooks configured yet \u2014 set a global fallback or per-country webhook in Automations to enable \u{1F680} Send.</span>') +
+      '</div>' +
+      '<div class="batch-grid">' + editorCards + '</div>' +
+    '</div>' +
+    '<div class="section-title">PM Review Queues <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires to country webhook when a video flips to For Review)</span></div>' +
+    '<div class="auto-card">' +
+      '<div class="batch-grid">' + pmCards + '</div>' +
+    '</div>' +
+    '<div class="section-title">Category Head QC Queues <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires when a video’s Category Head QC flips to For Review — @-mentions the assigned head)</span></div>' +
+    '<div class="auto-card">' +
+      '<div class="batch-grid">' + chqCards + '</div>' +
+    '</div>' +
+    '<div class="section-title">Category Head Approved <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires when a video’s Category Head QC flips to Approved — pings country PM with the video link)</span></div>' +
+    '<div class="auto-card">' +
+      '<div class="batch-grid">' + chaCards + '</div>' +
+    '</div>' +
+    (function() {
+      // Daily tally \u2014 one card per country with the current count breakdown and a
+      // per-country manual fire button. Auto-fires at local midnight via the ticker
+      // (see checkDailyTallyCrossover). The "last sent" date comes from localStorage so
+      // the value survives reloads and can race-check against other browser tabs.
+      var lastSent = '';
+      try { lastSent = localStorage.getItem(TALLY_STORAGE_KEY) || ''; } catch (e) { lastSent = ''; }
+      var lastSentLabel = lastSent ? formatDate(lastSent) : 'never';
+      var tallyCards = STATE.countries.map(function(c) {
+        // *** UK-ONLY GATE *** \u2014 the daily tally is currently wired only for UK. Other
+        // country cards are rendered greyed out with a "coming soon" tooltip. To enable
+        // a country, also remove the gate in sendDailyTally() above.
+        var isWired = (c.code === 'UK');
+        var tally = buildDailyTallyForCountry(c.code);
+        var total = tally.counts.Assigned + tally.counts['Needs Revisions'] + tally.counts.Approved;
+        var url = isWired ? resolveDailyTallyWebhook(c.code) : '';
+        var hasUrl = isWired && webhookValid(url);
+        var canSend = isWired && hasUrl && total > 0;
+        var sendTitle = !isWired
+          ? c.name + ' \u2014 daily tally is coming soon (UK only for now)'
+          : (!hasUrl
+            ? 'No webhook resolves for ' + c.code + ' \u2014 set one in Automations'
+            : (total === 0 ? 'No activity for ' + c.code + ' yet' : 'Send today\u2019s tally to Slack'));
+        var sendAttrs = canSend
+          ? 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '"'
+          : 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var copyAttrs = isWired
+          ? 'class="sent-copy-btn" title="Copy today\u2019s tally to clipboard"'
+          : 'class="sent-copy-btn" title="Coming soon" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var cardStyle = isWired ? '' : 'opacity:0.45;';
+        return '<div class="batch-card" style="' + cardStyle + '">' +
+          '<div class="batch-card-header">' +
+            '<div class="country-flag flag-' + c.code + '">' + c.code + '</div>' +
+            '<div style="flex:1; min-width:0;">' +
+              '<div style="font-size:13px; font-weight:600; color:var(--text1);">' + escapeHtml(c.name) + '</div>' +
+              '<div style="font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; margin-top:2px;">' +
+                '<span style="color:var(--blue-text);">' + tally.counts.Assigned + ' Assigned</span> \u00B7 ' +
+                '<span style="color:var(--amber-text);">' + tally.counts['Needs Revisions'] + ' Revisions</span> \u00B7 ' +
+                '<span style="color:var(--green-text);">' + tally.counts.Approved + ' Approved</span>' +
+              '</div>' +
+            '</div>' +
+            '<button ' + sendAttrs + ' onclick="App.sendDailyTallyForCountry(\'' + c.code + '\')">\u{1F680}</button>' +
+            '<button ' + copyAttrs + ' onclick="App.copyDailyTally(\'' + c.code + '\')">\u{1F4CB}</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      return '<div class="section-title">Daily Tally <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(auto-fires at local midnight \u00B7 last sent: ' + escapeHtml(lastSentLabel) + ')</span></div>' +
+        '<div class="auto-card">' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One message per country with every video currently in <span style="color:var(--blue-text);">Assigned</span>, <span style="color:var(--amber-text);">Needs Revisions</span>, and <span style="color:var(--green-text);">Approved</span>. Auto-fires at <strong style="color:var(--text1);">local midnight (00:00)</strong> with a 0\u201330s jitter window. Race-prevention is now coordinated via Firestore so multiple open browsers won\'t double-send. Caveat: if nobody has the app open at midnight, that day is still skipped \u2014 a future Firebase Cloud Function will close that gap.</div>' +
+          '<div style="margin-bottom:10px;"><button class="run-btn" onclick="App.sendDailyTallyAll()" style="background:var(--accent-dim); color:var(--accent2); border-color:var(--border2);">\u{1F680} Send all countries now</button></div>' +
+          '<div class="batch-grid">' + tallyCards + '</div>' +
+        '</div>';
     })() +
+    /* qcReportsHtml \u2014 inserted at the top of the panel, see hoist above the return */
     '<div class="section-title">Sent Notifications (last 20)</div>' +
     '<div class="auto-card"><div class="sent-log">' + sentHtml + '</div></div>' +
   '</div></div>';
@@ -5687,8 +6288,32 @@ function renderAutomationsView() {
       '<div class="webhook-row"><input type="text" id="webhook-input" value="' + escapeHtml(STATE.webhookUrl) + '" placeholder="https://hooks.slack.com/services/..."><button class="save-btn" onclick="App.saveWebhook()">Save locally</button><button class="edit-btn" onclick="App.testWebhook()" style="margin-left:4px;">\u{1F4E1} Send test ping</button></div>' +
     '</div>' +
 
+    (function() {
+      // Category Head QC webhook \u2014 single URL for ALL category-head batches (Sneakers,
+      // Bags, Apparel, etc.). When set, every CHQ batch routes here regardless of
+      // category. When blank, falls back to the global webhook (04).
+      var chw = STATE.categoryHeadWebhook || '';
+      var chwEsc = escapeHtml(chw);
+      var chwValid = webhookValid(chw);
+      var chwEmpty = !chw;
+      var chwDotClass = chwValid ? 'ok' : (chwEmpty ? '' : 'bad');
+      var chwDotTitle = chwValid
+        ? 'Valid webhook saved for Category Head QC'
+        : (chwEmpty ? 'No webhook \u2014 falls back to the global webhook above' : 'Saved value isn\u2019t a valid webhook URL');
+      return '<div class="auto-card">' +
+        '<div class="auto-header"><div class="auto-icon">05</div><div><div class="auto-title">Slack Webhook \u2014 Category Head QC</div><div class="auto-sub">all category-head review batches route here (Sneakers, Bags, Apparel, etc.)</div></div></div>' +
+        '<div class="auto-desc">A single webhook for all <strong style="color:var(--text1);">Category Head QC</strong> batches. The category head still gets @-mentioned in the message header (so Anand, Hanyan etc. get pinged personally), but the batch lands in this channel instead of your global one. Leave empty to fall back to the global webhook above. Save and Test work the same way.</div>' +
+        '<div class="webhook-row">' +
+          '<span class="webhook-status-dot ' + chwDotClass + '" title="' + chwDotTitle + '"></span>' +
+          '<input type="text" id="cathead-webhook-input" value="' + chwEsc + '" placeholder="https://hooks.slack.com/services/...">' +
+          '<button class="save-btn" onclick="App.saveCategoryHeadWebhook()">Save</button>' +
+          '<button class="edit-btn" onclick="App.testCategoryHeadWebhook()" style="margin-left:4px;">\u{1F4E1} Test</button>' +
+        '</div>' +
+      '</div>';
+    })() +
+
     '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">05</div><div><div class="auto-title">Slack Webhooks \u2014 Per Country</div><div class="auto-sub">PM review pings route here by country; editor batches use these when the batch is single-country</div></div></div>' +
+      '<div class="auto-header"><div class="auto-icon">06</div><div><div class="auto-title">Slack Webhooks \u2014 Per Country</div><div class="auto-sub">PM review pings route here by country; editor batches use these when the batch is single-country</div></div></div>' +
       '<div class="auto-desc">One webhook per country. When a video flips to <strong style="color:var(--text1);">For Review</strong>, the PM review ping goes to that country\u2019s webhook. Editor batches (single-country) also use these. Empty rows fall through to the global fallback above. Save and Test are per-row.</div>' +
       '<div style="margin-top:10px;">' +
         STATE.countries.map(function(c) {
@@ -5719,7 +6344,7 @@ function renderAutomationsView() {
     '</div>' +
 
     '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">06</div><div><div class="auto-title">Slack Webhooks \u2014 QC Reports</div><div class="auto-sub">Manual QC reports route here when you hit Send on a campaign\u2019s QC card</div></div></div>' +
+      '<div class="auto-header"><div class="auto-icon">07</div><div><div class="auto-title">Slack Webhooks \u2014 QC Reports</div><div class="auto-sub">Manual QC reports route here when you hit Send on a campaign\u2019s QC card</div></div></div>' +
       '<div class="auto-desc">One webhook per country, separate from the PM review route above. QC reports are never batched \u2014 you send them manually from the Notifications tab when a campaign is ready for review. Empty rows fall through to the global fallback. Save and Test are per-row.</div>' +
       '<div style="margin-top:10px;">' +
         STATE.countries.map(function(c) {
@@ -6071,9 +6696,11 @@ function saveState() {
       activeSubCampaignId: STATE.activeSubCampaignId,
       expandedCountries: STATE.expandedCountries,
       sidebarCompact: STATE.sidebarCompact,
+      sidebarMonthFilter: STATE.sidebarMonthFilter,
       feedbackName: STATE.feedbackName,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
+      categoryHeadWebhook: STATE.categoryHeadWebhook,
       qcWebhooks: STATE.qcWebhooks,
       slackWorkspace: STATE.slackWorkspace,
       editorSlackChannels: STATE.editorSlackChannels,
@@ -6198,6 +6825,9 @@ function loadState() {
     STATE.countries.forEach(function(c) {
       if (STATE.qcWebhooks[c.code] === undefined) STATE.qcWebhooks[c.code] = '';
     });
+    // Category-head webhook (added in this version). Single URL covering all categories.
+    // Empty string by default \u2014 falls back to global webhook until the user sets one.
+    if (typeof STATE.categoryHeadWebhook !== 'string') STATE.categoryHeadWebhook = '';
     // Reconcile categories (added in this version). Seed defaults if missing; coerce
     // any legacy string-array representations into {name, color} objects; ensure every
     // campaign's current category name still has an entry (auto-create if a campaign
@@ -6395,16 +7025,18 @@ function resolveWebhookForEditor(recipient, items) {
     return cw[code] || fallback;
   }
 
-  // CHQ:Category (Category Head QC) -> queue is per-category. Routing priority:
-  //   1. Campaign-level slackOverride (all items same campaign)
-  //   2. qcWebhooks[country] if all items share one country
-  //   3. Global fallback
+  // CHQ:Category (Category Head QC) -> queue is per-category; items can span
+  // multiple countries (e.g. UK + US Sneakers in one batch), so per-country
+  // routing doesn't apply. Routing priority for CHQ:
+  //   1. Campaign-level slackOverride (if every item shares one campaign with one set)
+  //   2. STATE.categoryHeadWebhook (single URL for ALL category-head batches)
+  //   3. STATE.webhookUrl (global fallback)
+  // Heads still get pinged via the @-mention in the message header regardless of
+  // which channel it lands in; this routing controls which channel/Slack workspace.
   if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
     var chqOverride = sharedCampaignOverride(items);
     if (chqOverride) return chqOverride;
-    var qwChq = STATE.qcWebhooks || {};
-    var chqCountries = batchCountriesOf(items);
-    if (chqCountries.length === 1 && qwChq[chqCountries[0]]) return qwChq[chqCountries[0]];
+    if (webhookValid(STATE.categoryHeadWebhook)) return STATE.categoryHeadWebhook;
     return fallback;
   }
 
@@ -6572,7 +7204,11 @@ function resolveDailyTallyWebhook(countryCode) {
 function sendDailyTally(triggerKind) {
   var kind = triggerKind || 'auto';
   var sentCount = 0, skippedNoActivity = 0, skippedNoWebhook = 0;
-  STATE.countries.forEach(function(c) {
+  // *** UK-ONLY GATE *** \u2014 daily tally is currently restricted to UK. To re-enable for
+  // other countries, change this list (or revert to STATE.countries) when you're ready.
+  // Affects both the auto-fire (midnight ticker) and the "Send all countries now" button.
+  var enabledCountries = STATE.countries.filter(function(c) { return c.code === 'UK'; });
+  enabledCountries.forEach(function(c) {
     var msg = buildDailyTallyMessage(c.code);
     if (!msg) { skippedNoActivity++; return; }
     var url = resolveDailyTallyWebhook(c.code);
@@ -6665,80 +7301,6 @@ function testWebhookPing() {
 // per-country groups. Each group uses that country's webhook. Partial failures (Option A):
 // successful groups are moved to the sent log; failed groups stay in the pending batch so
 // the user can retry just those.
-// Atomically claim a pending batch via a Firestore transaction so only one browser
-// sends when multiple tabs are open. Returns Promise<true> if this browser won the
-// claim (items were present and we cleared them), Promise<false> if another browser
-// already sent them (items were gone), or rejects on Firestore error.
-// On success, Firestore is updated with extraItems as the new batch contents.
-function claimBatch(editor, extraItems) {
-  if (!Fb._ready || !Auth.user) return Promise.reject(new Error('firestore-unavailable'));
-  var docRef = fbDb.doc(Fb.STATE_DOC);
-  return fbDb.runTransaction(function(tx) {
-    return tx.get(docRef).then(function(doc) {
-      if (!doc.exists) return false;
-      var remote = doc.data();
-      var rb = (remote.pendingBatches || {})[editor];
-      if (!rb || !rb.items || rb.items.length === 0) return false;
-      // We won \u2014 write the cleared batch atomically in the same transaction.
-      var newBatches = Object.assign({}, remote.pendingBatches || {});
-      newBatches[editor] = {
-        items: extraItems,
-        firstQueuedAt: extraItems.length > 0 ? Date.now() : null
-      };
-      tx.set(docRef, { pendingBatches: newBatches }, { merge: true });
-      return true;
-    });
-  });
-}
-
-// Execute the actual Slack send for a single batch (no split). Shared by both the
-// transaction-claimed path and the offline fallback path.
-function doSend(editor, windowItems, extraItems, url, msg, batch) {
-  function markSent(reason) {
-    STATE.sentNotifications.unshift({
-      time: timeStamp(), sentAt: Date.now(), editor: editor, items: windowItems, reason: reason, body: msg
-    });
-    if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-  }
-  function restoreOnFailure() {
-    batch.items = windowItems.concat(batch.items);
-    batch.firstQueuedAt = Date.now();
-  }
-  toast('Sending to Slack...', '');
-  postToSlack(url, msg).then(function(r) {
-    if (!r.ok) {
-      toast('Slack rejected the batch: "' + r.body + '"', 'error');
-      logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
-      restoreOnFailure();
-      render();
-      return;
-    }
-    markSent('sent-live');
-    logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
-    toast('\u2713 Sent to Slack', 'success');
-    render();
-  }).catch(function(err) {
-    fetch(url, {
-      method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: msg })
-    }).then(function() {
-      markSent('sent-blind');
-      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
-      toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
-      render();
-    }).catch(function(e2) {
-      var m = (e2 && e2.message) || (err && err.message) || 'network error';
-      var hint = (location.protocol === 'file:')
-        ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
-        : '';
-      restoreOnFailure();
-      render();
-      toast('Send failed: ' + m + hint, 'error');
-    });
-  });
-}
-
 function sendPendingBatch(editor, opts) {
   // opts.silent \u2014 when true, suppress user-facing toast + tab redirect on webhook
   // errors. The 5s ticker passes silent=true so auto-fires don't nag the user in a
@@ -6759,6 +7321,7 @@ function sendPendingBatch(editor, opts) {
     return sendPendingBatchSplit(editor, windowItems, extraItems, opts);
   }
 
+  // Single-send path (PM batches, single-country editor batches, or user overrode split)
   var url = resolveWebhookForEditor(editor, windowItems);
   if (!webhookValid(url)) {
     if (!silent) {
@@ -6770,22 +7333,63 @@ function sendPendingBatch(editor, opts) {
 
   var msg = buildBatchMessage(editor, windowItems);
 
-  // Use a Firestore transaction to atomically claim the batch. Only the browser
-  // that wins the transaction sends \u2014 this is the definitive fix for duplicate
-  // sends when multiple browsers are open simultaneously.
-  claimBatch(editor, extraItems).then(function(claimed) {
-    if (!claimed) return; // another browser already sent this batch
-    // Mirror the cleared state locally so the UI updates immediately.
+  function markSent(reason) {
+    STATE.sentNotifications.unshift({
+      time: timeStamp(), sentAt: Date.now(), editor: editor, items: windowItems, reason: reason, body: msg
+    });
+    if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
     batch.items = extraItems;
     batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
-    doSend(editor, windowItems, extraItems, url, msg, batch);
-  }).catch(function() {
-    // Firestore unavailable (offline, rules error, etc.) \u2014 fall back to the
-    // synchronous-clear approach so notifications still work without connectivity.
-    batch.items = extraItems;
-    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
-    Fb.uploadNow();
-    doSend(editor, windowItems, extraItems, url, msg, batch);
+  }
+
+  // Multi-browser dedupe: claim the send slot atomically so two open browsers can't
+  // POST the same batch twice. The slot key is the editor recipient (e.g. "Sharm",
+  // "PM:UK", "CHQ:Sneakers"). If the claim loses the race, we silently skip \u2014 the
+  // winning browser's onSnapshot listener will sync the moved-to-sent state to all
+  // tabs within ~1 second, so the UI converges naturally.
+  // Slot key is namespaced under "batch:" to keep editor/PM/CHQ slots distinct from
+  // QC report slots (different keyspace under sendSlots collection).
+  var slotKey = 'batch:' + editor;
+  toast('Sending to Slack...', '');
+  claimSendSlot(slotKey).then(function(wonClaim) {
+    if (!wonClaim) {
+      // Another browser is already sending this batch (or just sent it within the
+      // dedupe window). Skip silently \u2014 we'd be sending a duplicate.
+      if (!silent) {
+        // Only show toast on manual sends so auto-fires don't nag the user.
+        toast('Already sent by another browser \u2014 check Slack', '');
+      }
+      return;
+    }
+    return postToSlack(url, msg).then(function(r) {
+      if (!r.ok) {
+        toast('Slack rejected the batch: "' + r.body + '"', 'error');
+        logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
+        return;
+      }
+      markSent('sent-live');
+      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
+      toast('\u2713 Sent to Slack', 'success');
+      render();
+    }).catch(function(err) {
+      // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
+      fetch(url, {
+        method: 'POST', mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: msg })
+      }).then(function() {
+        markSent('sent-blind');
+        logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
+        toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
+        render();
+      }).catch(function(e2) {
+        var m = (e2 && e2.message) || (err && err.message) || 'network error';
+        var hint = (location.protocol === 'file:')
+          ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
+          : '';
+        toast('Send failed: ' + m + hint, 'error');
+      });
+    });
   });
 }
 
@@ -6833,20 +7437,30 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
   });
   if (!anyResolvable) {
     if (!silent) {
-      toast('No valid webhooks for any country in this batch — set one in Automations', 'error');
+      toast('No valid webhooks for any country in this batch \u2014 set one in Automations', 'error');
       App.setTab('automations');
     }
     return;
   }
 
-  function doSplit() {
-    toast('Sending ' + groups.length + ' country groups to Slack...', '');
-    var promises = groups.map(function(g) { return sendOneGroup(editor, g.items, g.country); });
+  toast('Sending ' + groups.length + ' country groups to Slack...', '');
 
+  // Multi-browser dedupe: claim the send slot so two browsers can't send the same
+  // split batch twice. We claim ONE slot for the whole split (not per country group)
+  // so the entire fan-out is atomic from the dedupe perspective \u2014 either this browser
+  // owns the send or it doesn't. Same key shape as the single-send path so the slot
+  // is shared across both code paths for a given editor.
+  var slotKey = 'batch:' + editor;
+  claimSendSlot(slotKey).then(function(wonClaim) {
+    if (!wonClaim) {
+      if (!silent) toast('Already sent by another browser \u2014 check Slack', '');
+      return;
+    }
+    var promises = groups.map(function(g) { return sendOneGroup(editor, g.items, g.country); });
     Promise.all(promises).then(function(results) {
-      var succeededItems = [];
-      var failedItems = [];
-      var sentLogEntries = [];
+      var succeededItems = [];      // items to move to sent log
+      var failedItems = [];          // items to keep in pending
+      var sentLogEntries = [];       // one per successful group
       var successLabels = [];
       var failureLabels = [];
 
@@ -6858,51 +7472,41 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
             sentAt: Date.now(),
             editor: editor,
             items: res.items,
-            reason: res.reason,
+            reason: res.reason, // 'sent-live' or 'sent-blind'
             body: res.msg
           });
           successLabels.push(res.country + (res.reason === 'sent-blind' ? ' (blind)' : ''));
         } else {
           failedItems = failedItems.concat(res.items);
-          failureLabels.push(res.country + ' — ' + res.err);
-          logAction('deleted', editor + ': split send failed for ' + res.country + ' — ' + res.err);
+          failureLabels.push(res.country + ' \u2014 ' + res.err);
+          logAction('deleted', editor + ': split send failed for ' + res.country + ' \u2014 ' + res.err);
         }
       });
 
-      // Restore any failed items so the user can retry them.
-      batch.items = failedItems.concat(batch.items);
+      // Update pending: keep failed items + any overflow beyond the size window
+      batch.items = failedItems.concat(extraItems);
       batch.firstQueuedAt = batch.items.length > 0 ? Date.now() : null;
 
-      sentLogEntries.forEach(function(entry) { STATE.sentNotifications.unshift(entry); });
+      // Push sent-log entries (newest first, as usual)
+      sentLogEntries.forEach(function(entry) {
+        STATE.sentNotifications.unshift(entry);
+      });
       while (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
 
-      if (successLabels.length > 0) {
-        logAction('notified', editor + ' — split send: ' + successLabels.join(', ') + ' ✓');
-      }
-      if (failureLabels.length === 0) {
-        toast('✓ Sent ' + successLabels.length + ' country group(s) to Slack', 'success');
-      } else if (successLabels.length === 0) {
-        toast('All ' + failureLabels.length + ' country group(s) failed — still queued. First error: ' + failureLabels[0], 'error');
-      } else {
-        toast(successLabels.length + ' sent ✓ · ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
-      }
-      render();
-    });
-  }
-
-  // Same transaction-based claim as sendPendingBatch to prevent multi-browser duplicates.
-  claimBatch(editor, extraItems).then(function(claimed) {
-    if (!claimed) return;
-    batch.items = extraItems;
-    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
-    doSplit();
-  }).catch(function() {
-    // Offline fallback: clear synchronously and push to Firestore immediately.
-    batch.items = extraItems;
-    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
-    Fb.uploadNow();
-    doSplit();
-  });
+      // Activity log + user-facing toast
+    if (successLabels.length > 0) {
+      logAction('notified', editor + ' \u2014 split send: ' + successLabels.join(', ') + ' \u2713');
+    }
+    if (failureLabels.length === 0) {
+      toast('\u2713 Sent ' + successLabels.length + ' country group(s) to Slack', 'success');
+    } else if (successLabels.length === 0) {
+      toast('All ' + failureLabels.length + ' country group(s) failed \u2014 still queued. First error: ' + failureLabels[0], 'error');
+    } else {
+      toast(successLabels.length + ' sent \u2713 \u00B7 ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
+    }
+    render();
+    }); // close Promise.all().then
+  }); // close claimSendSlot().then
 }
 
 // Re-send an entry from the sent notifications log (idempotent: doesn't modify state).
@@ -7034,12 +7638,14 @@ function buildBatchMessage(recipient, items, opts) {
     var chqHeadPrefix = chqHeadMention ? chqHeadMention + ' ' : '';
     header = ':mag: ' + chqHeadPrefix + '*Category Head QC \u2014 ' + chqCategory + '* \u00B7 ' + items.length + ' ' + updatesWord;
   } else if (isChaBatch) {
-    // CHA = Category Head Approved per country. Each item @-mentions the head
-    // who approved it (Cristian / Anand / Nazy / Hanyan) so the message acts
-    // as an audit trail of who signed off on what. PM is NOT @-mentioned in
-    // the header (it's the heads who did the approval, not the PM).
+    // CHA = Category Head Approved per country. Pings the PM (Elsa for UK
+    // etc) when a category head signs off on a video so the PM knows it's
+    // ready to publish. Separate queue from the PM Review one so the two
+    // signals don't get mixed up visually.
     var chaCountry = recipient.slice(4);
-    header = ':white_check_mark: *Category Head Approved \u2014 ' + chaCountry + '* \u00B7 ' + items.length + ' ' + updatesWord;
+    var chaPmMention = mentionPm(chaCountry);
+    var chaPmPrefix = chaPmMention ? chaPmMention + ' ' : '';
+    header = ':white_check_mark: ' + chaPmPrefix + '*Category Head Approved \u2014 ' + chaCountry + '* \u00B7 ' + items.length + ' ' + updatesWord;
   } else {
     var suffix = opts.countryLabel ? ' (' + opts.countryLabel + ')' : '';
     // mentionEditor(recipient) returns '<@USERID>' if a Slack member ID is configured
@@ -7070,12 +7676,6 @@ function buildBatchMessage(recipient, items, opts) {
     // span both UK and US items.
     var lineSuffix = '';
     if (isChqBatch && it.country) lineSuffix = ' [' + it.country + ']';
-    // CHA: append the head's @-mention per item so each video shows who
-    // signed off (per-category resolution since heads vary by category).
-    if (isChaBatch && it.category) {
-      var chaItemMention = mentionCategoryHead(it.category);
-      if (chaItemMention) lineSuffix += ' \u2014 by ' + chaItemMention;
-    }
     lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel + lineSuffix);
     if (FINAL_VIDEO_STATUSES[it.status]) {
       var finalUrl = extractSingleUrl(it.finalVideo);
@@ -7360,6 +7960,10 @@ var App = {
   toggleCountry: function(code) { STATE.expandedCountries[code] = !STATE.expandedCountries[code]; render(); },
   // Flip the compact/full sidebar mode. Persists via saveState() inside render().
   toggleSidebarCompact: function() { STATE.sidebarCompact = !STATE.sidebarCompact; render(); },
+  setSidebarMonthFilter: function(value) {
+    STATE.sidebarMonthFilter = value || 'all';
+    render();
+  },
   addSub: function(code) { showAddSubCampaignModal(code); },
   editAssetById: function(id) {
     for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { showAssetModal(STATE.assets[i]); return; }
@@ -7384,6 +7988,7 @@ var App = {
       return;
     }
     var oldStatus = a.status;
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
     // Capture pre-change snapshot BEFORE mutating, then determine what the
     // full change-set ended up being (status can also cascade into assignedAt
     // and dateApproved). Push the version after the mutation is complete.
@@ -7397,6 +8002,12 @@ var App = {
     // daily / weekly / monthly tally math.
     if (newStatus === 'Approved' && oldStatus !== 'Approved' && !a.dateApproved) {
       a.dateApproved = todayISO();
+    }
+    // Card leaving the To Do column \u2014 clear drag-lock so it doesn't follow the card to
+    // other status columns. Also clear when card transitions INTO Assigned from elsewhere
+    // (it should sort by ETA cleanly when freshly arriving).
+    if ((oldStatus === 'Assigned' && newStatus !== 'Assigned') || (newStatus === 'Assigned' && oldStatus !== 'Assigned')) {
+      a.dragLocked = false;
     }
     pushVersion(a, vhPre, diffSnapshots(vhPre, snapshotAsset(a)));
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + newStatus);
@@ -7617,6 +8228,7 @@ var App = {
     if (!trimmed) { toast('Video name cannot be empty', 'error'); render(); return; }
     if (a.name === trimmed) { render(); return; }
     var old = a.name;
+    recordUndo(a, ['name'], 'name: "' + old + '" \u2192 "' + trimmed + '"');
     var vhPre = snapshotAsset(a);
     a.name = trimmed;
     pushVersion(a, vhPre, ['name']);
@@ -7644,6 +8256,7 @@ var App = {
     if (DIFFICULTIES.indexOf(newDiff) < 0) { render(); return; } // invalid \u2014 ignore
     if (a.difficulty === newDiff) { render(); return; }
     var old = a.difficulty;
+    recordUndo(a, ['difficulty'], 'difficulty: ' + old + ' \u2192 ' + newDiff);
     var vhPre = snapshotAsset(a);
     a.difficulty = newDiff;
     pushVersion(a, vhPre, ['difficulty']);
@@ -7663,6 +8276,7 @@ var App = {
     if (validNames.indexOf(newCat) < 0) { render(); return; } // unknown \u2014 ignore
     if (a.category === newCat) { render(); return; }
     var old = a.category;
+    recordUndo(a, ['category'], 'category: ' + old + ' \u2192 ' + newCat);
     var vhPre = snapshotAsset(a);
     a.category = newCat;
     pushVersion(a, vhPre, ['category']);
@@ -7682,6 +8296,7 @@ var App = {
     if (a.editor === cleanEditor) { render(); return; }
     var oldEditor = a.editor;
     var oldStatus = a.status;
+    recordUndo(a, ['editor', 'status', 'assignedAt'], 'editor: ' + (oldEditor || 'unassigned') + ' \u2192 ' + (cleanEditor || 'unassigned'));
     // Same auto-status rules as the modal (applyEditorAutoStatus).
     // Note: applyEditorAutoStatus expects (oldEditor, newEditor, oldStatus, chosenStatus).
     // In inline-edit context, "chosenStatus" is the current status (user isn't changing it here).
@@ -7709,6 +8324,7 @@ var App = {
     // <input type="date"> gives us 'YYYY-MM-DD' or '' directly. Normalize defensively anyway.
     var iso = toISODate(newDate);
     if (a.estDelivery === iso) { render(); return; }
+    recordUndo(a, ['estDelivery'], 'ETA: ' + (a.estDelivery ? formatDate(a.estDelivery) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     var vhPre = snapshotAsset(a);
     a.estDelivery = iso;
     pushVersion(a, vhPre, ['estDelivery']);
@@ -7722,6 +8338,7 @@ var App = {
     if (!a) return;
     var iso = toISODate(newDate);
     if (a.dateApproved === iso) { render(); return; }
+    recordUndo(a, ['dateApproved'], 'date approved: ' + (a.dateApproved ? formatDate(a.dateApproved) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     var vhPre = snapshotAsset(a);
     a.dateApproved = iso;
     pushVersion(a, vhPre, ['dateApproved']);
@@ -7745,6 +8362,7 @@ var App = {
       render();
       return;
     }
+    recordUndo(a, ['rawVideo'], 'raw video link');
     var vhPre = snapshotAsset(a);
     a.rawVideo = trimmed;
     pushVersion(a, vhPre, ['rawVideo']);
@@ -7764,6 +8382,7 @@ var App = {
       render();
       return;
     }
+    recordUndo(a, ['editingBrief'], 'editing brief link');
     var vhPre = snapshotAsset(a);
     a.editingBrief = trimmed;
     pushVersion(a, vhPre, ['editingBrief']);
@@ -7783,6 +8402,7 @@ var App = {
       render();
       return;
     }
+    recordUndo(a, ['finalVideo'], 'final video link');
     // Auto-snapshot: capture the full pre-change state so the user can restore
     // any prior delivery. See VERSION HISTORY HELPERS comment block above.
     var vhPre = snapshotAsset(a);
@@ -7801,6 +8421,7 @@ var App = {
     if (QC_VALUES.indexOf(newQc) < 0) { render(); return; }
     var old = a.qc || 'Draft';
     if (old === newQc) { render(); return; }
+    recordUndo(a, ['qc'], 'QC: ' + old + ' \u2192 ' + newQc);
     var vhPre = snapshotAsset(a);
     a.qc = newQc;
     pushVersion(a, vhPre, ['qc']);
@@ -8190,6 +8811,150 @@ var App = {
   deleteCampaign: deleteCampaign,
   reorderCampaigns: reorderCampaigns,
 
+  // --- Campaign actions kebab menu ---
+  // Toggle the dropdown next to Edit/Delete in the campaign header. Lightweight: just
+  // flips visibility on the (always-rendered) #camp-actions-menu div. Closes on outside
+  // click via the document listener at the bottom of the script.
+  toggleCampActionsMenu: function(event) {
+    if (event) event.stopPropagation();
+    var menu = document.getElementById('camp-actions-menu');
+    if (!menu) return;
+    menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+  },
+
+  // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
+  // hash (#campaign=N) so it doesn't collide with Firebase auth's query-string redirects.
+  // Boot logic in attachAuthListener parses this and selects the campaign on load.
+  copyCampaignLink: function(campaignId) {
+    var camp = findCampaignById(campaignId);
+    if (!camp) return;
+    var base = location.origin + location.pathname;
+    var url = base + '#campaign=' + campaignId;
+    copyToClipboard(url, 'Link copied');
+    // Close the menu after action
+    var menu = document.getElementById('camp-actions-menu');
+    if (menu) menu.style.display = 'none';
+  },
+
+  // Open a print-friendly version of the campaign in a new window and trigger the browser's
+  // print dialog. The user can save as PDF from there. No external library needed.
+  exportCampaignPdf: function(campaignId) {
+    var camp = findCampaignById(campaignId);
+    if (!camp) return;
+    var menu = document.getElementById('camp-actions-menu');
+    if (menu) menu.style.display = 'none';
+    var country = getCountryByCode(camp.country);
+    var assets = STATE.assets.filter(function(a) { return a.campaignId === camp.id; })
+                              .sort(function(a, b) { return (a.pn || 0) - (b.pn || 0); });
+    var monthLabel = '';
+    if (/^\d{4}-\d{2}$/.test(camp.monthYear || '')) {
+      monthLabel = MONTH_SHORT[parseInt(camp.monthYear.slice(5, 7), 10) - 1] + ' ' + camp.monthYear.slice(0, 4);
+    }
+    var rows = assets.map(function(a, i) {
+      return '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + escapeHtml(a.name) + '</td>' +
+        '<td>' + escapeHtml(a.editor || '\u2014') + '</td>' +
+        '<td>' + escapeHtml(a.difficulty || '\u2014') + '</td>' +
+        '<td>' + escapeHtml(a.status || 'Draft') + '</td>' +
+        '<td>' + escapeHtml(a.qc || 'Draft') + '</td>' +
+        '<td>' + escapeHtml(a.estDelivery ? formatDate(a.estDelivery) : '\u2014') + '</td>' +
+        '<td>' + escapeHtml(a.dateApproved ? formatDate(a.dateApproved) : '\u2014') + '</td>' +
+      '</tr>';
+    }).join('');
+    var totalCount = assets.length;
+    var approvedCount = assets.filter(function(a) { return a.status === 'Approved'; }).length;
+    var html =
+      '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+      '<title>' + escapeHtml(camp.name) + ' \u2014 Creative Tracker</title>' +
+      '<style>' +
+        'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; padding: 32px; color: #222; max-width: 1100px; margin: 0 auto; }' +
+        'h1 { margin: 0 0 4px; font-size: 22px; }' +
+        '.subhead { color: #666; font-size: 13px; margin-bottom: 18px; }' +
+        '.meta { font-size: 12px; color: #555; margin-bottom: 24px; padding: 10px 14px; background: #f5f5f5; border-radius: 6px; }' +
+        '.meta strong { color: #222; }' +
+        'table { width: 100%; border-collapse: collapse; font-size: 12px; }' +
+        'th { text-align: left; padding: 8px 10px; background: #ececec; border-bottom: 2px solid #999; font-weight: 600; }' +
+        'td { padding: 7px 10px; border-bottom: 1px solid #eaeaea; vertical-align: top; }' +
+        'tr:nth-child(even) td { background: #fafafa; }' +
+        '.footer { margin-top: 24px; font-size: 10px; color: #999; text-align: center; }' +
+        '@media print { body { padding: 16px; } th { background: #ddd; } }' +
+      '</style>' +
+      '</head><body>' +
+      '<h1>' + escapeHtml(camp.name) + '</h1>' +
+      '<div class="subhead">' + (country ? escapeHtml(country.name) : escapeHtml(camp.country)) + ' \u00B7 Campaign #' + camp.rank + (monthLabel ? ' \u00B7 ' + escapeHtml(monthLabel) : '') + '</div>' +
+      '<div class="meta">' +
+        '<strong>Total:</strong> ' + totalCount + ' video' + (totalCount === 1 ? '' : 's') + ' \u00B7 ' +
+        '<strong>Approved:</strong> ' + approvedCount + '/' + totalCount + ' \u00B7 ' +
+        '<strong>Type:</strong> ' + escapeHtml(camp.type || '\u2014') + ' \u00B7 ' +
+        '<strong>Category:</strong> ' + escapeHtml(camp.category || '\u2014') +
+      '</div>' +
+      (totalCount === 0
+        ? '<p style="color:#999; font-style:italic;">No videos in this campaign yet.</p>'
+        : '<table><thead><tr>' +
+            '<th style="width:36px">#</th>' +
+            '<th>Video Name</th>' +
+            '<th>Editor</th>' +
+            '<th>Difficulty</th>' +
+            '<th>Status</th>' +
+            '<th>QC</th>' +
+            '<th>Est. Delivery</th>' +
+            '<th>Approved</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>') +
+      '<div class="footer">Generated ' + new Date().toLocaleString() + ' \u2014 Tilt Creative Tracker</div>' +
+      '<script>window.onload=function(){setTimeout(function(){window.print();},250);};<' + '/script>' +
+      '</body></html>';
+    var win = window.open('', '_blank');
+    if (!win) { toast('Pop-up blocked \u2014 enable pop-ups for this site to export PDF', 'error'); return; }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  },
+
+  // Build a Slack-formatted text summary of the campaign and copy to clipboard. User can
+  // paste directly into Slack to share campaign status. Groups videos by status so the
+  // PM can see at a glance what's done vs. pending.
+  exportCampaignSlack: function(campaignId) {
+    var camp = findCampaignById(campaignId);
+    if (!camp) return;
+    var menu = document.getElementById('camp-actions-menu');
+    if (menu) menu.style.display = 'none';
+    var country = getCountryByCode(camp.country);
+    var assets = STATE.assets.filter(function(a) { return a.campaignId === camp.id; })
+                              .sort(function(a, b) { return (a.pn || 0) - (b.pn || 0); });
+    var monthLabel = '';
+    if (/^\d{4}-\d{2}$/.test(camp.monthYear || '')) {
+      monthLabel = MONTH_SHORT[parseInt(camp.monthYear.slice(5, 7), 10) - 1] + ' ' + camp.monthYear.slice(0, 4);
+    }
+    var lines = [];
+    lines.push(':clapper: *' + (country ? country.name : camp.country) + ' \u00B7 ' + camp.name + '*');
+    var headerBits = [];
+    headerBits.push(':bar_chart: ' + assets.length + ' video' + (assets.length === 1 ? '' : 's'));
+    var approved = assets.filter(function(a) { return a.status === 'Approved'; }).length;
+    headerBits.push(approved + ' approved');
+    if (monthLabel) headerBits.push('Month: ' + monthLabel);
+    lines.push(headerBits.join(' \u00B7 '));
+    // Group by status, in workflow order
+    var statusOrder = ['Approved', 'For Review', 'Needs Revisions', 'Assigned', 'Draft'];
+    statusOrder.forEach(function(status) {
+      var inStatus = assets.filter(function(a) { return (a.status || 'Draft') === status; });
+      if (inStatus.length === 0) return;
+      lines.push('');
+      lines.push('*' + status + ' (' + inStatus.length + '):*');
+      inStatus.forEach(function(a, i) {
+        var line = '  ' + (i + 1) + '. ' + a.name;
+        if (a.editor) line += ' \u2014 _' + a.editor + '_';
+        lines.push(line);
+      });
+    });
+    if (assets.length === 0) {
+      lines.push('');
+      lines.push('_No videos in this campaign yet._');
+    }
+    var msg = lines.join('\n');
+    copyToClipboard(msg, 'Slack message copied');
+  },
+
   // --- Version history panel (Google-Sheets-style) ---
   // Opens the full-width 2-column version-history modal for an asset. Timeline
   // on the left groups entries by Today / Yesterday / date; preview on the right
@@ -8328,7 +9093,13 @@ var App = {
   },
 
   // Fire the tally for one country only. Useful for testing a single webhook.
+  // *** UK-ONLY GATE *** \u2014 currently restricted to UK. To re-enable for others,
+  // remove this guard and the matching ones in sendDailyTally() and the card render.
   sendDailyTallyForCountry: function(countryCode) {
+    if (countryCode !== 'UK') {
+      toast(countryCode + ' daily tally is coming soon \u2014 only UK is wired up for now', 'error');
+      return;
+    }
     var msg = buildDailyTallyMessage(countryCode);
     if (!msg) { toast('No activity in ' + countryCode + ' to send', 'error'); return; }
     var url = resolveDailyTallyWebhook(countryCode);
@@ -8606,6 +9377,11 @@ var App = {
       category: source.category,
       rank: 0, // will be fixed by reorderCampaigns below
       driveId: source.driveId || '',
+      brief: source.brief || '',
+      type: source.type || DEFAULT_CAMPAIGN_TYPE,
+      monthYear: source.monthYear || '',
+      slackOverride: source.slackOverride || '',
+      hideAssetLinkCols: !!source.hideAssetLinkCols,
       notionBrief: source.notionBrief || '',
       finalVideoUrl: source.finalVideoUrl || ''
     };
@@ -8692,6 +9468,56 @@ var App = {
     }
   },
   testWebhook: testWebhookPing,
+
+  // Category-head webhook \u2014 single URL for ALL category-head batches. Save and test
+  // mirror the global webhook flow above; tests POST a short ping with the canonical
+  // helper so the user can verify Slack accepts the channel before live data flows.
+  saveCategoryHeadWebhook: function() {
+    var input = document.getElementById('cathead-webhook-input');
+    if (!input) return;
+    var trimmed = (input.value || '').trim();
+    if (STATE.categoryHeadWebhook === trimmed) {
+      toast('Category Head webhook unchanged', '');
+      return;
+    }
+    STATE.categoryHeadWebhook = trimmed;
+    saveState();
+    logAction('updated', 'Category Head Slack webhook ' + (trimmed === '' ? 'cleared (will fall back to global)' : 'updated'));
+    var msg = trimmed === ''
+      ? 'Category Head webhook cleared \u2014 batches will fall back to the global webhook'
+      : (webhookValid(trimmed) ? 'Category Head webhook saved' : 'Saved, but that URL doesn\u2019t look like a real Slack webhook');
+    toast(msg, webhookValid(trimmed) || trimmed === '' ? 'success' : 'error');
+    render();
+  },
+  testCategoryHeadWebhook: function() {
+    var input = document.getElementById('cathead-webhook-input');
+    var url = input ? input.value.trim() : (STATE.categoryHeadWebhook || '');
+    if (!url) {
+      toast('No Category Head webhook set \u2014 paste one first', 'error');
+      return;
+    }
+    if (!looksLikeWebhookUrl(url)) {
+      toast('That URL doesn\u2019t look like a Slack incoming webhook', 'error');
+      return;
+    }
+    if (isPlaceholderWebhook(url)) {
+      toast('That webhook URL looks like a placeholder', 'error');
+      return;
+    }
+    // Save-then-test, mirroring the per-country flow.
+    if (STATE.categoryHeadWebhook !== url) {
+      STATE.categoryHeadWebhook = url;
+      saveState();
+      logAction('updated', 'Category Head Slack webhook updated (via Test button)');
+    }
+    var msg = ':mag: *Category Head QC test ping* \u2014 if you can see this, the webhook is wired up.';
+    postToSlack(url, msg).then(function(r) {
+      if (r.ok) toast('\u2713 Category Head test ping sent \u2014 check Slack', 'success');
+      else toast('Slack rejected the test ping (HTTP ' + r.status + ')', 'error');
+    }).catch(function(e) {
+      toast('Network error: ' + (e && e.message ? e.message : 'unknown'), 'error');
+    });
+  },
   saveCountryWebhook: function(code, url) {
     var trimmed = (url || '').trim();
     if (!STATE.countryWebhooks) STATE.countryWebhooks = {};
@@ -8801,28 +9627,37 @@ var App = {
     var msg = buildQcReportMessage(campaignId);
     if (!msg) { toast('Nothing flagged Missing files or Missing prices in this campaign', 'error'); return; }
     toast('Sending QC report for ' + camp.name + '...', '');
-    postToSlack(url, msg).then(function(r) {
-      if (r.ok) {
-        // Append to sent log so the QC report has the same audit trail as other sends.
-        // Synthesize a recipient key 'QC:<country>' and a 'manual' reason.
-        STATE.sentNotifications.unshift({
-          time: timeStamp(), sentAt: Date.now(),
-          editor: 'QC:' + camp.country, items: [], reason: 'sent-live', body: msg
-        });
-        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-        // Dismiss this sub-campaign's QC card. Non-persisted \u2014 card reappears on page
-        // refresh, or if any QC value in this sub-campaign changes (handled in setAssetQc).
-        if (!STATE.qcDismissed) STATE.qcDismissed = {};
-        STATE.qcDismissed[camp.id] = Date.now();
-        logAction('notified', 'QC report sent for ' + camp.country + ' \u00B7 ' + camp.name);
-        toast('\u2713 QC report sent for ' + camp.name, 'success');
-        render();
-      } else {
-        toast('Slack rejected the QC report: "' + r.body + '" (HTTP ' + r.status + ')', 'error');
-        logAction('deleted', 'QC report send failed for ' + camp.name + ': ' + r.body);
+    // Multi-browser dedupe: claim the send slot so two PMs clicking simultaneously
+    // don't both POST the same QC report.
+    var slotKey = 'qc:' + campaignId;
+    claimSendSlot(slotKey).then(function(wonClaim) {
+      if (!wonClaim) {
+        toast('QC report for ' + camp.name + ' was just sent by another browser', '');
+        return;
       }
-    }).catch(function(e) {
-      toast('Network error sending QC report: ' + (e && e.message ? e.message : 'unknown'), 'error');
+      return postToSlack(url, msg).then(function(r) {
+        if (r.ok) {
+          // Append to sent log so the QC report has the same audit trail as other sends.
+          // Synthesize a recipient key 'QC:<country>' and a 'manual' reason.
+          STATE.sentNotifications.unshift({
+            time: timeStamp(), sentAt: Date.now(),
+            editor: 'QC:' + camp.country, items: [], reason: 'sent-live', body: msg
+          });
+          if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+          // Dismiss this sub-campaign's QC card. Non-persisted \u2014 card reappears on page
+          // refresh, or if any QC value in this sub-campaign changes (handled in setAssetQc).
+          if (!STATE.qcDismissed) STATE.qcDismissed = {};
+          STATE.qcDismissed[camp.id] = Date.now();
+          logAction('notified', 'QC report sent for ' + camp.country + ' \u00B7 ' + camp.name);
+          toast('\u2713 QC report sent for ' + camp.name, 'success');
+          render();
+        } else {
+          toast('Slack rejected the QC report: "' + r.body + '" (HTTP ' + r.status + ')', 'error');
+          logAction('deleted', 'QC report send failed for ' + camp.name + ': ' + r.body);
+        }
+      }).catch(function(e) {
+        toast('Network error sending QC report: ' + (e && e.message ? e.message : 'unknown'), 'error');
+      });
     });
   },
 
@@ -8975,6 +9810,23 @@ document.addEventListener('keydown', function(e) {
     if (SidebarEditState.renameCampId !== null) { App.cancelRenameSubcamp(); return; }
     if (ContextMenuState.subcampId !== null) { App.hideSubcampContextMenu(); return; }
     closeModal();
+    return;
+  }
+  // Cmd+Z (Mac) or Ctrl+Z (Windows/Linux) \u2014 undo most recent video field edit. Skip when
+  // the user is typing in an input/textarea/select/contenteditable so native undo for the
+  // text input still works. Shift+Cmd+Z (which would normally be redo) is left alone since
+  // we don't currently support redo.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    var t = e.target;
+    var inEditable = false;
+    if (t && t.tagName) {
+      var tag = t.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') inEditable = true;
+      if (t.isContentEditable) inEditable = true;
+    }
+    if (inEditable) return; // let native undo handle text editing
+    e.preventDefault();
+    undoLastEdit();
   }
 });
 // Dismiss the right-click menu on any click outside it. Listener is in the capture phase
@@ -8988,6 +9840,19 @@ document.addEventListener('click', function(e) {
     t = t.parentNode;
   }
   App.hideSubcampContextMenu();
+});
+
+// Dismiss the campaign-header kebab menu on outside-click (same shape as the sidebar one).
+// Walks up from the click target looking for the menu wrapper; if not found, hides menu.
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('camp-actions-menu');
+  if (!menu || menu.style.display === 'none' || !menu.style.display) return;
+  var t = e.target;
+  while (t) {
+    if (t.classList && (t.classList.contains('camp-actions-menu-wrap') || t.classList.contains('camp-actions-menu'))) return;
+    t = t.parentNode;
+  }
+  menu.style.display = 'none';
 });
 
 // ===================== POINTER DRAG =====================
@@ -9295,6 +10160,9 @@ bootApp = function() {
   // Seed the daily-tally date flag on first run so we don't fire on first load.
   // Lives outside STATE because the scheduler runs across tabs.
   initTallyDate();
+  // Start listening to the shared Firestore tally flag so all browsers see the same
+  // "last sent" date in real time and only one of them wins the midnight race.
+  attachTallyListener();
 
   // Upsert the user profile doc (idempotent), then start listening to it so
   // role changes (e.g. an admin promoting them) propagate live without a refresh.
@@ -9311,6 +10179,32 @@ bootApp = function() {
 
   // Subscribe to the canonical state doc. The first snapshot drives initial load.
   Fb.subscribe(function(hadData) {
+    // Apply deep-link from URL hash on first data load (#campaign=N selects that campaign
+    // and expands its country). Guard ensures this runs only once per session.
+    if (!window.__deepLinkApplied) {
+      window.__deepLinkApplied = true;
+      var match = (location.hash || '').match(/^#campaign=(\d+)/);
+      if (match) {
+        var targetId = parseInt(match[1], 10);
+        var targetCamp = findCampaignById(targetId);
+        if (targetCamp) {
+          STATE.activeSubCampaignId = targetCamp.id;
+          STATE.expandedCountries[targetCamp.country] = true;
+          STATE.tab = 'campaigns';
+          // Save so the deep link state survives a refresh (tab + active id).
+          if (typeof saveState === 'function') saveState();
+          render();
+          // Show a small toast so the user knows the link worked
+          setTimeout(function() {
+            if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
+          }, 400);
+        } else {
+          setTimeout(function() {
+            if (typeof toast === 'function') toast('Linked campaign not found (id ' + targetId + ')', 'error');
+          }, 400);
+        }
+      }
+    }
     if (hadData) {
       // Firestore had data \u2014 STATE was populated by applySnapshot. Just render.
       // applySnapshot already calls render(), so we don't double-render here.
