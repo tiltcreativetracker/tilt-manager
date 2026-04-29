@@ -3214,7 +3214,7 @@ function getFilteredAssets() {
 function queueNotification(recipient, changeType, asset, detail, opts) {
   opts = opts || {};
   if (!STATE.pendingBatches[recipient]) {
-    STATE.pendingBatches[recipient] = { items: [], firstQueuedAt: null };
+    STATE.pendingBatches[recipient] = { items: [], firstQueuedAt: null, sendingSince: null };
   }
   var batch = STATE.pendingBatches[recipient];
   var camp = findCampaignById(asset.campaignId);
@@ -3504,6 +3504,26 @@ var SEND_SLOTS_COLLECTION = 'sendSlots'; // top-level collection: sendSlots/{key
 // re-fetches from Firestore via the listener, so consistency is restored).
 var _sendSlotLocalClaims = {};
 
+// Per-recipient in-flight guard. Prevents the 5s ticker (and concurrent manual sends)
+// from invoking sendPendingBatch for the same recipient while a send is already in
+// flight. Keys are recipient strings (e.g. "Sharm", "PM:UK"). Values are the
+// Date.now() timestamp when the send started. SEND_INFLIGHT_TIMEOUT_MS is a safety
+// ceiling so a crashed promise can't lock a recipient indefinitely.
+var _sendInFlight = Object.create(null);
+var SEND_INFLIGHT_TIMEOUT_MS = 30 * 1000;
+
+function isSendInFlight(recipient) {
+  var t = _sendInFlight[recipient];
+  if (!t) return false;
+  if (Date.now() - t > SEND_INFLIGHT_TIMEOUT_MS) { delete _sendInFlight[recipient]; return false; }
+  return true;
+}
+
+function clearBatchInFlight(recipient) {
+  delete _sendInFlight[recipient];
+  if (STATE.pendingBatches[recipient]) STATE.pendingBatches[recipient].sendingSince = null;
+}
+
 function claimSendSlot(slotKey) {
   if (!slotKey || typeof slotKey !== 'string') return Promise.resolve(true);
   var nowMs = Date.now();
@@ -3594,14 +3614,19 @@ setInterval(function() {
   // as sent without POSTing, which produced the "I have to click the rocket" bug.
   Object.keys(STATE.pendingBatches).forEach(function(editor) {
     var batch = STATE.pendingBatches[editor];
-    if (batch.items.length > 0 && batch.firstQueuedAt !== null) {
-      if (nowTs - batch.firstQueuedAt >= BATCH_TIME_LIMIT_MS) {
-        // silent:true \u2014 the 5s ticker must not nag the user with toasts or force
-        // a tab jump if the webhook happens to be missing; the user sees the
-        // standing banner in the Notifications tab when that's the case.
-        sendPendingBatch(editor, { silent: true });
-        anyChange = true;
-      }
+    // Skip if no items or no timer running.
+    if (!batch.items.length || batch.firstQueuedAt === null) return;
+    // Layer A: skip if a send is already in flight in this browser tab.
+    if (isSendInFlight(editor)) return;
+    // Layer B: skip if another browser recently claimed the send slot (sendingSince
+    // persists in STATE and syncs via Firestore). Treat stale markers as cleared.
+    if (batch.sendingSince && nowTs - batch.sendingSince < SEND_INFLIGHT_TIMEOUT_MS) return;
+    if (nowTs - batch.firstQueuedAt >= BATCH_TIME_LIMIT_MS) {
+      // silent:true \u2014 the 5s ticker must not nag the user with toasts or force
+      // a tab jump if the webhook happens to be missing; the user sees the
+      // standing banner in the Notifications tab when that's the case.
+      sendPendingBatch(editor, { silent: true });
+      anyChange = true;
     }
   });
   // (2) Purge sent notifications older than 24 hours. Items sent before this version
@@ -7310,6 +7335,26 @@ function sendPendingBatch(editor, opts) {
   var batch = STATE.pendingBatches[editor];
   if (!batch || batch.items.length === 0) { if (!silent) toast('Nothing to send', 'error'); return; }
 
+  // Duplicate-send guard (Layer A + B). If a send is already in flight for this
+  // recipient \u2014 either in this tab (_sendInFlight) or in another browser
+  // (batch.sendingSince synced via Firestore) \u2014 bail out so we don't POST twice.
+  if (isSendInFlight(editor)) {
+    if (!silent) toast('Already sending\u2026', '');
+    return;
+  }
+  var nowForGuard = Date.now();
+  if (batch.sendingSince && nowForGuard - batch.sendingSince < SEND_INFLIGHT_TIMEOUT_MS) {
+    if (!silent) toast('Already sending from another browser \u2014 check Slack', '');
+    return;
+  }
+  // Mark in-flight locally and persist sendingSince so other tabs see it too.
+  _sendInFlight[editor] = nowForGuard;
+  batch.sendingSince = nowForGuard;
+  saveState();
+
+  // Clears both in-flight markers when a send attempt ends (success, failure, or lost claim).
+  function clearInFlight() { clearBatchInFlight(editor); }
+
   var isPmBatch = editor.indexOf('PM:') === 0;
   var windowItems = batch.items.slice(0, BATCH_SIZE_LIMIT);
   var extraItems = batch.items.slice(BATCH_SIZE_LIMIT);
@@ -7355,6 +7400,7 @@ function sendPendingBatch(editor, opts) {
     if (!wonClaim) {
       // Another browser is already sending this batch (or just sent it within the
       // dedupe window). Skip silently \u2014 we'd be sending a duplicate.
+      clearInFlight();
       if (!silent) {
         // Only show toast on manual sends so auto-fires don't nag the user.
         toast('Already sent by another browser \u2014 check Slack', '');
@@ -7363,11 +7409,13 @@ function sendPendingBatch(editor, opts) {
     }
     return postToSlack(url, msg).then(function(r) {
       if (!r.ok) {
+        clearInFlight();
         toast('Slack rejected the batch: "' + r.body + '"', 'error');
         logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
         return;
       }
       markSent('sent-live');
+      clearInFlight();
       logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
       toast('\u2713 Sent to Slack', 'success');
       render();
@@ -7379,10 +7427,12 @@ function sendPendingBatch(editor, opts) {
         body: JSON.stringify({ text: msg })
       }).then(function() {
         markSent('sent-blind');
+        clearInFlight();
         logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
         toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
         render();
       }).catch(function(e2) {
+        clearInFlight();
         var m = (e2 && e2.message) || (err && err.message) || 'network error';
         var hint = (location.protocol === 'file:')
           ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
@@ -7453,6 +7503,7 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
   var slotKey = 'batch:' + editor;
   claimSendSlot(slotKey).then(function(wonClaim) {
     if (!wonClaim) {
+      clearBatchInFlight(editor);
       if (!silent) toast('Already sent by another browser \u2014 check Slack', '');
       return;
     }
@@ -7494,17 +7545,18 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
       while (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
 
       // Activity log + user-facing toast
-    if (successLabels.length > 0) {
-      logAction('notified', editor + ' \u2014 split send: ' + successLabels.join(', ') + ' \u2713');
-    }
-    if (failureLabels.length === 0) {
-      toast('\u2713 Sent ' + successLabels.length + ' country group(s) to Slack', 'success');
-    } else if (successLabels.length === 0) {
-      toast('All ' + failureLabels.length + ' country group(s) failed \u2014 still queued. First error: ' + failureLabels[0], 'error');
-    } else {
-      toast(successLabels.length + ' sent \u2713 \u00B7 ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
-    }
-    render();
+      if (successLabels.length > 0) {
+        logAction('notified', editor + ' \u2014 split send: ' + successLabels.join(', ') + ' \u2713');
+      }
+      if (failureLabels.length === 0) {
+        toast('\u2713 Sent ' + successLabels.length + ' country group(s) to Slack', 'success');
+      } else if (successLabels.length === 0) {
+        toast('All ' + failureLabels.length + ' country group(s) failed \u2014 still queued. First error: ' + failureLabels[0], 'error');
+      } else {
+        toast(successLabels.length + ' sent \u2713 \u00B7 ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
+      }
+      clearBatchInFlight(editor);
+      render();
     }); // close Promise.all().then
   }); // close claimSendSlot().then
 }
