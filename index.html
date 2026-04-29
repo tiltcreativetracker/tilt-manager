@@ -521,10 +521,12 @@
     font-size: 10.5px; font-family: 'JetBrains Mono', monospace; font-weight: 600;
     padding: 1px 7px; border-radius: 10px; background: var(--bg4); color: var(--text2);
   }
-  .today-col-accent-todo  { border-top: 3px solid #d8d4ff; }
-  .today-col-accent-prog  { border-top: 3px solid var(--amber-text); }
-  .today-col-accent-rev   { border-top: 3px solid var(--blue-text); }
-  .today-col-accent-done  { border-top: 3px solid var(--green-text); }
+  .today-col-accent-todo    { border-top: 3px solid #d8d4ff; }
+  .today-col-accent-prog    { border-top: 3px solid var(--amber-text); }
+  .today-col-accent-rev     { border-top: 3px solid var(--blue-text); }
+  .today-col-accent-done    { border-top: 3px solid var(--green-text); }
+  .today-col-accent-ch-rev  { border-top: 3px solid #f59e8a; }
+  .today-col-accent-ch-done { border-top: 3px solid #a78bfa; }
 
   .today-cards { display: flex; flex-direction: column; gap: 8px; flex: 1; }
   .today-card {
@@ -3313,12 +3315,22 @@ function emitAssetChangeNotifications(asset, ctx) {
   // Rule: Approved \u2014 ping PM (country channel) with Frame.io link so they
   // know the video is ready to publish. Routes to the same PM:Country batch
   // as For Review messages and @mentions the country PM in the header.
+  // EXCEPTION: if the approval is back-dated to before this week's Monday,
+  // this is a catch-up data-entry action \u2014 skip the notification so the team
+  // isn't pinged for old work. A skipped-notify log line is written so the
+  // suppression is visible in Automations \u2192 Live Activity Log.
   if (statusChanged && newStatus === 'Approved') {
-    var campAp = findCampaignById(asset.campaignId);
-    var countryAp = campAp ? campAp.country : null;
-    if (countryAp) {
-      var approvedDetail = asset.finalVideo ? 'Frame.io: ' + asset.finalVideo : '(no Frame.io link set)';
-      queueNotification('PM:' + countryAp, 'approved', asset, approvedDetail);
+    var weekStart = getThisWeekRange().start;
+    var dateAp = asset.dateApproved || todayISO();
+    if (dateAp >= weekStart) {
+      var campAp = findCampaignById(asset.campaignId);
+      var countryAp = campAp ? campAp.country : null;
+      if (countryAp) {
+        var approvedDetail = asset.finalVideo ? 'Frame.io: ' + asset.finalVideo : '(no Frame.io link set)';
+        queueNotification('PM:' + countryAp, 'approved', asset, approvedDetail);
+      }
+    } else {
+      logAction('skipped-notify', '"' + asset.name + '" approved with back-dated dateApproved (' + dateAp + ') \u2014 no Slack ping');
     }
   }
 
@@ -4931,33 +4943,43 @@ function sortTodoBucketByEta(items) {
 }
 
 // ===================== TODAY KANBAN BOARD =====================
-// Four columns on one board: To Do Today, In Progress, Done for Review, Approved.
-// Cards are draggable between columns \u2014 dropping flips the asset's status and fires
-// the normal notification path (same as changing the status on the Campaigns tab).
+// Six columns on one board: To Do Today, In Progress, PM Review, PM Approved,
+// CH Review, CH Approved. Cards are draggable between columns.
+// PM columns drive asset.status; CH columns drive asset.categoryHeadQc.
+// A single video can appear in both a PM column AND a CH column simultaneously
+// since the two tracks are independent (see PRD \u00a76.3).
 //
-// Column filter rules (documented so behavior is obvious):
-//   To Do Today       : status === 'Assigned' AND (assignedAt === today OR estDelivery === today)
-//   In Progress       : status === 'In Progress'
-//   Done for Review   : status === 'For Review' OR status === 'Needs Revisions'
-//   Approved          : status === 'Approved' AND dateApproved === today
-//                       (restricted to today so the column doesn't balloon indefinitely;
-//                        the main counter uses the same filter for "day's total").
+// Column filter rules:
+//   To Do Today  : status === 'Assigned' AND (assignedAt === today OR estDelivery === today)
+//   In Progress  : status === 'In Progress'
+//   PM Review    : status === 'For Review' OR status === 'Needs Revisions'
+//   PM Approved  : status === 'Approved' AND dateApproved === today
+//                  (today-only so column doesn't balloon; main counter uses same filter)
+//   CH Review    : categoryHeadQc === 'For Review' OR categoryHeadQc === 'Needs Revisions'
+//   CH Approved  : categoryHeadQc === 'Approved'
 function getTodayBoardBuckets() {
   var today = todayISO();
   var buckets = {
-    todo:     { label: 'To Do Today',     key: 'todo',     items: [] },
-    progress: { label: 'In Progress',     key: 'progress', items: [] },
-    review:   { label: 'Done for Review', key: 'review',   items: [] },
-    approved: { label: 'Approved',        key: 'approved', items: [] }
+    todo:       { label: 'To Do Today',  key: 'todo',       items: [] },
+    progress:   { label: 'In Progress',  key: 'progress',   items: [] },
+    review:     { label: 'PM Review',    key: 'review',     items: [] },
+    approved:   { label: 'PM Approved',  key: 'approved',   items: [] },
+    chReview:   { label: 'CH Review',    key: 'chReview',   items: [] },
+    chApproved: { label: 'CH Approved',  key: 'chApproved', items: [] }
   };
   // Iterate STATE.assets in its current array order \u2014 drops on the board mutate
   // that order so a moved card lands at the drop position rather than snapping
   // back to a canonical sort slot.
   STATE.assets.forEach(function(a) {
+    // PM track (status-based)
     if (a.status === 'Assigned' && (a.assignedAt === today || a.estDelivery === today)) buckets.todo.items.push(a);
     else if (a.status === 'In Progress') buckets.progress.items.push(a);
     else if (a.status === 'For Review' || a.status === 'Needs Revisions') buckets.review.items.push(a);
     else if (a.status === 'Approved' && a.dateApproved === today) buckets.approved.items.push(a);
+    // CH track (categoryHeadQc-based) \u2014 independent, so any asset can appear here too
+    var chq = a.categoryHeadQc || 'Draft';
+    if (chq === 'For Review' || chq === 'Needs Revisions') buckets.chReview.items.push(a);
+    else if (chq === 'Approved') buckets.chApproved.items.push(a);
   });
   // Sort the To Do column by Estimated Delivery (soonest first), preserving manually-
   // dragged items and items without an ETA. Other columns keep their natural array order.
@@ -5050,26 +5072,31 @@ function getCampaignWeeklyStats() {
 // per-video cards \u2014 we show one card per subcampaign with its total video count
 // (across every status) plus the breakdown. Approvals this week are included as
 // a "+N this week" badge so the week context isn't lost.
+// Only campaigns that have at least one asset with estDelivery OR dateApproved
+// inside this week are included \u2014 campaigns with no scheduled or approved work
+// this week are hidden so the This Week row is a real "active this week" view.
 function getCampaignStatusBreakdown() {
   var weekRange = getThisWeekRange();
   var byId = {};
   STATE.campaigns.forEach(function(c) {
     var b = { 'Draft': 0, 'Assigned': 0, 'In Progress': 0, 'For Review': 0, 'Needs Revisions': 0, 'Approved': 0 };
-    byId[c.id] = { campaign: c, total: 0, byStatus: b, weekApproved: 0 };
+    byId[c.id] = { campaign: c, total: 0, byStatus: b, weekApproved: 0, weekActive: false };
   });
   STATE.assets.forEach(function(a) {
     var row = byId[a.campaignId];
     if (!row) return;
     row.total++;
     if (row.byStatus[a.status] !== undefined) row.byStatus[a.status]++;
-    if (a.status === 'Approved' && a.dateApproved &&
-        a.dateApproved >= weekRange.start && a.dateApproved <= weekRange.end) {
-      row.weekApproved++;
-    }
+    var inWeekApproved = a.dateApproved && a.dateApproved >= weekRange.start && a.dateApproved <= weekRange.end;
+    var inWeekDelivery = a.estDelivery  && a.estDelivery  >= weekRange.start && a.estDelivery  <= weekRange.end;
+    if (inWeekApproved || inWeekDelivery) row.weekActive = true;
+    if (a.status === 'Approved' && inWeekApproved) row.weekApproved++;
   });
   var countryIdx = {};
   STATE.countries.forEach(function(c, i) { countryIdx[c.code] = i; });
-  var list = Object.keys(byId).map(function(k) { return byId[k]; }).filter(function(r) { return r.total > 0; });
+  var list = Object.keys(byId).map(function(k) { return byId[k]; }).filter(function(r) {
+    return r.total > 0 && r.weekActive;
+  });
   list.sort(function(a, b) {
     var ai = countryIdx[a.campaign.country];
     var bi = countryIdx[b.campaign.country];
@@ -5175,6 +5202,39 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   // status change to anything else clears the flag (above).
   if (a.status === 'Assigned') {
     a.dragLocked = true;
+  }
+  render();
+}
+
+// Sibling of applyStatusChangeThenReorder for CH columns. Sets categoryHeadQc
+// (via the existing App setter so notifications + version history are captured)
+// and then repositions the asset in STATE.assets for visual drop placement.
+function applyCategoryHeadQcChangeThenReorder(id, targetVal, placement, anchorId) {
+  var a = null, idx = -1;
+  for (var i = 0; i < STATE.assets.length; i++) {
+    if (STATE.assets[i].id === id) { a = STATE.assets[i]; idx = i; break; }
+  }
+  if (!a) return;
+  // Delegate to App setter — handles validation, version snapshot, activity log,
+  // and CHQ/CHA/editor Slack notifications. It calls render() at end which is
+  // harmless; we override with our own render after the reorder below.
+  App.setAssetCategoryHeadQc(id, targetVal);
+  // Re-find idx after App setter may have triggered state changes.
+  idx = -1;
+  for (var j = 0; j < STATE.assets.length; j++) {
+    if (STATE.assets[j].id === id) { idx = j; break; }
+  }
+  if (idx < 0) return;
+  STATE.assets.splice(idx, 1);
+  if (placement === 'before' && anchorId !== null && anchorId !== undefined) {
+    var anchorIdx = -1;
+    for (var k = 0; k < STATE.assets.length; k++) {
+      if (STATE.assets[k].id === anchorId) { anchorIdx = k; break; }
+    }
+    if (anchorIdx < 0) STATE.assets.push(a);
+    else STATE.assets.splice(anchorIdx, 0, a);
+  } else {
+    STATE.assets.push(a);
   }
   render();
 }
@@ -5327,11 +5387,13 @@ function renderTodayView() {
     '</div>';
   }
 
-  function renderColumn(bucket, accentClass, statusTarget) {
+  // track: 'pm' (default) drives asset.status; 'ch' drives asset.categoryHeadQc.
+  function renderColumn(bucket, accentClass, dropTarget, track) {
+    var colTrack = track || 'pm';
     var cardsHtml = bucket.items.length === 0
       ? '<div class="today-col-empty">Empty \u2014 drop a card here</div>'
       : bucket.items.map(renderCard).join('');
-    return '<div class="today-col ' + accentClass + '" data-col="' + bucket.key + '" data-status="' + statusTarget + '">' +
+    return '<div class="today-col ' + accentClass + '" data-col="' + bucket.key + '" data-status="' + dropTarget + '" data-track="' + colTrack + '">' +
       '<div class="today-col-head">' +
         '<div class="today-col-title">' + bucket.label + '</div>' +
         '<div class="today-col-count">' + bucket.items.length + '</div>' +
@@ -5340,14 +5402,15 @@ function renderTodayView() {
     '</div>';
   }
 
-  // Columns map to a single canonical "drop target status" each. Drops into 'review'
-  // pick 'For Review' (not 'Needs Revisions') since that's the forward-moving transition;
-  // users who want to flip to Needs Revisions should still do it from Campaigns.
+  // PM columns drive status; CH columns drive categoryHeadQc.
+  // Drops into *Review pick the forward-moving value; Needs Revisions is set from Campaigns.
   var colsHtml =
-    renderColumn(buckets.todo,     'today-col-accent-todo', 'Assigned') +
-    renderColumn(buckets.progress, 'today-col-accent-prog', 'In Progress') +
-    renderColumn(buckets.review,   'today-col-accent-rev',  'For Review') +
-    renderColumn(buckets.approved, 'today-col-accent-done', 'Approved');
+    renderColumn(buckets.todo,       'today-col-accent-todo', 'Assigned',   'pm') +
+    renderColumn(buckets.progress,   'today-col-accent-prog', 'In Progress','pm') +
+    renderColumn(buckets.review,     'today-col-accent-rev',  'For Review', 'pm') +
+    renderColumn(buckets.approved,   'today-col-accent-done', 'Approved',   'pm') +
+    renderColumn(buckets.chReview,   'today-col-accent-ch-rev',  'For Review', 'ch') +
+    renderColumn(buckets.chApproved, 'today-col-accent-ch-done', 'Approved',   'ch');
 
   // --- This Week row ---
   // Week scope shows subcampaigns (not individual videos) \u2014 each card aggregates
@@ -5436,7 +5499,7 @@ function renderTodayView() {
     renderMonthPanel() +
     '<div class="today-head">' +
       '<div><div class="today-title">Today \u2014 ' + escapeHtml(todayLabel) + '</div>' +
-      '<div class="today-sub">Drag cards between columns to change status. Double-click to open the full editor. "Approved" column only shows videos approved today.</div></div>' +
+      '<div class="today-sub">Drag cards between columns to change status. Double-click to open the full editor. PM columns set the main status · CH columns set the Category Head QC. "PM Approved" shows today only.</div></div>' +
       '<div class="today-totals">' +
         '<div class="today-total-main">' +
           '<span class="today-total-main-num">' + approvedTotal + '</span>' +
@@ -5590,15 +5653,13 @@ function computeDailyLog(days) {
     // are ignored \u2014 the tab is for tracking per-editor accountability on live work.
     if (!a.editor || DAILY_LOG_EDITORS.indexOf(a.editor) < 0) return;
     var statusByDay = days.map(function(d) { return getAssetStateOnDay(a, d).status || 'Draft'; });
-    // Show this video in the editor's list if EITHER:
-    //   (a) it had any non-Draft status during the visible week (in flight), OR
-    //   (b) it was approved on a day in the visible week (dateApproved match)
-    var hadActivity = false;
-    for (var i = 0; i < statusByDay.length; i++) {
-      if (statusByDay[i] && statusByDay[i] !== 'Draft') { hadActivity = true; break; }
-    }
+    // Strict filter: only include videos that were actually approved within the
+    // visible Mon–Fri window. The Daily Log is a "what got finished" report,
+    // not a workload timeline — so drafts, in-progress, and for-review videos
+    // are intentionally hidden, and approved videos only surface on the day
+    // matching their dateApproved field.
     var approvedThisWeek = a.dateApproved && days.indexOf(a.dateApproved) >= 0;
-    if (!hadActivity && !approvedThisWeek) return;
+    if (!approvedThisWeek) return;
     byEditor[a.editor].videos.push({ asset: a, statusByDay: statusByDay });
     // Per-day approval count: strictly based on the asset's dateApproved field. If the
     // editor approves a video and stamps dateApproved=2026-04-28, that's the day it
@@ -5670,19 +5731,14 @@ function renderDailyLogView() {
   var daysMissed = row.approvedByDay.filter(function(n) { return n < target; }).length;
   var daysHit = days.length - daysMissed;
 
-  // Bucket each video into the days it was actively worked on (any non-Draft status
-  // on that day) OR was approved on (dateApproved match). One video can appear in
-  // multiple days; that's fine \u2014 it shows the editor's ongoing work timeline.
+  // Bucket each video under exactly the day it was approved on. Videos without a
+  // dateApproved match in the visible window were already filtered out upstream
+  // by computeDailyLog, so each video lands in one day card only \u2014 the report
+  // becomes a clean "what got finished" view rather than a multi-day timeline.
   var videosByDay = days.map(function() { return []; });
   row.videos.forEach(function(v) {
-    days.forEach(function(d, dayIdx) {
-      var statusThatDay = v.statusByDay[dayIdx] || 'Draft';
-      var approvedOnDay = v.asset.dateApproved === d;
-      // Show under day X if either had a non-Draft status that day, OR was approved on that day
-      if (statusThatDay !== 'Draft' || approvedOnDay) {
-        videosByDay[dayIdx].push(v);
-      }
-    });
+    var dayIdx = days.indexOf(v.asset.dateApproved);
+    if (dayIdx >= 0) videosByDay[dayIdx].push(v);
   });
 
   // Render one day-card per workday. Each card lists the videos worked that day with
@@ -5706,7 +5762,7 @@ function renderDailyLogView() {
     });
     var rowsHtml;
     if (sortedVids.length === 0) {
-      rowsHtml = '<div class="log-day-empty">No work logged on ' + dowLabel + '.</div>';
+      rowsHtml = '<div class="log-day-empty">No videos approved on ' + dowLabel + '.</div>';
     } else {
       rowsHtml = sortedVids.map(function(v) {
         var a = v.asset;
@@ -7657,8 +7713,11 @@ function buildQcReportMessage(campaignId) {
 //   N. Video name \u2014 Current Status
 //        Raw: <url|Drive>    \u2190 shown for Assigned / other
 //        Brief: <url|Notion>
-//     \u2014 OR \u2014
-//        Final: <url|Frame>  \u2190 shown for For Review / Needs Revisions / Approved
+//     \u2014 OR \u2014 (For Review)
+//        Video: <url|Frame>
+//        Brief: <url|Notion>
+//     \u2014 OR \u2014 (Needs Revisions / Approved / CHQ statuses)
+//        Video: <url|Video>
 //
 // Missing URLs render as '\u2014'. Slack renders <url|label> as a clickable chip.
 function buildBatchMessage(recipient, items, opts) {
@@ -7729,7 +7788,16 @@ function buildBatchMessage(recipient, items, opts) {
     var lineSuffix = '';
     if (isChqBatch && it.country) lineSuffix = ' [' + it.country + ']';
     lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel + lineSuffix);
-    if (FINAL_VIDEO_STATUSES[it.status]) {
+    if (it.status === 'For Review') {
+      // PM is reviewing the cut \u2014 show the Frame.io link AND the brief so they
+      // can verify the cut matches the brief without hunting for it separately.
+      var frUrl   = extractSingleUrl(it.finalVideo);
+      var frBrief = extractSingleUrl(it.editingBrief);
+      lines.push('    Video: ' + (frUrl   ? '<' + frUrl   + '|Frame>'  : '\u2014'));
+      lines.push('    Brief: ' + (frBrief ? '<' + frBrief + '|Notion>' : '\u2014'));
+    } else if (FINAL_VIDEO_STATUSES[it.status]) {
+      // Other produced-video statuses (Needs Revisions / Approved / CHQ) \u2014
+      // show only the final cut link, no brief.
       var finalUrl = extractSingleUrl(it.finalVideo);
       var finalLink = finalUrl ? '<' + finalUrl + '|Video>' : '\u2014';
       lines.push('    Video: ' + finalLink);
@@ -10025,7 +10093,8 @@ function pdragFindTargetAt(x, y) {
     var col = el.closest && el.closest('.today-col');
     if (col) {
       var status = col.getAttribute('data-status');
-      return { kind: 'col', status: status, el: col };
+      var track = col.getAttribute('data-track') || 'pm';
+      return { kind: 'col', status: status, track: track, el: col };
     }
   }
   if (PtrDrag.kind === 'campcard') {
@@ -10133,16 +10202,25 @@ function pdragOnMouseUp(e) {
   if (kind === 'card') {
     if (!target) { render(); return; }
     if (target.kind === 'card' && target.id !== sourceId) {
-      var tgt = null;
-      for (var j = 0; j < STATE.assets.length; j++) {
-        if (STATE.assets[j].id === target.id) { tgt = STATE.assets[j]; break; }
+      // Determine which column the target card is in so we know which track to use.
+      var colEl = target.el && target.el.closest && target.el.closest('.today-col');
+      var dropTrack = colEl ? (colEl.getAttribute('data-track') || 'pm') : 'pm';
+      var dropVal   = colEl ? (colEl.getAttribute('data-status') || '') : '';
+      if (!dropVal) {
+        // Fallback: read from target card's asset status (PM track only).
+        var tgt2 = null;
+        for (var j2 = 0; j2 < STATE.assets.length; j2++) {
+          if (STATE.assets[j2].id === target.id) { tgt2 = STATE.assets[j2]; break; }
+        }
+        dropVal = tgt2 ? tgt2.status : '';
       }
-      if (!tgt) { render(); return; }
-      applyStatusChangeThenReorder(sourceId, tgt.status, 'before', target.id);
+      if (dropTrack === 'ch') applyCategoryHeadQcChangeThenReorder(sourceId, dropVal, 'before', target.id);
+      else applyStatusChangeThenReorder(sourceId, dropVal, 'before', target.id);
       return;
     }
     if (target.kind === 'col' && target.status) {
-      applyStatusChangeThenReorder(sourceId, target.status, 'end', null);
+      if (target.track === 'ch') applyCategoryHeadQcChangeThenReorder(sourceId, target.status, 'end', null);
+      else applyStatusChangeThenReorder(sourceId, target.status, 'end', null);
       return;
     }
     render();
