@@ -6395,15 +6395,16 @@ function resolveWebhookForEditor(recipient, items) {
     return cw[code] || fallback;
   }
 
-  // CHQ:Category (Category Head QC) -> queue is per-category; items can span
-  // multiple countries (e.g. UK + US Sneakers in one batch), so per-country
-  // routing doesn't apply. Honors a campaign override if every item shares one
-  // campaign; otherwise routes to the global fallback webhook. Heads get pinged
-  // via the @-mention in the message header regardless of which channel it
-  // lands in.
+  // CHQ:Category (Category Head QC) -> queue is per-category. Routing priority:
+  //   1. Campaign-level slackOverride (all items same campaign)
+  //   2. qcWebhooks[country] if all items share one country
+  //   3. Global fallback
   if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
     var chqOverride = sharedCampaignOverride(items);
     if (chqOverride) return chqOverride;
+    var qwChq = STATE.qcWebhooks || {};
+    var chqCountries = batchCountriesOf(items);
+    if (chqCountries.length === 1 && qwChq[chqCountries[0]]) return qwChq[chqCountries[0]];
     return fallback;
   }
 
@@ -6664,6 +6665,80 @@ function testWebhookPing() {
 // per-country groups. Each group uses that country's webhook. Partial failures (Option A):
 // successful groups are moved to the sent log; failed groups stay in the pending batch so
 // the user can retry just those.
+// Atomically claim a pending batch via a Firestore transaction so only one browser
+// sends when multiple tabs are open. Returns Promise<true> if this browser won the
+// claim (items were present and we cleared them), Promise<false> if another browser
+// already sent them (items were gone), or rejects on Firestore error.
+// On success, Firestore is updated with extraItems as the new batch contents.
+function claimBatch(editor, extraItems) {
+  if (!Fb._ready || !Auth.user) return Promise.reject(new Error('firestore-unavailable'));
+  var docRef = fbDb.doc(Fb.STATE_DOC);
+  return fbDb.runTransaction(function(tx) {
+    return tx.get(docRef).then(function(doc) {
+      if (!doc.exists) return false;
+      var remote = doc.data();
+      var rb = (remote.pendingBatches || {})[editor];
+      if (!rb || !rb.items || rb.items.length === 0) return false;
+      // We won \u2014 write the cleared batch atomically in the same transaction.
+      var newBatches = Object.assign({}, remote.pendingBatches || {});
+      newBatches[editor] = {
+        items: extraItems,
+        firstQueuedAt: extraItems.length > 0 ? Date.now() : null
+      };
+      tx.set(docRef, { pendingBatches: newBatches }, { merge: true });
+      return true;
+    });
+  });
+}
+
+// Execute the actual Slack send for a single batch (no split). Shared by both the
+// transaction-claimed path and the offline fallback path.
+function doSend(editor, windowItems, extraItems, url, msg, batch) {
+  function markSent(reason) {
+    STATE.sentNotifications.unshift({
+      time: timeStamp(), sentAt: Date.now(), editor: editor, items: windowItems, reason: reason, body: msg
+    });
+    if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+  }
+  function restoreOnFailure() {
+    batch.items = windowItems.concat(batch.items);
+    batch.firstQueuedAt = Date.now();
+  }
+  toast('Sending to Slack...', '');
+  postToSlack(url, msg).then(function(r) {
+    if (!r.ok) {
+      toast('Slack rejected the batch: "' + r.body + '"', 'error');
+      logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
+      restoreOnFailure();
+      render();
+      return;
+    }
+    markSent('sent-live');
+    logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
+    toast('\u2713 Sent to Slack', 'success');
+    render();
+  }).catch(function(err) {
+    fetch(url, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: msg })
+    }).then(function() {
+      markSent('sent-blind');
+      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
+      toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
+      render();
+    }).catch(function(e2) {
+      var m = (e2 && e2.message) || (err && err.message) || 'network error';
+      var hint = (location.protocol === 'file:')
+        ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
+        : '';
+      restoreOnFailure();
+      render();
+      toast('Send failed: ' + m + hint, 'error');
+    });
+  });
+}
+
 function sendPendingBatch(editor, opts) {
   // opts.silent \u2014 when true, suppress user-facing toast + tab redirect on webhook
   // errors. The 5s ticker passes silent=true so auto-fires don't nag the user in a
@@ -6684,7 +6759,6 @@ function sendPendingBatch(editor, opts) {
     return sendPendingBatchSplit(editor, windowItems, extraItems, opts);
   }
 
-  // Single-send path (PM batches, single-country editor batches, or user overrode split)
   var url = resolveWebhookForEditor(editor, windowItems);
   if (!webhookValid(url)) {
     if (!silent) {
@@ -6696,60 +6770,22 @@ function sendPendingBatch(editor, opts) {
 
   var msg = buildBatchMessage(editor, windowItems);
 
-  // Claim the items synchronously BEFORE the async fetch so that:
-  // (a) the 5s timer doesn't re-fire the same batch on its next tick, and
-  // (b) the saveState() that follows writes an empty batch to Firestore immediately,
-  //     preventing other open browsers from also firing the same items.
-  batch.items = extraItems;
-  batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
-  Fb.uploadNow(); // push empty-batch state to Firestore right away (skip the 600ms debounce)
-
-  function markSent(reason) {
-    STATE.sentNotifications.unshift({
-      time: timeStamp(), sentAt: Date.now(), editor: editor, items: windowItems, reason: reason, body: msg
-    });
-    if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-  }
-
-  function restoreOnFailure() {
-    // Put the items back so the user can retry manually.
-    batch.items = windowItems.concat(batch.items);
-    batch.firstQueuedAt = Date.now();
-  }
-
-  toast('Sending to Slack...', '');
-  postToSlack(url, msg).then(function(r) {
-    if (!r.ok) {
-      toast('Slack rejected the batch: "' + r.body + '"', 'error');
-      logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
-      restoreOnFailure();
-      render();
-      return;
-    }
-    markSent('sent-live');
-    logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
-    toast('\u2713 Sent to Slack', 'success');
-    render();
-  }).catch(function(err) {
-    // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
-    fetch(url, {
-      method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: msg })
-    }).then(function() {
-      markSent('sent-blind');
-      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
-      toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
-      render();
-    }).catch(function(e2) {
-      var m = (e2 && e2.message) || (err && err.message) || 'network error';
-      var hint = (location.protocol === 'file:')
-        ? ' \u2014 you\'re running from file:// which blocks webhook requests in some browsers. Host the file on a local server (e.g. python3 -m http.server) or try Chrome.'
-        : '';
-      restoreOnFailure();
-      render();
-      toast('Send failed: ' + m + hint, 'error');
-    });
+  // Use a Firestore transaction to atomically claim the batch. Only the browser
+  // that wins the transaction sends \u2014 this is the definitive fix for duplicate
+  // sends when multiple browsers are open simultaneously.
+  claimBatch(editor, extraItems).then(function(claimed) {
+    if (!claimed) return; // another browser already sent this batch
+    // Mirror the cleared state locally so the UI updates immediately.
+    batch.items = extraItems;
+    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
+    doSend(editor, windowItems, extraItems, url, msg, batch);
+  }).catch(function() {
+    // Firestore unavailable (offline, rules error, etc.) \u2014 fall back to the
+    // synchronous-clear approach so notifications still work without connectivity.
+    batch.items = extraItems;
+    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
+    Fb.uploadNow();
+    doSend(editor, windowItems, extraItems, url, msg, batch);
   });
 }
 
@@ -6797,70 +6833,75 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
   });
   if (!anyResolvable) {
     if (!silent) {
-      toast('No valid webhooks for any country in this batch \u2014 set one in Automations', 'error');
+      toast('No valid webhooks for any country in this batch — set one in Automations', 'error');
       App.setTab('automations');
     }
     return;
   }
 
-  // Claim all items synchronously before the async sends start (same race-condition fix
-  // as sendPendingBatch: prevents the 5s timer re-firing and prevents other browsers
-  // from seeing items in Firestore while the fetch is in flight).
-  batch.items = extraItems;
-  batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
-  Fb.uploadNow();
+  function doSplit() {
+    toast('Sending ' + groups.length + ' country groups to Slack...', '');
+    var promises = groups.map(function(g) { return sendOneGroup(editor, g.items, g.country); });
 
-  toast('Sending ' + groups.length + ' country groups to Slack...', '');
-  var promises = groups.map(function(g) { return sendOneGroup(editor, g.items, g.country); });
+    Promise.all(promises).then(function(results) {
+      var succeededItems = [];
+      var failedItems = [];
+      var sentLogEntries = [];
+      var successLabels = [];
+      var failureLabels = [];
 
-  Promise.all(promises).then(function(results) {
-    var succeededItems = [];      // items to move to sent log
-    var failedItems = [];          // items to keep in pending
-    var sentLogEntries = [];       // one per successful group
-    var successLabels = [];
-    var failureLabels = [];
+      results.forEach(function(res) {
+        if (res.ok) {
+          succeededItems = succeededItems.concat(res.items);
+          sentLogEntries.push({
+            time: timeStamp(),
+            sentAt: Date.now(),
+            editor: editor,
+            items: res.items,
+            reason: res.reason,
+            body: res.msg
+          });
+          successLabels.push(res.country + (res.reason === 'sent-blind' ? ' (blind)' : ''));
+        } else {
+          failedItems = failedItems.concat(res.items);
+          failureLabels.push(res.country + ' — ' + res.err);
+          logAction('deleted', editor + ': split send failed for ' + res.country + ' — ' + res.err);
+        }
+      });
 
-    results.forEach(function(res) {
-      if (res.ok) {
-        succeededItems = succeededItems.concat(res.items);
-        sentLogEntries.push({
-          time: timeStamp(),
-          sentAt: Date.now(),
-          editor: editor,
-          items: res.items,
-          reason: res.reason, // 'sent-live' or 'sent-blind'
-          body: res.msg
-        });
-        successLabels.push(res.country + (res.reason === 'sent-blind' ? ' (blind)' : ''));
-      } else {
-        failedItems = failedItems.concat(res.items);
-        failureLabels.push(res.country + ' \u2014 ' + res.err);
-        logAction('deleted', editor + ': split send failed for ' + res.country + ' \u2014 ' + res.err);
+      // Restore any failed items so the user can retry them.
+      batch.items = failedItems.concat(batch.items);
+      batch.firstQueuedAt = batch.items.length > 0 ? Date.now() : null;
+
+      sentLogEntries.forEach(function(entry) { STATE.sentNotifications.unshift(entry); });
+      while (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+
+      if (successLabels.length > 0) {
+        logAction('notified', editor + ' — split send: ' + successLabels.join(', ') + ' ✓');
       }
+      if (failureLabels.length === 0) {
+        toast('✓ Sent ' + successLabels.length + ' country group(s) to Slack', 'success');
+      } else if (successLabels.length === 0) {
+        toast('All ' + failureLabels.length + ' country group(s) failed — still queued. First error: ' + failureLabels[0], 'error');
+      } else {
+        toast(successLabels.length + ' sent ✓ · ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
+      }
+      render();
     });
+  }
 
-    // Restore failed items so the user can retry them.
-    batch.items = failedItems.concat(batch.items);
-    batch.firstQueuedAt = batch.items.length > 0 ? Date.now() : null;
-
-    // Push sent-log entries (newest first, as usual)
-    sentLogEntries.forEach(function(entry) {
-      STATE.sentNotifications.unshift(entry);
-    });
-    while (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-
-    // Activity log + user-facing toast
-    if (successLabels.length > 0) {
-      logAction('notified', editor + ' \u2014 split send: ' + successLabels.join(', ') + ' \u2713');
-    }
-    if (failureLabels.length === 0) {
-      toast('\u2713 Sent ' + successLabels.length + ' country group(s) to Slack', 'success');
-    } else if (successLabels.length === 0) {
-      toast('All ' + failureLabels.length + ' country group(s) failed \u2014 still queued. First error: ' + failureLabels[0], 'error');
-    } else {
-      toast(successLabels.length + ' sent \u2713 \u00B7 ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
-    }
-    render();
+  // Same transaction-based claim as sendPendingBatch to prevent multi-browser duplicates.
+  claimBatch(editor, extraItems).then(function(claimed) {
+    if (!claimed) return;
+    batch.items = extraItems;
+    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
+    doSplit();
+  }).catch(function() {
+    // Offline fallback: clear synchronously and push to Firestore immediately.
+    batch.items = extraItems;
+    batch.firstQueuedAt = extraItems.length > 0 ? Date.now() : null;
+    Fb.uploadNow();
+    doSplit();
   });
 }
 
