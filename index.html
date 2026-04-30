@@ -506,7 +506,7 @@
   .daily-pace-fill.behind { background: var(--amber-text); }
 
   .today-board {
-    display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 12px;
+    display: grid; grid-template-columns: repeat(7, minmax(220px, 1fr)); gap: 12px;
     align-items: start;
   }
   .today-col {
@@ -523,6 +523,7 @@
   }
   .today-col-accent-todo    { border-top: 3px solid #d8d4ff; }
   .today-col-accent-prog    { border-top: 3px solid var(--amber-text); }
+  .today-col-accent-revisions { border-top: 3px solid var(--red-text); }
   .today-col-accent-rev     { border-top: 3px solid var(--blue-text); }
   .today-col-accent-done    { border-top: 3px solid var(--green-text); }
   .today-col-accent-ch-rev  { border-top: 3px solid #f59e8a; }
@@ -1353,6 +1354,9 @@ var Fb = {
       editorSlackIds: STATE.editorSlackIds,
       categoryHeadSlackIds: STATE.categoryHeadSlackIds,
       pmSlackIds: STATE.pmSlackIds,
+      slackBotToken: STATE.slackBotToken,
+      dailyThreads: STATE.dailyThreads,
+      dailyThreadHistory: STATE.dailyThreadHistory,
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
@@ -1884,6 +1888,16 @@ var STATE = {
   // Approved messages @mention the PM so they get pinged. Names of the PMs
   // come from COUNTRY_PMS (UK→Elsa, IT→Anasstassiya, ES→Laura).
   pmSlackIds: { UK: '', IT: '', ES: '', US: '', PL: '' },
+  // Slack Bot User OAuth Token (xoxb-...) used for chat.postMessage when posting
+  // to a daily editor thread. Webhook fallback is still used when this is blank
+  // or when an editor has no daily thread set for today.
+  slackBotToken: '',
+  // One daily Slack thread per editor (Zidni/Sharm/Patty). Each entry: { date,
+  // url, channelId, threadTs }. Cleared at midnight rollover. Notifications
+  // routed to that editor land in the thread when set; otherwise webhook.
+  dailyThreads: { Zidni: null, Sharm: null, Patty: null },
+  // Last 7 archived per-editor threads, kept for audit / re-paste.
+  dailyThreadHistory: { Zidni: [], Sharm: [], Patty: [] },
   schedulerDate: todayISO(),
   schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
@@ -3296,39 +3310,31 @@ function emitAssetChangeNotifications(asset, ctx) {
     queueNotification(newEditor, 'assigned', asset, assignedDetail);
   }
 
-  // Rule: For Review \u2014 ping PM (country channel) with Frame.io link
-  if (statusChanged && newStatus === 'For Review') {
-    var camp = findCampaignById(asset.campaignId);
-    var country = camp ? camp.country : null;
-    if (country) {
-      var reviewDetail = asset.finalVideo ? 'Frame.io: ' + asset.finalVideo : '(no Frame.io link set)';
-      queueNotification('PM:' + country, 'for-review', asset, reviewDetail);
-    }
+  // Rule: In Progress \u2014 ping editor (informational; raw + brief)
+  if (statusChanged && newStatus === 'In Progress' && newEditor) {
+    queueNotification(newEditor, 'in-progress', asset, '');
   }
 
-  // Rule: Needs Revisions \u2014 ping editor with Frame.io link (revision targets)
+  // Rule: For Review \u2014 routes to the editor's batch so the message lands in
+  // the editor's daily thread; header @-mentions the country PM with "from
+  // <@editor>". This replaces the prior PM:Country routing.
+  if (statusChanged && newStatus === 'For Review' && newEditor) {
+    queueNotification(newEditor, 'for-review', asset, '');
+  }
+
+  // Rule: Needs Revisions \u2014 ping editor; header reads "<@editor> \u2014 Needs Revisions from <@PM>".
   if (statusChanged && newStatus === 'Needs Revisions' && newEditor) {
-    var revDetail = asset.finalVideo ? 'Frame.io: ' + asset.finalVideo : '(no Frame.io link set)';
-    queueNotification(newEditor, 'needs-revisions', asset, revDetail);
+    queueNotification(newEditor, 'needs-revisions', asset, '');
   }
 
-  // Rule: Approved \u2014 ping PM (country channel) with Frame.io link so they
-  // know the video is ready to publish. Routes to the same PM:Country batch
-  // as For Review messages and @mentions the country PM in the header.
-  // EXCEPTION: if the approval is back-dated to before this week's Monday,
-  // this is a catch-up data-entry action \u2014 skip the notification so the team
-  // isn't pinged for old work. A skipped-notify log line is written so the
-  // suppression is visible in Automations \u2192 Live Activity Log.
-  if (statusChanged && newStatus === 'Approved') {
+  // Rule: Approved \u2014 ping editor (was PM); header reads "<@editor> \u2014 Approved from <@PM>".
+  // EXCEPTION: back-dated approvals (dateApproved before this week's Monday) are catch-up
+  // data entry \u2014 skip the ping. Suppression logged for visibility.
+  if (statusChanged && newStatus === 'Approved' && newEditor) {
     var weekStart = getThisWeekRange().start;
     var dateAp = asset.dateApproved || todayISO();
     if (dateAp >= weekStart) {
-      var campAp = findCampaignById(asset.campaignId);
-      var countryAp = campAp ? campAp.country : null;
-      if (countryAp) {
-        var approvedDetail = asset.finalVideo ? 'Frame.io: ' + asset.finalVideo : '(no Frame.io link set)';
-        queueNotification('PM:' + countryAp, 'approved', asset, approvedDetail);
-      }
+      queueNotification(newEditor, 'approved', asset, '');
     } else {
       logAction('skipped-notify', '"' + asset.name + '" approved with back-dated dateApproved (' + dateAp + ') \u2014 no Slack ping');
     }
@@ -3653,6 +3659,8 @@ setInterval(function() {
   if (STATE.sentNotifications.length !== beforeLen) anyChange = true;
   // (3) Daily tally at local midnight
   checkDailyTallyCrossover();
+  // (4) Sweep stale daily threads (date != today) to dailyThreadHistory.
+  if (sweepStaleDailyThreads()) anyChange = true;
   // Re-render notifications tab passively so countdown stays live
   if (STATE.tab === 'notifications' || anyChange) render();
 }, 5000);
@@ -3682,89 +3690,7 @@ function sortByPriority(assets, countryOrder) {
   });
 }
 
-function computeDayPlan() {
-  var plans = { Zidni: [], Sharm: [], Patty: [] };
-  var alerts = [];
-  var overflow = [];
-  var used = {};
-
-  function availableFor(editor) {
-    return STATE.assets.filter(function(a) {
-      if (used[a.id] || a.released || a.scheduledFor || a.status === 'Approved') return false;
-      return a.editor === editor;
-    });
-  }
-
-  ['Zidni', 'Sharm', 'Patty'].forEach(function(editor) {
-    var rules = EDITOR_RULES[editor];
-    var pool = sortByPriority(availableFor(editor), rules.countryOrder);
-    var ideal = Object.assign({}, rules.idealMix);
-
-    for (var d = 0; d < DIFFICULTIES.length; d++) {
-      var diff = DIFFICULTIES[d];
-      var need = ideal[diff] || 0;
-      while (need > 0 && plans[editor].length < rules.cap) {
-        var found = null;
-        for (var i = 0; i < pool.length; i++) if (pool[i].difficulty === diff) { found = pool[i]; break; }
-        if (!found) break;
-        plans[editor].push(found);
-        used[found.id] = true;
-        pool = pool.filter(function(x) { return x.id !== found.id; });
-        need--;
-      }
-    }
-    while (plans[editor].length < rules.cap && pool.length > 0) {
-      var pick = pool.shift();
-      plans[editor].push(pick);
-      used[pick.id] = true;
-    }
-
-    if (plans[editor].length === 0) {
-      alerts.push(editor + ' has no videos matching their skill level \u2014 reassign manually');
-    }
-  });
-
-  // Overflow: Zidni absorbs videos assigned to editors who can't handle them
-  if (plans.Zidni.length < EDITOR_RULES.Zidni.cap) {
-    var slotsLeft = EDITOR_RULES.Zidni.cap - plans.Zidni.length;
-    STATE.assets.forEach(function(a) {
-      if (slotsLeft <= 0 || used[a.id] || a.released || a.scheduledFor || a.status === 'Approved') return;
-      var allowed = EDITOR_ALLOWED_DIFF[a.editor] || [];
-      if (allowed.indexOf(a.difficulty) < 0) {
-        plans.Zidni.push(a);
-        used[a.id] = true;
-        overflow.push({ from: a.editor, to: 'Zidni', asset: a });
-        slotsLeft--;
-      }
-    });
-    plans.Zidni = sortByPriority(plans.Zidni, EDITOR_RULES.Zidni.countryOrder);
-  }
-
-  return { plans: plans, alerts: alerts, overflow: overflow };
-}
-
-function runScheduler() {
-  var dateStr = STATE.schedulerDate;
-  if (isWeekend(dateStr) && !STATE.schedulerIncludeWeekends) {
-    toast('Weekend skipped. Enable override if you want to drop today.', 'error');
-    return;
-  }
-  var result = computeDayPlan();
-  var totalScheduled = 0;
-
-  Object.keys(result.plans).forEach(function(editor) {
-    var list = result.plans[editor];
-    list.forEach(function(a) { a.scheduledFor = dateStr; totalScheduled++; });
-    if (list.length) {
-      logAction('scheduled', editor + ': ' + list.length + ' video(s) scheduled for ' + dateStr);
-    }
-  });
-  result.overflow.forEach(function(o) { logAction('updated', 'Overflow: ' + o.asset.name + ' \u2192 Zidni (from ' + o.from + ')'); });
-  result.alerts.forEach(function(msg) { logAction('updated', 'ALERT: ' + msg); });
-
-  toast(totalScheduled ? 'Scheduled ' + totalScheduled + ' videos for ' + dateStr : 'No videos scheduled (queues empty?)', totalScheduled ? 'success' : 'error');
-  render();
-}
+// Auto-pick scheduler removed \u2014 Scheduler tab is now manual. See renderSchedulerView.
 
 function clearSchedule() {
   var dateStr = STATE.schedulerDate, cleared = 0;
@@ -4827,69 +4753,81 @@ function renderCampaignsView() {
 }
 
 function renderSchedulerView() {
-  var result = computeDayPlan();
   var dateStr = STATE.schedulerDate;
   var weekend = isWeekend(dateStr);
 
-  var plansHtml = '';
-  ['Zidni', 'Sharm', 'Patty'].forEach(function(editor) {
-    var list = result.plans[editor];
-    var rules = EDITOR_RULES[editor];
-    var isAlert = list.length === 0;
-    var mixStr = Object.keys(rules.idealMix).map(function(k) { return rules.idealMix[k] + ' ' + k; }).join(' + ');
-    var countryStr = rules.countryOrder.join(' \u203A ');
+  // "Today's plan" summary: count of assets already scheduled for this date per editor.
+  var planCounts = { Zidni: 0, Sharm: 0, Patty: 0, Elsa: 0 };
+  STATE.assets.forEach(function(a) {
+    if (a.scheduledFor === dateStr && !a.released && a.editor && planCounts[a.editor] !== undefined) {
+      planCounts[a.editor]++;
+    }
+  });
+  var planSummaryHtml = ['Zidni','Sharm','Patty','Elsa'].map(function(e) {
+    return '<div class="editor-plan">' +
+      '<div class="editor-plan-header">' +
+        '<div class="editor-avatar av-' + e + '">' + editorInitials(e) + '</div>' +
+        '<div><div class="editor-plan-name">' + e + '</div>' +
+        '<div class="editor-plan-rules-inline">' + planCounts[e] + ' video(s) scheduled for ' + dateStr + '</div></div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
 
-    var slotsHtml = list.length === 0
-      ? '<div class="plan-empty">No available videos in ' + editor + '\'s queue today</div>'
-      : list.map(function(a, i) {
-          var camp = findCampaignById(a.campaignId);
-          var code = camp ? camp.country : '?';
-          return '<div class="plan-slot"><div class="plan-slot-num">' + (i+1) + '</div>' +
-            '<span class="plan-slot-name">' + escapeHtml(a.name) + '</span>' +
-            '<span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span>' +
-            '<span class="plan-slot-country flag-' + code + '">' + code + '</span></div>';
-        }).join('');
-
-    plansHtml +=
-      '<div class="editor-plan ' + (isAlert ? 'alert' : '') + '">' +
-        '<div class="editor-plan-header">' +
-          '<div class="editor-avatar av-' + editor + '">' + editorInitials(editor) + '</div>' +
-          '<div><div class="editor-plan-name">' + editor + '</div>' +
-          '<div class="editor-plan-rules-inline">Ideal mix: ' + mixStr + ' \u00B7 Cap: ' + rules.cap + ' \u00B7 Priority: ' + countryStr + '</div></div>' +
-          '<div class="editor-plan-rules">' + list.length + '/' + rules.cap + ' slots</div>' +
-        '</div>' +
-        '<div class="plan-slots">' + slotsHtml + '</div>' +
-      '</div>';
+  // Unscheduled = no scheduledFor AND not Approved AND not released. Includes Drafts so
+  // you can assign editor + ETA from one place.
+  var unscheduled = STATE.assets.filter(function(a) {
+    return !a.scheduledFor && !a.released && a.status !== 'Approved';
+  }).sort(function(a, b) {
+    var ea = a.estDelivery || '9999-99-99';
+    var eb = b.estDelivery || '9999-99-99';
+    if (ea !== eb) return ea < eb ? -1 : 1;
+    return a.pn - b.pn;
   });
 
-  var alertsHtml = result.alerts.length ? result.alerts.map(function(m) { return '<div class="alert-box">\u26A0 ' + escapeHtml(m) + '</div>'; }).join('') : '';
-  var overflowHtml = result.overflow.length
-    ? '<div class="auto-card"><div class="auto-title" style="margin-bottom:8px;">Overflow routing</div>' +
-      result.overflow.map(function(o) { return '<div style="font-size:12px;color:var(--text2);padding:4px 0;font-family:monospace;">\u27A4 "' + escapeHtml(o.asset.name) + '" \u2014 ' + o.from + ' cannot handle ' + o.asset.difficulty + ', absorbed by Zidni</div>'; }).join('') + '</div>'
-    : '';
-  var weekendNote = weekend ? '<div class="alert-box" style="background:var(--amber-bg);color:var(--amber-text);border-color:var(--amber-text);">\u26A0 ' + dateStr + ' is a weekend. ' + (STATE.schedulerIncludeWeekends ? 'Override ON \u2014 scheduler will run.' : 'Scheduler will skip unless override is checked.') + '</div>' : '';
+  var editorOpts = function(current) {
+    var opts = '<option value="">\u2014</option>';
+    EDITORS.forEach(function(e) {
+      opts += '<option value="' + e + '"' + (current === e ? ' selected' : '') + '>' + e + '</option>';
+    });
+    return opts;
+  };
+
+  var rowsHtml = unscheduled.length === 0
+    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No unscheduled videos. Pick a date and assign editor + ETA on rows in the Campaigns tab to plan more work.</td></tr>'
+    : unscheduled.map(function(a) {
+        var camp = findCampaignById(a.campaignId);
+        var code = camp ? camp.country : '?';
+        var campName = camp ? camp.name : '\u2014';
+        return '<tr>' +
+          '<td><span class="country-flag flag-' + code + '">' + code + '</span></td>' +
+          '<td>' + escapeHtml(a.name) + '</td>' +
+          '<td title="' + escapeHtml(campName) + '" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(campName) + '</td>' +
+          '<td><span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span></td>' +
+          '<td><select class="form-select" onchange="App.scheduleAssignEditor(' + a.id + ', this.value)">' + editorOpts(a.editor) + '</select></td>' +
+          '<td><input type="date" class="form-input" value="' + (a.estDelivery || '') + '" onchange="App.scheduleSetEta(' + a.id + ', this.value)"></td>' +
+        '</tr>';
+      }).join('');
+
+  var weekendNote = weekend ? '<div class="alert-box" style="background:var(--amber-bg);color:var(--amber-text);border-color:var(--amber-text);">\u26A0 ' + dateStr + ' is a weekend.</div>' : '';
 
   return '<div class="content"><div class="scheduler-panel">' +
     '<div class="section-title">Daily Scheduler</div>' +
     '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">\u23F0</div><div><div class="auto-title">3:00 PM Daily Drop</div><div class="auto-sub">Mon-Fri \u00B7 auto-picks videos per editor based on difficulty + country priority</div></div></div>' +
-      '<div class="auto-desc">Preview today\'s plan below. Slack pings fire only when you release.</div>' +
+      '<div class="auto-header"><div class="auto-icon">\u270E</div><div><div class="auto-title">Manual planner</div><div class="auto-sub">Assign editor + ETA per video. Setting an ETA stamps Scheduled For = the planned date below.</div></div></div>' +
       '<div class="scheduler-config-row">' +
         '<div class="scheduler-date-pick"><span>Plan for:</span><input type="date" value="' + dateStr + '" onchange="App.setSchedulerDate(this.value)"></div>' +
-        '<label class="checkbox-row"><input type="checkbox" ' + (STATE.schedulerIncludeWeekends ? 'checked' : '') + ' onchange="App.toggleWeekends(this.checked)"> Override weekend skip</label>' +
       '</div>' +
       weekendNote +
-      '<div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">' +
-        '<button class="run-btn" onclick="App.runScheduler()">\u25B6 Run scheduler (stamp Scheduled For)</button>' +
-        '<button class="run-btn secondary" onclick="App.clearSchedule()">Clear unscheduled</button>' +
-        '<button class="run-btn" style="background:var(--green-bg);color:var(--green-text);border-color:var(--green);" onclick="App.releaseScheduled()">\u{1F4E8} Release & notify editors</button>' +
-      '</div>' +
     '</div>' +
-    '<div class="section-title">Plan for ' + dateStr + '</div>' +
-    alertsHtml +
-    '<div class="editor-plans">' + plansHtml + '</div>' +
-    overflowHtml +
-    '<div class="auto-card"><div class="auto-title" style="margin-bottom:8px;">Elsa \u2014 manual only</div><div class="auto-desc">Elsa never gets scheduled by the daily drop, but she does receive reactive Slack pings when you manually assign her a video or change one of her tasks. See the Notifications tab for her queue.</div></div>' +
+    '<div class="section-title">Today\'s plan \u2014 ' + dateStr + '</div>' +
+    '<div class="editor-plans">' + planSummaryHtml + '</div>' +
+    '<div class="section-title">Unscheduled videos</div>' +
+    '<div class="auto-card" style="padding:0;">' +
+      '<div class="table-wrap"><table>' +
+        '<thead><tr><th></th><th>Video</th><th>Campaign</th><th>Difficulty</th><th>Editor</th><th>ETA</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>' +
+    '</div>' +
     '</div></div>';
 }
 
@@ -4962,6 +4900,7 @@ function getTodayBoardBuckets() {
   var buckets = {
     todo:       { label: 'To Do Today',  key: 'todo',       items: [] },
     progress:   { label: 'In Progress',  key: 'progress',   items: [] },
+    revision:   { label: 'Revision',     key: 'revision',   items: [] },
     review:     { label: 'PM Review',    key: 'review',     items: [] },
     approved:   { label: 'PM Approved',  key: 'approved',   items: [] },
     chReview:   { label: 'CH Review',    key: 'chReview',   items: [] },
@@ -4974,7 +4913,8 @@ function getTodayBoardBuckets() {
     // PM track (status-based)
     if (a.status === 'Assigned' && (a.assignedAt === today || a.estDelivery === today)) buckets.todo.items.push(a);
     else if (a.status === 'In Progress') buckets.progress.items.push(a);
-    else if (a.status === 'For Review' || a.status === 'Needs Revisions') buckets.review.items.push(a);
+    else if (a.status === 'Needs Revisions') buckets.revision.items.push(a);
+    else if (a.status === 'For Review') buckets.review.items.push(a);
     else if (a.status === 'Approved' && a.dateApproved === today) buckets.approved.items.push(a);
     // CH track (categoryHeadQc-based) \u2014 independent, so any asset can appear here too
     var chq = a.categoryHeadQc || 'Draft';
@@ -5003,6 +4943,7 @@ function getThisWeekBoardBuckets() {
   var buckets = {
     todo:     { label: 'To Do This Week',     key: 'weekTodo',     items: [] },
     progress: { label: 'In Progress',          key: 'weekProgress', items: [] },
+    revision: { label: 'Revision',             key: 'weekRevision', items: [] },
     review:   { label: 'Done for Review',      key: 'weekReview',   items: [] },
     approved: { label: 'Approved This Week',   key: 'weekApproved', items: [] }
   };
@@ -5012,7 +4953,9 @@ function getThisWeekBoardBuckets() {
       buckets.todo.items.push(a);
     } else if (a.status === 'In Progress' && inWeekNotToday(a.estDelivery)) {
       buckets.progress.items.push(a);
-    } else if ((a.status === 'For Review' || a.status === 'Needs Revisions') && inWeekNotToday(a.estDelivery)) {
+    } else if (a.status === 'Needs Revisions' && inWeekNotToday(a.estDelivery)) {
+      buckets.revision.items.push(a);
+    } else if (a.status === 'For Review' && inWeekNotToday(a.estDelivery)) {
       buckets.review.items.push(a);
     } else if (a.status === 'Approved' && inWeekNotToday(a.dateApproved)) {
       buckets.approved.items.push(a);
@@ -5405,10 +5348,11 @@ function renderTodayView() {
   // PM columns drive status; CH columns drive categoryHeadQc.
   // Drops into *Review pick the forward-moving value; Needs Revisions is set from Campaigns.
   var colsHtml =
-    renderColumn(buckets.todo,       'today-col-accent-todo', 'Assigned',   'pm') +
-    renderColumn(buckets.progress,   'today-col-accent-prog', 'In Progress','pm') +
-    renderColumn(buckets.review,     'today-col-accent-rev',  'For Review', 'pm') +
-    renderColumn(buckets.approved,   'today-col-accent-done', 'Approved',   'pm') +
+    renderColumn(buckets.todo,       'today-col-accent-todo', 'Assigned',        'pm') +
+    renderColumn(buckets.progress,   'today-col-accent-prog', 'In Progress',     'pm') +
+    renderColumn(buckets.revision,   'today-col-accent-revisions', 'Needs Revisions', 'pm') +
+    renderColumn(buckets.review,     'today-col-accent-rev',  'For Review',      'pm') +
+    renderColumn(buckets.approved,   'today-col-accent-done', 'Approved',        'pm') +
     renderColumn(buckets.chReview,   'today-col-accent-ch-rev',  'For Review', 'ch') +
     renderColumn(buckets.chApproved, 'today-col-accent-ch-done', 'Approved',   'ch');
 
@@ -6261,55 +6205,53 @@ function renderNotificationsView() {
       '<div class="batch-grid">' + chaCards + '</div>' +
     '</div>' +
     (function() {
-      // Daily tally \u2014 one card per country with the current count breakdown and a
-      // per-country manual fire button. Auto-fires at local midnight via the ticker
-      // (see checkDailyTallyCrossover). The "last sent" date comes from localStorage so
-      // the value survives reloads and can race-check against other browser tabs.
+      // Daily tally \u2014 one card per editor (Zidni, Sharm, Patty) summarising the
+      // videos that editor approved today, with each video's CH QC status. Routes
+      // into the editor's daily Slack thread when set; otherwise webhook fallback.
       var lastSent = '';
       try { lastSent = localStorage.getItem(TALLY_STORAGE_KEY) || ''; } catch (e) { lastSent = ''; }
       var lastSentLabel = lastSent ? formatDate(lastSent) : 'never';
-      var tallyCards = STATE.countries.map(function(c) {
-        // *** UK-ONLY GATE *** \u2014 the daily tally is currently wired only for UK. Other
-        // country cards are rendered greyed out with a "coming soon" tooltip. To enable
-        // a country, also remove the gate in sendDailyTally() above.
-        var isWired = (c.code === 'UK');
-        var tally = buildDailyTallyForCountry(c.code);
-        var total = tally.counts.Assigned + tally.counts['Needs Revisions'] + tally.counts.Approved;
-        var url = isWired ? resolveDailyTallyWebhook(c.code) : '';
-        var hasUrl = isWired && webhookValid(url);
-        var canSend = isWired && hasUrl && total > 0;
-        var sendTitle = !isWired
-          ? c.name + ' \u2014 daily tally is coming soon (UK only for now)'
-          : (!hasUrl
-            ? 'No webhook resolves for ' + c.code + ' \u2014 set one in Automations'
-            : (total === 0 ? 'No activity for ' + c.code + ' yet' : 'Send today\u2019s tally to Slack'));
+      var TALLY_EDS = ['Zidni', 'Sharm', 'Patty'];
+      var tallyCards = TALLY_EDS.map(function(ed) {
+        var t = buildDailyTallyForEditor(ed);
+        var total = t.items.length;
+        var thread = resolveDailyThreadForEditor(ed);
+        var token = (STATE.slackBotToken || '').trim();
+        var useThread = !!(thread && token);
+        var url = resolveDailyTallyWebhook();
+        var hasChannel = useThread || webhookValid(url);
+        var canSend = total > 0 && hasChannel;
+        var sendTitle = total === 0
+          ? 'No approvals today for ' + ed
+          : (!hasChannel ? 'No daily thread + no webhook configured' : (useThread ? 'Send tally in ' + ed + '\'s thread' : 'Send tally to webhook (no thread set)'));
         var sendAttrs = canSend
           ? 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '"'
           : 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '" disabled style="opacity:0.45; cursor:not-allowed;"';
-        var copyAttrs = isWired
+        var copyAttrs = total > 0
           ? 'class="sent-copy-btn" title="Copy today\u2019s tally to clipboard"'
-          : 'class="sent-copy-btn" title="Coming soon" disabled style="opacity:0.45; cursor:not-allowed;"';
-        var cardStyle = isWired ? '' : 'opacity:0.45;';
-        return '<div class="batch-card" style="' + cardStyle + '">' +
+          : 'class="sent-copy-btn" title="Nothing to copy" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var catChips = Object.keys(t.byCategory).map(function(cat) {
+          return '<span style="color:var(--text2);">' + t.byCategory[cat] + ' ' + escapeHtml(cat) + '</span>';
+        }).join(' \u00B7 ');
+        var threadDot = useThread ? '<span style="color:var(--green-text);" title="Daily thread set">\u2022 thread</span>' : '<span style="color:var(--text3);" title="Falls back to webhook">\u2022 webhook</span>';
+        return '<div class="batch-card">' +
           '<div class="batch-card-header">' +
-            '<div class="country-flag flag-' + c.code + '">' + c.code + '</div>' +
+            '<div class="editor-avatar av-' + ed + '">' + editorInitials(ed) + '</div>' +
             '<div style="flex:1; min-width:0;">' +
-              '<div style="font-size:13px; font-weight:600; color:var(--text1);">' + escapeHtml(c.name) + '</div>' +
+              '<div style="font-size:13px; font-weight:600; color:var(--text1);">' + ed + ' \u00B7 ' + threadDot + '</div>' +
               '<div style="font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; margin-top:2px;">' +
-                '<span style="color:var(--blue-text);">' + tally.counts.Assigned + ' Assigned</span> \u00B7 ' +
-                '<span style="color:var(--amber-text);">' + tally.counts['Needs Revisions'] + ' Revisions</span> \u00B7 ' +
-                '<span style="color:var(--green-text);">' + tally.counts.Approved + ' Approved</span>' +
+                (total === 0 ? '<span style="color:var(--text3);">no approvals today</span>' : (total + ' approved \u00B7 ' + (catChips || ''))) +
               '</div>' +
             '</div>' +
-            '<button ' + sendAttrs + ' onclick="App.sendDailyTallyForCountry(\'' + c.code + '\')">\u{1F680}</button>' +
-            '<button ' + copyAttrs + ' onclick="App.copyDailyTally(\'' + c.code + '\')">\u{1F4CB}</button>' +
+            '<button ' + sendAttrs + ' onclick="App.sendDailyTallyForEditor(\'' + ed + '\')">\u{1F680}</button>' +
+            '<button ' + copyAttrs + ' onclick="App.copyDailyTally(\'' + ed + '\')">\u{1F4CB}</button>' +
           '</div>' +
         '</div>';
       }).join('');
       return '<div class="section-title">Daily Tally <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(auto-fires at local midnight \u00B7 last sent: ' + escapeHtml(lastSentLabel) + ')</span></div>' +
         '<div class="auto-card">' +
-          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One message per country with every video currently in <span style="color:var(--blue-text);">Assigned</span>, <span style="color:var(--amber-text);">Needs Revisions</span>, and <span style="color:var(--green-text);">Approved</span>. Auto-fires at <strong style="color:var(--text1);">local midnight (00:00)</strong> with a 0\u201330s jitter window. Race-prevention is now coordinated via Firestore so multiple open browsers won\'t double-send. Caveat: if nobody has the app open at midnight, that day is still skipped \u2014 a future Firebase Cloud Function will close that gap.</div>' +
-          '<div style="margin-bottom:10px;"><button class="run-btn" onclick="App.sendDailyTallyAll()" style="background:var(--accent-dim); color:var(--accent2); border-color:var(--border2);">\u{1F680} Send all countries now</button></div>' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One message per editor with the videos they approved today, each annotated with its Category Head QC status. Auto-fires at <strong style="color:var(--text1);">local midnight (00:00)</strong> with a 0\u201330s jitter window. Posts inside each editor\'s daily Slack thread when set; falls back to the global webhook otherwise. Editors with no approvals today are skipped.</div>' +
+          '<div style="margin-bottom:10px;"><button class="run-btn" onclick="App.sendDailyTallyAll()" style="background:var(--accent-dim); color:var(--accent2); border-color:var(--border2);">\u{1F680} Send all editors now</button></div>' +
           '<div class="batch-grid">' + tallyCards + '</div>' +
         '</div>';
     })() +
@@ -6339,8 +6281,56 @@ function renderAutomationsView() {
       '<span class="log-msg-text">' + escapeHtml(l.msg) + '</span></div></div>';
   }).join('');
 
+  // Daily-thread + bot-token card. Shown above the legacy webhook cards because
+  // it's the preferred delivery path now; webhooks are the fallback.
+  function renderDailyThreadCard() {
+    var today = todayISO();
+    var token = (STATE.slackBotToken || '').trim();
+    var tokenDot = token ? 'ok' : '';
+    var tokenDotTitle = token ? 'Bot token saved (xoxb-...)' : 'No bot token — thread posting disabled';
+    var rows = ['Zidni', 'Sharm', 'Patty'].map(function(ed) {
+      var t = (STATE.dailyThreads && STATE.dailyThreads[ed]) || null;
+      var url = t ? t.url : '';
+      var dot = '';
+      var dotTitle = 'No thread set — falls back to webhook';
+      if (t) {
+        if (t.date === today) { dot = 'ok'; dotTitle = 'Thread set for today'; }
+        else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at midnight'; }
+      }
+      var hist = (STATE.dailyThreadHistory && STATE.dailyThreadHistory[ed]) || [];
+      var histHtml = hist.length === 0 ? '' :
+        '<div style="font-size:11px; color:var(--text3); margin-top:4px;">Recent: ' +
+        hist.slice(0, 3).map(function(h) {
+          return '<a href="' + escapeHtml(h.url) + '" target="_blank" style="color:var(--text3);">' + h.date + '</a>';
+        }).join(' · ') + '</div>';
+      return '<div style="margin-top:8px;">' +
+        '<div class="webhook-row">' +
+          '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '"></span>' +
+          '<span style="min-width:50px; font-weight:600; color:var(--text1);">' + ed + '</span>' +
+          '<input type="text" id="daily-thread-input-' + ed + '" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx">' +
+          '<button class="save-btn" onclick="App.saveDailyThread(\'' + ed + '\')">Set</button>' +
+          (t ? '<button class="edit-btn" onclick="App.clearDailyThread(\'' + ed + '\')" style="margin-left:4px;">Clear</button>' : '') +
+        '</div>' + histHtml +
+      '</div>';
+    }).join('');
+
+    return '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack threads (per editor)</div><div class="auto-sub">paste each editor\'s daily thread URL — notifications post as replies</div></div></div>' +
+      '<div class="auto-desc">Each editor has their own daily Slack thread. Paste today\'s thread URL below and notifications for that editor (Assigned, For Review, Needs Revisions, Approved, CHQ events) will post as replies in the thread instead of the channel. Threads reset at local midnight; the previous day\'s URL is archived. Falls back to the webhook below when no thread is set or when the post fails.</div>' +
+      '<div class="webhook-row" style="margin-top:10px;">' +
+        '<span class="webhook-dot ' + tokenDot + '" title="' + escapeHtml(tokenDotTitle) + '"></span>' +
+        '<span style="min-width:50px; font-weight:600; color:var(--text1);">Bot token</span>' +
+        '<input type="password" id="slack-bot-token-input" value="' + escapeHtml(token) + '" placeholder="xoxb-...">' +
+        '<button class="save-btn" onclick="App.saveBotToken()">Save</button>' +
+      '</div>' +
+      rows +
+    '</div>';
+  }
+
   return '<div class="content"><div class="automation-panel">' +
     '<div class="section-title">Automations</div>' +
+
+    renderDailyThreadCard() +
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">01</div><div><div class="auto-title">Auto-reorder Campaigns by Rank</div><div class="auto-sub">trigger: Campaigns.Rank field updated</div></div></div>' +
@@ -6788,6 +6778,9 @@ function saveState() {
       editorSlackIds: STATE.editorSlackIds,
       categoryHeadSlackIds: STATE.categoryHeadSlackIds,
       pmSlackIds: STATE.pmSlackIds,
+      slackBotToken: STATE.slackBotToken,
+      dailyThreads: STATE.dailyThreads,
+      dailyThreadHistory: STATE.dailyThreadHistory,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       countries: STATE.countries,
       categories: STATE.categories,
@@ -7215,125 +7208,226 @@ function postToSlack(url, text) {
   });
 }
 
-// ===================== DAILY TALLY =====================
-// Buckets every asset in one country into the three statuses that matter for the nightly
-// digest: Assigned, Needs Revisions, Approved. Returns { counts, buckets } where buckets
-// is { Assigned: [assets], 'Needs Revisions': [...], Approved: [...] }.
-function buildDailyTallyForCountry(countryCode) {
-  var campaignsInCountry = STATE.campaigns.filter(function(c) { return c.country === countryCode; });
-  var campIds = {};
-  campaignsInCountry.forEach(function(c) { campIds[c.id] = c; });
-  var buckets = { 'Assigned': [], 'Needs Revisions': [], 'Approved': [] };
-  STATE.assets.forEach(function(a) {
-    if (!campIds[a.campaignId]) return;
-    if (buckets[a.status]) buckets[a.status].push(a);
-  });
-  return {
-    counts: {
-      Assigned: buckets['Assigned'].length,
-      'Needs Revisions': buckets['Needs Revisions'].length,
-      Approved: buckets['Approved'].length
+// ===================== DAILY THREAD HELPERS =====================
+// Parse a Slack thread URL like
+//   https://workspace.slack.com/archives/C0ABCDEFG/p1735574832123456?thread_ts=1735574832.123456
+// Returns { channelId, threadTs } or null.
+function parseSlackThreadUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  var s = url.trim();
+  var m = s.match(/\/archives\/([A-Z0-9]+)\/p(\d+)/i);
+  if (!m) return null;
+  var channelId = m[1];
+  var pTs = m[2];
+  // Optional ?thread_ts= overrides for replies; otherwise convert pXXXX -> XXX.XXX (last 6 = micro).
+  var queryMatch = s.match(/[?&]thread_ts=([0-9.]+)/);
+  var threadTs = queryMatch ? queryMatch[1] : (pTs.slice(0, pTs.length - 6) + '.' + pTs.slice(pTs.length - 6));
+  return { channelId: channelId, threadTs: threadTs };
+}
+
+// Returns the daily-thread descriptor for an editor IFF its date matches today.
+// Stale entries (date != today) are treated as not set so the caller falls back
+// to webhook. Caller is also responsible for clearing stale entries via the
+// midnight check.
+function resolveDailyThreadForEditor(editor) {
+  var t = STATE.dailyThreads && STATE.dailyThreads[editor];
+  if (!t) return null;
+  if (t.date !== todayISO()) return null;
+  if (!t.channelId || !t.threadTs) return null;
+  return t;
+}
+
+// POST a Slack chat.postMessage as a thread reply. Requires slackBotToken with
+// chat:write scope. Returns { ok, body, status } the same shape as postToSlack
+// so the caller can handle uniformly.
+function postToSlackThread(channel, threadTs, text) {
+  var token = (STATE.slackBotToken || '').trim();
+  if (!token) return Promise.resolve({ ok: false, body: 'no bot token configured' });
+  var body = JSON.stringify({ channel: channel, thread_ts: threadTs, text: text });
+  return fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Authorization': 'Bearer ' + token
     },
-    buckets: buckets,
-    campaignsById: campIds
-  };
+    body: body
+  }).then(function(res) {
+    return res.json().then(function(json) {
+      return { ok: !!json.ok, body: json.error || (json.ok ? 'ok' : 'unknown'), status: res.status };
+    }).catch(function() {
+      return { ok: false, body: 'invalid Slack response', status: res.status };
+    });
+  });
 }
 
-// Build the Slack message string for one country's daily tally. Returns null if there
-// is zero activity in all three buckets (so the caller can skip sending a useless ping).
-function buildDailyTallyMessage(countryCode) {
-  var tally = buildDailyTallyForCountry(countryCode);
-  var total = tally.counts.Assigned + tally.counts['Needs Revisions'] + tally.counts.Approved;
-  if (total === 0) return null;
-
-  var countryName = (getCountryByCode(countryCode) || { name: countryCode }).name;
-  var todayStr = formatDate(todayISO());
-  var header = ':calendar: *Daily tally \u2014 ' + countryName + ' (' + countryCode + ') \u00B7 ' + todayStr + '*';
-
-  function fmtLine(a) {
-    var camp = tally.campaignsById[a.campaignId];
-    var campName = camp ? camp.name : 'Unknown';
-    var editor = a.editor || 'unassigned';
-    return '\u2022 ' + a.name + ' (' + a.version + ') \u2014 ' + campName + ' \u00B7 ' + editor;
-  }
-
-  var sections = [];
-  sections.push('*Assigned (' + tally.counts.Assigned + '):*');
-  sections.push(tally.counts.Assigned === 0 ? '_none_' : tally.buckets['Assigned'].map(fmtLine).join('\n'));
-  sections.push('');
-  sections.push('*Needs Revisions (' + tally.counts['Needs Revisions'] + '):*');
-  sections.push(tally.counts['Needs Revisions'] === 0 ? '_none_' : tally.buckets['Needs Revisions'].map(fmtLine).join('\n'));
-  sections.push('');
-  sections.push('*Approved (' + tally.counts.Approved + '):*');
-  sections.push(tally.counts.Approved === 0 ? '_none_' : tally.buckets['Approved'].map(fmtLine).join('\n'));
-
-  return header + '\n\n' + sections.join('\n');
+// Sweep stale dailyThreads at midnight rollover. Archives expired entries to
+// dailyThreadHistory (capped at 7 per editor) and clears the live slot. Returns
+// true if any change was made so the caller can persist.
+function sweepStaleDailyThreads() {
+  var today = todayISO();
+  var changed = false;
+  if (!STATE.dailyThreads) return false;
+  Object.keys(STATE.dailyThreads).forEach(function(editor) {
+    var t = STATE.dailyThreads[editor];
+    if (!t) return;
+    if (t.date === today) return;
+    // Archive
+    if (!STATE.dailyThreadHistory) STATE.dailyThreadHistory = {};
+    if (!STATE.dailyThreadHistory[editor]) STATE.dailyThreadHistory[editor] = [];
+    STATE.dailyThreadHistory[editor].unshift({ date: t.date, url: t.url });
+    while (STATE.dailyThreadHistory[editor].length > 7) STATE.dailyThreadHistory[editor].pop();
+    STATE.dailyThreads[editor] = null;
+    logAction('updated', 'Daily thread reset for ' + editor + ' (was ' + t.date + ')');
+    changed = true;
+  });
+  return changed;
 }
 
-// Resolve the webhook for a daily tally for a given country. Priority: country PM webhook,
-// then global fallback. (Same as PM review batches \u2014 the tally lands in the same channel
-// the team already uses for per-country updates.)
-function resolveDailyTallyWebhook(countryCode) {
-  var cw = STATE.countryWebhooks || {};
-  return cw[countryCode] || STATE.webhookUrl || '';
+// ===================== DAILY TALLY (per-editor) =====================
+// Per-editor list of videos that the editor approved today. Each entry carries the
+// asset's CH QC status so the message can read "CH QC: <status>" beside each video.
+// Returns { items: [{name, categoryHeadQc, category}], byCategory: {Cat: count} }
+// for the given editor. Editors with zero approvals today get { items: [] }.
+function buildDailyTallyForEditor(editor) {
+  var today = todayISO();
+  var items = [];
+  var byCategory = {};
+  STATE.assets.forEach(function(a) {
+    if (a.editor !== editor) return;
+    if (a.status !== 'Approved') return;
+    if (a.dateApproved !== today) return;
+    var cat = a.category || 'Uncategorised';
+    items.push({ name: a.name, categoryHeadQc: a.categoryHeadQc || 'Draft', category: cat });
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+  });
+  return { items: items, byCategory: byCategory };
 }
 
-// Fire the daily tally for every country that has activity + a resolved webhook.
-// triggerKind: 'auto' (scheduled midnight fire) or 'manual' (clicked Send Now).
-// Records each send in STATE.sentNotifications using a PM:XX key so it appears in the
-// sent-log viewer with the right avatar.
+// Build the Slack message for one editor's daily tally. Returns null when the
+// editor has zero approvals today.
+function buildDailyTallyMessageForEditor(editor) {
+  var t = buildDailyTallyForEditor(editor);
+  if (t.items.length === 0) return null;
+  var todayStr = todayISO();
+  // Preserve first-seen order of categories
+  var seen = {};
+  var orderedCats = [];
+  t.items.forEach(function(it) {
+    if (!seen[it.category]) { seen[it.category] = 1; orderedCats.push(it.category); }
+  });
+  var clauses = orderedCats.map(function(cat) {
+    var n = t.byCategory[cat];
+    return n + ' video(s) in ' + cat;
+  }).join(', ');
+  var header = ':tada: ' + mentionEditor(editor) + ' \u2014 ' + clauses + ' completed today (' + todayStr + ')';
+  var lines = [header, ''];
+  t.items.forEach(function(it, i) {
+    lines.push((i + 1) + '. ' + it.name + '  \u2014 CH QC: ' + (it.categoryHeadQc || 'Draft'));
+  });
+  return lines.join('\n');
+}
+
+// Webhook for the daily tally. Per-editor send falls back to global webhook when
+// the editor has no daily thread + bot token configured.
+function resolveDailyTallyWebhook() {
+  return STATE.webhookUrl || '';
+}
+
+// Send the daily tally for every editor with activity today. Routes each editor's
+// message to their daily Slack thread when configured (preferred), otherwise the
+// global webhook (channel post fallback).
 function sendDailyTally(triggerKind) {
   var kind = triggerKind || 'auto';
-  var sentCount = 0, skippedNoActivity = 0, skippedNoWebhook = 0;
-  // *** UK-ONLY GATE *** \u2014 daily tally is currently restricted to UK. To re-enable for
-  // other countries, change this list (or revert to STATE.countries) when you're ready.
-  // Affects both the auto-fire (midnight ticker) and the "Send all countries now" button.
-  var enabledCountries = STATE.countries.filter(function(c) { return c.code === 'UK'; });
-  enabledCountries.forEach(function(c) {
-    var msg = buildDailyTallyMessage(c.code);
+  var sentCount = 0, skippedNoActivity = 0, skippedNoChannel = 0;
+  var TALLY_EDITORS = ['Zidni', 'Sharm', 'Patty'];
+  TALLY_EDITORS.forEach(function(ed) {
+    var msg = buildDailyTallyMessageForEditor(ed);
     if (!msg) { skippedNoActivity++; return; }
-    var url = resolveDailyTallyWebhook(c.code);
-    if (!webhookValid(url)) { skippedNoWebhook++; return; }
+    var thread = resolveDailyThreadForEditor(ed);
+    var token = (STATE.slackBotToken || '').trim();
+    var useThread = !!(thread && token);
+    var url = resolveDailyTallyWebhook();
+    if (!useThread && !webhookValid(url)) { skippedNoChannel++; return; }
     sentCount++;
-    var recipient = 'PM:' + c.code;
-    postToSlack(url, msg).then(function(r) {
+    var recipient = ed;
+    function logSent(reasonTag) {
+      STATE.sentNotifications.unshift({
+        time: timeStamp(), sentAt: Date.now(),
+        editor: recipient, items: [],
+        reason: kind === 'manual' ? 'tally-manual' : 'tally-auto',
+        body: msg
+      });
+      if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+      logAction('notified', 'Daily tally sent for ' + ed + ' (' + kind + ', ' + reasonTag + ')');
+      render();
+    }
+    var primary = useThread
+      ? postToSlackThread(thread.channelId, thread.threadTs, msg)
+      : postToSlack(url, msg);
+    primary.then(function(r) {
       if (r.ok) {
-        STATE.sentNotifications.unshift({
-          time: timeStamp(), sentAt: Date.now(),
-          editor: recipient, items: [],
-          reason: kind === 'manual' ? 'tally-manual' : 'tally-auto',
-          body: msg
-        });
-        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-        logAction('notified', 'Daily tally sent for ' + c.code + ' (' + kind + ')');
-        render();
-      } else {
-        logAction('deleted', 'Daily tally POST rejected for ' + c.code + ': ' + r.body);
+        logSent(useThread ? 'thread' : 'webhook');
+        return;
       }
+      // Thread failure \u2014 try webhook fallback
+      if (useThread && webhookValid(url)) {
+        logAction('updated', 'Daily tally thread post failed for ' + ed + ' (' + r.body + ') \u2014 falling back to webhook');
+        postToSlack(url, msg).then(function(r2) {
+          if (r2.ok) logSent('webhook-fallback');
+          else logAction('deleted', 'Daily tally fallback rejected for ' + ed + ': ' + r2.body);
+        });
+        return;
+      }
+      logAction('deleted', 'Daily tally rejected for ' + ed + ': ' + r.body);
     }).catch(function() {
-      // Blind fallback for CORS-blocked origins
+      // CORS/network \u2014 blind no-cors send to webhook
+      if (!webhookValid(url)) return;
       fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: msg }) })
-        .then(function() {
-          STATE.sentNotifications.unshift({
-            time: timeStamp(), sentAt: Date.now(),
-            editor: recipient, items: [],
-            reason: kind === 'manual' ? 'tally-manual' : 'tally-auto',
-            body: msg
-          });
-          if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-          logAction('notified', 'Daily tally sent blind for ' + c.code + ' (' + kind + ')');
-          render();
-        }).catch(function() {});
+        .then(function() { logSent('blind'); }).catch(function() {});
     });
   });
   if (kind === 'manual') {
     var parts = [];
     if (sentCount) parts.push(sentCount + ' sending');
-    if (skippedNoActivity) parts.push(skippedNoActivity + ' skipped (no activity)');
-    if (skippedNoWebhook) parts.push(skippedNoWebhook + ' skipped (no webhook)');
+    if (skippedNoActivity) parts.push(skippedNoActivity + ' skipped (no approvals today)');
+    if (skippedNoChannel) parts.push(skippedNoChannel + ' skipped (no thread + no webhook)');
     toast(parts.length ? parts.join(' \u00B7 ') : 'Nothing to send', sentCount ? 'success' : 'error');
   }
-  return { sent: sentCount, skippedNoActivity: skippedNoActivity, skippedNoWebhook: skippedNoWebhook };
+  return { sent: sentCount, skippedNoActivity: skippedNoActivity, skippedNoChannel: skippedNoChannel };
+}
+
+// Per-editor manual send (button next to each editor's row in Automations).
+function sendDailyTallyForEditor(editor) {
+  var msg = buildDailyTallyMessageForEditor(editor);
+  if (!msg) { toast(editor + ' has no approvals today', ''); return; }
+  var thread = resolveDailyThreadForEditor(editor);
+  var token = (STATE.slackBotToken || '').trim();
+  var useThread = !!(thread && token);
+  var url = resolveDailyTallyWebhook();
+  if (!useThread && !webhookValid(url)) {
+    toast('No daily thread + no webhook configured', 'error');
+    return;
+  }
+  toast('Sending tally for ' + editor + '...', '');
+  var primary = useThread
+    ? postToSlackThread(thread.channelId, thread.threadTs, msg)
+    : postToSlack(url, msg);
+  primary.then(function(r) {
+    if (r.ok) {
+      STATE.sentNotifications.unshift({
+        time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
+        reason: 'tally-manual', body: msg
+      });
+      if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+      logAction('notified', 'Daily tally sent for ' + editor + ' (manual)');
+      toast('\u2713 Tally sent for ' + editor, 'success');
+      render();
+    } else {
+      toast('Slack rejected: ' + r.body, 'error');
+    }
+  }).catch(function(err) {
+    toast('Send failed: ' + ((err && err.message) || 'network error'), 'error');
+  });
 }
 
 function testWebhookPing() {
@@ -7423,8 +7517,23 @@ function sendPendingBatch(editor, opts) {
   }
 
   // Single-send path (PM batches, single-country editor batches, or user overrode split)
+  // Daily-thread path: when the recipient is an editor (or a CHQ batch whose items
+  // share one editor) and that editor has a daily thread set for today plus a bot
+  // token, POST as a thread reply via chat.postMessage instead of using the webhook.
+  var threadEditor = null;
+  if (EDITORS.indexOf(editor) >= 0) {
+    threadEditor = editor;
+  } else {
+    // CHQ:Category \u2014 only thread-post when every item shares the same editor.
+    var sharedEditor = windowItems[0] && windowItems[0].editor;
+    var allSame = sharedEditor && windowItems.every(function(it) { return it.editor === sharedEditor; });
+    if (allSame) threadEditor = sharedEditor;
+  }
+  var thread = threadEditor ? resolveDailyThreadForEditor(threadEditor) : null;
+  var useThread = !!(thread && (STATE.slackBotToken || '').trim());
+
   var url = resolveWebhookForEditor(editor, windowItems);
-  if (!webhookValid(url)) {
+  if (!useThread && !webhookValid(url)) {
     if (!silent) {
       toast('Webhook URL is missing or a placeholder \u2014 fix it in Automations', 'error');
       App.setTab('automations');
@@ -7463,17 +7572,39 @@ function sendPendingBatch(editor, opts) {
       }
       return;
     }
-    return postToSlack(url, msg).then(function(r) {
+    var primary = useThread
+      ? postToSlackThread(thread.channelId, thread.threadTs, msg)
+      : postToSlack(url, msg);
+    return primary.then(function(r) {
       if (!r.ok) {
+        // If the thread post failed, fall back to webhook (channel post) so the
+        // message still reaches Slack. Log the fallback so Elsa knows it didn't
+        // land in the daily thread as expected.
+        if (useThread && webhookValid(url)) {
+          logAction('updated', editor + ': thread post failed (' + r.body + ') \u2014 falling back to webhook');
+          return postToSlack(url, msg).then(function(r2) {
+            if (!r2.ok) {
+              clearInFlight();
+              toast('Slack rejected the batch: "' + r2.body + '"', 'error');
+              logAction('deleted', editor + ': Slack send failed \u2014 ' + r2.body);
+              return;
+            }
+            markSent('sent-fallback');
+            clearInFlight();
+            logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) via webhook fallback');
+            toast('\u2713 Sent to Slack (webhook fallback)', 'success');
+            render();
+          });
+        }
         clearInFlight();
         toast('Slack rejected the batch: "' + r.body + '"', 'error');
         logAction('deleted', editor + ': Slack send failed \u2014 ' + r.body);
         return;
       }
-      markSent('sent-live');
+      markSent(useThread ? 'sent-thread' : 'sent-live');
       clearInFlight();
-      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) live to Slack (confirmed)');
-      toast('\u2713 Sent to Slack', 'success');
+      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) ' + (useThread ? 'in daily thread' : 'live to Slack') + ' (confirmed)');
+      toast('\u2713 Sent to Slack' + (useThread ? ' (thread)' : ''), 'success');
       render();
     }).catch(function(err) {
       // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
@@ -7720,97 +7851,83 @@ function buildQcReportMessage(campaignId) {
 //        Video: <url|Video>
 //
 // Missing URLs render as '\u2014'. Slack renders <url|label> as a clickable chip.
+// New per-item format. Each batch item renders its own header block:
+//   <@Recipient> \u2014 <Status> [from <@Sender>]
+//
+//   <AssetName>
+//         <\u2026|Raw>
+//         <\u2026|Brief>
+// Items are concatenated with a blank line between them. Header recipient/sender
+// are computed per item from it.status + it.editor + it.category + it.country.
 function buildBatchMessage(recipient, items, opts) {
   opts = opts || {};
-  // PM batches route to a country channel, not an editor's DM \u2014 different header.
-  // CHQ batches are a parallel country-channel queue dedicated to category-head review;
-  // each item @-mentions its assigned head so the right person gets pinged per video.
-  var isPmBatch = recipient.indexOf('PM:') === 0;
-  var isChqBatch = recipient.indexOf('CHQ:') === 0;
-  var isChaBatch = recipient.indexOf('CHA:') === 0;
-  var header;
-  // Header pluralization \u2014 used by all three batch headers below.
-  var updatesWord = items.length === 1 ? 'video update' : 'video updates';
-  if (isPmBatch) {
-    var country = recipient.slice(3);
-    // @-mention the PM so they get pinged. mentionPm() returns '<@USERID>' if a
-    // Slack member ID is set in pmSlackIds, plain name fallback otherwise, or
-    // empty string for unassigned countries (US, PL) \u2014 in which case the
-    // header just opens with the emoji.
-    var pmMention = mentionPm(country);
-    var pmPrefix = pmMention ? pmMention + ' ' : '';
-    header = ':clapper: ' + pmPrefix + '*Review queue \u2014 ' + country + '* \u00B7 ' + items.length + ' ' + updatesWord;
-  } else if (isChqBatch) {
-    // CHQ recipient is a category name (e.g. 'CHQ:Sneakers'), one queue per
-    // category so the right head sees only their own pile. Country mix happens
-    // INSIDE the batch \u2014 UK and US items can both end up in one Sneakers queue.
-    var chqCategory = recipient.slice(4);
-    var chqHeadMention = mentionCategoryHead(chqCategory);
-    var chqHeadPrefix = chqHeadMention ? chqHeadMention + ' ' : '';
-    header = ':mag: ' + chqHeadPrefix + '*Category Head QC \u2014 ' + chqCategory + '* \u00B7 ' + items.length + ' ' + updatesWord;
-  } else if (isChaBatch) {
-    // CHA = Category Head Approved per country. Pings the PM (Elsa for UK
-    // etc) when a category head signs off on a video so the PM knows it's
-    // ready to publish. Separate queue from the PM Review one so the two
-    // signals don't get mixed up visually.
-    var chaCountry = recipient.slice(4);
-    var chaPmMention = mentionPm(chaCountry);
-    var chaPmPrefix = chaPmMention ? chaPmMention + ' ' : '';
-    header = ':white_check_mark: ' + chaPmPrefix + '*Category Head Approved \u2014 ' + chaCountry + '* \u00B7 ' + items.length + ' ' + updatesWord;
-  } else {
-    var suffix = opts.countryLabel ? ' (' + opts.countryLabel + ')' : '';
-    // mentionEditor(recipient) returns '<@USERID>' if a Slack member ID is configured
-    // for this editor (which auto-pings them), or just the plain name as fallback.
-    header = ':clapper: ' + mentionEditor(recipient) + ' \u2014 ' + items.length + ' ' + updatesWord + suffix;
+  function rawLink(it)   { var u = extractSingleUrl(it.rawVideo);     return u ? '<' + u + '|Raw>'   : null; }
+  function briefLink(it) { var u = extractSingleUrl(it.editingBrief); return u ? '<' + u + '|Brief>' : null; }
+  function videoLink(it) { var u = extractSingleUrl(it.finalVideo);   return u ? '<' + u + '|Video>' : null; }
+
+  // Resolve the header recipient + sender mentions for one item.
+  function headerFor(it) {
+    var status = it.status || it.change || '';
+    var editorM = mentionEditor(it.editor);
+    var pmM     = it.country ? mentionPm(it.country) : '';
+    var chM     = it.category ? mentionCategoryHead(it.category) : '';
+    var recipientMention = '';
+    var senderMention = '';
+    switch (status) {
+      case 'Assigned':
+      case 'In Progress':
+        recipientMention = editorM; break;
+      case 'For Review':
+        recipientMention = pmM || editorM; senderMention = editorM; break;
+      case 'Needs Revisions':
+        recipientMention = editorM; senderMention = pmM; break;
+      case 'Approved':
+        recipientMention = editorM; senderMention = pmM; break;
+      case 'For Review (Category Head)':
+        recipientMention = chM; senderMention = editorM; break;
+      case 'Needs Revisions (Category Head)':
+        recipientMention = editorM; senderMention = chM; break;
+      case 'Approved (Category Head)':
+        recipientMention = editorM; senderMention = chM; break;
+      default:
+        recipientMention = editorM; break;
+    }
+    var displayStatus = status.replace(' (Category Head)', '');
+    var headerText = recipientMention + ' \u2014 <' + displayStatus + '>';
+    if (senderMention) headerText += ' from ' + senderMention;
+    return headerText;
   }
 
-  var lines = [header];
-  // Statuses where the notification is about a produced video (Video link) rather
-  // than source material. For these, show only the Video link. Everything else
-  // (Assigned, or legacy / unknown statuses) shows the source links: Raw + Brief.
-  // Includes the compound CHQ statuses ("Approved (Category Head)" etc) so
-  // category-head Approved / Needs Revisions items show only the video link.
-  var FINAL_VIDEO_STATUSES = {
-    'For Review': 1,
-    'Needs Revisions': 1,
-    'Approved': 1,
-    'Approved (Category Head)': 1,
-    'Needs Revisions (Category Head)': 1
-  };
-  items.forEach(function(it, i) {
-    // Fallback to change type if status wasn't captured (legacy items from older batches
-    // won't have .status populated). Rare edge, but worth protecting against.
-    var statusLabel = it.status || it.change || '';
-    // CHQ batch items \u2014 the queue is per-category so all items share one
-    // head; we still @-mention them once on the first line via the header (no
-    // per-line cc needed). Add a country tag in brackets since the queue can
-    // span both UK and US items.
-    var lineSuffix = '';
-    if (isChqBatch && it.country) lineSuffix = ' [' + it.country + ']';
-    lines.push((i+1) + '. ' + it.name + ' \u2014 ' + statusLabel + lineSuffix);
-    if (it.status === 'For Review') {
-      // PM is reviewing the cut \u2014 show the Frame.io link AND the brief so they
-      // can verify the cut matches the brief without hunting for it separately.
-      var frUrl   = extractSingleUrl(it.finalVideo);
-      var frBrief = extractSingleUrl(it.editingBrief);
-      lines.push('    Video: ' + (frUrl   ? '<' + frUrl   + '|Frame>'  : '\u2014'));
-      lines.push('    Brief: ' + (frBrief ? '<' + frBrief + '|Notion>' : '\u2014'));
-    } else if (FINAL_VIDEO_STATUSES[it.status]) {
-      // Other produced-video statuses (Needs Revisions / Approved / CHQ) \u2014
-      // show only the final cut link, no brief.
-      var finalUrl = extractSingleUrl(it.finalVideo);
-      var finalLink = finalUrl ? '<' + finalUrl + '|Video>' : '\u2014';
-      lines.push('    Video: ' + finalLink);
+  // Pick which links go below the asset name based on the status.
+  function linksFor(it) {
+    var status = it.status || '';
+    var lines = [];
+    if (status === 'Assigned' || status === 'In Progress') {
+      var r = rawLink(it), b = briefLink(it);
+      if (r) lines.push(r);
+      if (b) lines.push(b);
+    } else if (status === 'For Review') {
+      var r2 = rawLink(it), b2 = briefLink(it), v = videoLink(it);
+      if (r2) lines.push(r2);
+      if (b2) lines.push(b2);
+      if (v)  lines.push(v);
     } else {
-      var rawUrl = extractSingleUrl(it.rawVideo);
-      var briefUrl = extractSingleUrl(it.editingBrief);
-      var rawLink  = rawUrl   ? '<' + rawUrl   + '|Drive>'  : '\u2014';
-      var briefLink = briefUrl ? '<' + briefUrl + '|Notion>' : '\u2014';
-      lines.push('    Raw: ' + rawLink);
-      lines.push('    Brief: ' + briefLink);
+      // Needs Revisions / Approved / all CHQ events \u2014 Video link only.
+      var v2 = videoLink(it);
+      if (v2) lines.push(v2);
     }
+    return lines;
+  }
+
+  var blocks = items.map(function(it) {
+    var header = headerFor(it);
+    var name = it.name || '';
+    var links = linksFor(it).map(function(L) { return '      ' + L; });
+    var block = header + '\n\n' + name;
+    if (links.length) block += ' \n' + links.join('\n');
+    return block;
   });
-  return lines.join('\n');
+  return blocks.join('\n\n');
 }
 
 // Build a daily queue message for an editor based on currently-assigned, unreleased videos
@@ -8581,35 +8698,27 @@ var App = {
       var camp = findCampaignById(a.campaignId);
       var country = camp && camp.country;
       if (country && CHQ_COUNTRY_ALLOWLIST[country]) {
-        var detail = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
-        // Pass the categoryHeadQc value as statusLabel so the message shows
-        // "For Review" (the head's review status) instead of the workflow
-        // status, which would be misleading on a CHQ batch.
-        queueNotification('CHQ:' + a.category, 'for-review', a, detail, { statusLabel: newVal });
+        // Header reads "<@CategoryHead> — For Review from <@editor>".
+        queueNotification('CHQ:' + a.category, 'for-review', a, '', { statusLabel: 'For Review (Category Head)' });
       }
     }
-    // Approved → ping the country PM (Elsa for UK, Anasstassiya for IT, Laura
-    // for ES) with the final video link. Routes to a SEPARATE per-country queue
-    // (CHA:Country = Category Head Approved) so it appears as its own card on
-    // the Notifications tab, distinct from the PM Review queue.
-    if (newVal === 'Approved' && old !== 'Approved') {
+    // Approved → ping the assigned editor; header reads
+    // "<@editor> — Approved from <@CategoryHead>". Routes to the editor's batch
+    // so it lands in their daily thread.
+    if (newVal === 'Approved' && old !== 'Approved' && a.editor) {
       var campA = findCampaignById(a.campaignId);
       var countryA = campA && campA.country;
       if (countryA && CHQ_COUNTRY_ALLOWLIST[countryA]) {
-        var detailA = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
-        queueNotification('CHA:' + countryA, 'category-approved', a, detailA, { statusLabel: 'Approved (Category Head)' });
+        queueNotification(a.editor, 'category-approved', a, '', { statusLabel: 'Approved (Category Head)' });
       }
     }
-    // Needs Revisions → ping the assigned editor (NOT the head) so they know
-    // to fix it. Routes to the editor's own DM batch with the existing
-    // mentionEditor() in the header. Final video link in the per-item lines
-    // so the editor sees what to revise.
+    // Needs Revisions → ping the assigned editor; header reads
+    // "<@editor> — Needs Revisions from <@CategoryHead>".
     if (newVal === 'Needs Revisions' && old !== 'Needs Revisions' && a.editor) {
       var campN = findCampaignById(a.campaignId);
       var countryN = campN && campN.country;
       if (countryN && CHQ_COUNTRY_ALLOWLIST[countryN]) {
-        var detailN = a.finalVideo ? 'Frame.io: ' + a.finalVideo : '(no Frame.io link set)';
-        queueNotification(a.editor, 'category-needs-revisions', a, detailN, { statusLabel: 'Needs Revisions (Category Head)' });
+        queueNotification(a.editor, 'category-needs-revisions', a, '', { statusLabel: 'Needs Revisions (Category Head)' });
       }
     }
     render();
@@ -9212,61 +9321,21 @@ var App = {
     sendDailyTally('manual');
   },
 
-  // Fire the tally for one country only. Useful for testing a single webhook.
-  // *** UK-ONLY GATE *** \u2014 currently restricted to UK. To re-enable for others,
-  // remove this guard and the matching ones in sendDailyTally() and the card render.
-  sendDailyTallyForCountry: function(countryCode) {
-    if (countryCode !== 'UK') {
-      toast(countryCode + ' daily tally is coming soon \u2014 only UK is wired up for now', 'error');
-      return;
-    }
-    var msg = buildDailyTallyMessage(countryCode);
-    if (!msg) { toast('No activity in ' + countryCode + ' to send', 'error'); return; }
-    var url = resolveDailyTallyWebhook(countryCode);
-    if (!webhookValid(url)) { toast('No webhook resolves for ' + countryCode, 'error'); return; }
-    var recipient = 'PM:' + countryCode;
-    toast('Sending tally for ' + countryCode + '\u2026', '');
-    postToSlack(url, msg).then(function(r) {
-      if (r.ok) {
-        STATE.sentNotifications.unshift({
-          time: timeStamp(), sentAt: Date.now(),
-          editor: recipient, items: [], reason: 'tally-manual', body: msg
-        });
-        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-        logAction('notified', 'Daily tally sent for ' + countryCode + ' (manual)');
-        toast('\u2713 Tally sent to Slack', 'success');
-        render();
-      } else {
-        toast('Slack rejected tally: "' + r.body + '"', 'error');
-      }
-    }).catch(function() {
-      fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: msg }) })
-        .then(function() {
-          STATE.sentNotifications.unshift({
-            time: timeStamp(), sentAt: Date.now(),
-            editor: recipient, items: [], reason: 'tally-manual', body: msg
-          });
-          if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-          logAction('notified', 'Daily tally sent blind for ' + countryCode);
-          toast('Sent blind \u2014 check Slack to confirm', 'success');
-          render();
-        }).catch(function() {
-          toast('Send failed', 'error');
-        });
-    });
+  // Fire the daily tally for a single editor.
+  sendDailyTallyForEditor: function(editor) {
+    sendDailyTallyForEditor(editor);
   },
 
-  // Copy the current tally preview for a country to clipboard.
-  copyDailyTally: function(countryCode) {
-    var msg = buildDailyTallyMessage(countryCode);
-    if (!msg) { toast('No activity in ' + countryCode + ' to copy', 'error'); return; }
+  // Copy a single editor's tally preview to the clipboard.
+  copyDailyTally: function(editor) {
+    var msg = buildDailyTallyMessageForEditor(editor);
+    if (!msg) { toast('No approvals today for ' + editor, ''); return; }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(msg).then(function() { toast('Copied ' + countryCode + ' tally', 'success'); });
+      navigator.clipboard.writeText(msg).then(function() { toast('Copied ' + editor + ' tally', 'success'); });
     } else {
-      // Fallback: textarea hack
       var ta = document.createElement('textarea');
       ta.value = msg; document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); toast('Copied ' + countryCode + ' tally', 'success'); }
+      try { document.execCommand('copy'); toast('Copied ' + editor + ' tally', 'success'); }
       catch (e) { toast('Copy failed', 'error'); }
       document.body.removeChild(ta);
     }
@@ -9589,6 +9658,64 @@ var App = {
   },
   testWebhook: testWebhookPing,
 
+  // Daily-thread + bot token handlers.
+  saveDailyThread: function(editor) {
+    if (!STATE.dailyThreads) STATE.dailyThreads = { Zidni: null, Sharm: null, Patty: null };
+    var input = document.getElementById('daily-thread-input-' + editor);
+    if (!input) return;
+    var url = (input.value || '').trim();
+    if (!url) {
+      STATE.dailyThreads[editor] = null;
+      saveState();
+      logAction('updated', 'Cleared daily thread for ' + editor);
+      toast('Cleared', 'success');
+      render();
+      return;
+    }
+    var parsed = parseSlackThreadUrl(url);
+    if (!parsed) {
+      toast('Not a valid Slack thread URL', 'error');
+      return;
+    }
+    STATE.dailyThreads[editor] = {
+      date: todayISO(),
+      url: url,
+      channelId: parsed.channelId,
+      threadTs: parsed.threadTs
+    };
+    saveState();
+    logAction('updated', 'Daily thread set for ' + editor + ' (channel ' + parsed.channelId + ')');
+    toast('✓ Thread set for ' + editor, 'success');
+    render();
+  },
+  clearDailyThread: function(editor) {
+    if (!STATE.dailyThreads) return;
+    if (!STATE.dailyThreads[editor]) return;
+    var t = STATE.dailyThreads[editor];
+    if (!STATE.dailyThreadHistory) STATE.dailyThreadHistory = {};
+    if (!STATE.dailyThreadHistory[editor]) STATE.dailyThreadHistory[editor] = [];
+    STATE.dailyThreadHistory[editor].unshift({ date: t.date, url: t.url });
+    while (STATE.dailyThreadHistory[editor].length > 7) STATE.dailyThreadHistory[editor].pop();
+    STATE.dailyThreads[editor] = null;
+    saveState();
+    logAction('updated', 'Cleared daily thread for ' + editor);
+    render();
+  },
+  saveBotToken: function() {
+    var input = document.getElementById('slack-bot-token-input');
+    if (!input) return;
+    var trimmed = (input.value || '').trim();
+    if (STATE.slackBotToken === trimmed) {
+      toast('Bot token unchanged', '');
+      return;
+    }
+    STATE.slackBotToken = trimmed;
+    saveState();
+    logAction('updated', 'Slack bot token ' + (trimmed === '' ? 'cleared' : 'updated'));
+    toast(trimmed === '' ? 'Bot token cleared' : '✓ Bot token saved', 'success');
+    render();
+  },
+
   // Category-head webhook \u2014 single URL for ALL category-head batches. Save and test
   // mirror the global webhook flow above; tests POST a short ping with the canonical
   // helper so the user can verify Slack accepts the channel before live data flows.
@@ -9804,9 +9931,25 @@ var App = {
   onQcFilter: function(v) { STATE.qcFilter = v; render(); },
   setSchedulerDate: function(v) { STATE.schedulerDate = v; render(); },
   toggleWeekends: function(v) { STATE.schedulerIncludeWeekends = v; render(); },
-  runScheduler: runScheduler,
   clearSchedule: clearSchedule,
   releaseScheduled: releaseScheduled,
+  // Manual scheduler row handlers — assign editor (delegates to setAssetEditor for
+  // notification side effects) and stamp ETA + scheduledFor for the planned date.
+  scheduleAssignEditor: function(id, editor) {
+    App.setAssetEditor(id, editor || '');
+  },
+  scheduleSetEta: function(id, iso) {
+    var a = null;
+    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    if (!a) return;
+    var clean = toISODate(iso);
+    var vhPre = snapshotAsset(a);
+    a.estDelivery = clean;
+    if (clean) a.scheduledFor = STATE.schedulerDate;
+    pushVersion(a, vhPre, ['estDelivery', 'scheduledFor']);
+    logAction('updated', 'Asset "' + a.name + '" ETA → ' + (clean ? formatDate(clean) : 'cleared') + (clean ? ' · scheduled for ' + STATE.schedulerDate : ''));
+    render();
+  },
   flushBatch: function(editor) {
     var fired = fireBatch(editor, 'manual');
     if (fired) toast('Fired batch for ' + editor, 'success');
