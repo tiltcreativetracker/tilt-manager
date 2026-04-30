@@ -6538,22 +6538,46 @@ function renderAutomationsView() {
 // ============================================================================
 
 function parseCSV(csvText) {
-  var lines = csvText.trim().split('\n');
-  if (lines.length < 2) return { header: [], rows: [] };
+  // Parse CSV handling multi-line quoted fields
+  var lines = csvText.split('\n');
+  var processedLines = [];
+  var currentLine = '';
+  var insideQuotes = false;
 
-  // Skip empty rows and section header rows (like "Overview, Editing Space, etc.")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    currentLine += (currentLine ? '\n' : '') + line;
+
+    // Count quotes to detect if we're in a quoted field
+    for (var j = 0; j < line.length; j++) {
+      if (line[j] === '"' && (j === 0 || line[j-1] !== '\\')) {
+        insideQuotes = !insideQuotes;
+      }
+    }
+
+    // If quotes are balanced, this is a complete line
+    if (!insideQuotes) {
+      processedLines.push(currentLine);
+      currentLine = '';
+    }
+  }
+  if (currentLine) processedLines.push(currentLine);
+
+  if (processedLines.length < 2) return { header: [], rows: [] };
+
+  // Skip empty rows and section header rows
   // Find the actual header row that contains BOTH "PN #" AND "Video Name"
   var headerIdx = 0;
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i].trim();
+  for (var i = 0; i < processedLines.length; i++) {
+    var line = processedLines[i].trim();
     if (line && line.includes('PN #') && line.includes('Video Name')) {
       headerIdx = i;
       break;
     }
   }
 
-  var header = parseCSVLine(lines[headerIdx]);
-  var rows = lines.slice(headerIdx + 1).map(function(line) {
+  var header = parseCSVLine(processedLines[headerIdx]);
+  var rows = processedLines.slice(headerIdx + 1).map(function(line) {
     var trimmed = line.trim();
     if (!trimmed) return null; // skip empty rows
     var values = parseCSVLine(line);
