@@ -505,10 +505,10 @@
   .daily-pace-fill { position: absolute; top: 0; left: 0; bottom: 0; background: var(--green-text); border-radius: 2px; transition: width 0.4s ease-out; }
   .daily-pace-fill.behind { background: var(--amber-text); }
 
-  .today-board-scroll { overflow-x: auto; }
+  .today-board-scroll { overflow-x: auto; min-width: 0; width: 100%; }
   .today-board {
     display: grid; grid-template-columns: repeat(7, minmax(200px, 1fr)); gap: 12px;
-    align-items: start; min-width: 1420px;
+    align-items: start;
   }
   .today-col {
     background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
@@ -4756,35 +4756,50 @@ function renderSchedulerView() {
   var dateStr = STATE.schedulerDate;
   var weekend = isWeekend(dateStr);
 
-  // "Today's plan" summary: count of assets already scheduled for this date per editor.
-  var planCounts = { Zidni: 0, Sharm: 0, Patty: 0, Elsa: 0 };
-  STATE.assets.forEach(function(a) {
-    if (a.scheduledFor === dateStr && !a.released && a.editor && planCounts[a.editor] !== undefined) {
-      planCounts[a.editor]++;
-    }
-  });
-  var planSummaryHtml = ['Zidni','Sharm','Patty','Elsa'].map(function(e) {
-    return '<div class="editor-plan">' +
-      '<div class="editor-plan-header">' +
-        '<div class="editor-avatar av-' + e + '">' + editorInitials(e) + '</div>' +
-        '<div><div class="editor-plan-name">' + e + '</div>' +
-        '<div class="editor-plan-rules-inline">' + planCounts[e] + ' video(s) scheduled for ' + dateStr + '</div></div>' +
-      '</div>' +
-    '</div>';
-  }).join('');
-
-  // Show assets due on or before the selected date, excluding anything fully approved.
-  var unscheduled = STATE.assets.filter(function(a) {
-    return a.estDelivery && a.estDelivery <= dateStr &&
-      !a.released &&
-      a.status !== 'Approved' &&
-      a.categoryHeadQc !== 'Approved';
+  // Same pool as Board "To Do Today": Assigned with assignedAt or estDelivery on this date.
+  var todayPool = STATE.assets.filter(function(a) {
+    return a.status === 'Assigned' &&
+      (a.assignedAt === dateStr || a.estDelivery === dateStr) &&
+      !a.released;
   }).sort(function(a, b) {
     var ea = a.estDelivery || '9999-99-99';
     var eb = b.estDelivery || '9999-99-99';
     if (ea !== eb) return ea < eb ? -1 : 1;
     return a.pn - b.pn;
   });
+
+  var byEditor = { Zidni: [], Sharm: [], Patty: [], Elsa: [] };
+  todayPool.forEach(function(a) {
+    if (a.editor && byEditor[a.editor]) byEditor[a.editor].push(a);
+  });
+
+  var planSummaryHtml = ['Zidni','Sharm','Patty','Elsa'].map(function(e) {
+    var videos = byEditor[e];
+    var videoListHtml = videos.length === 0
+      ? '<div style="color:var(--text3);font-size:11px;padding:4px 0;">No videos for ' + dateStr + '</div>'
+      : videos.map(function(a) {
+          var st = (a.status || '').replace(/ /g, '_');
+          var chSt = (a.categoryHeadQc || '').replace(/ /g, '_');
+          var chBadge = (a.categoryHeadQc && a.categoryHeadQc !== 'Draft')
+            ? '<span class="cat-head-status-badge st-' + chSt + '" style="font-size:10px;white-space:nowrap;">CH: ' + escapeHtml(a.categoryHeadQc) + '</span>'
+            : '';
+          return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);">' +
+            '<span style="font-size:11.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text1);" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
+            '<span class="cat-head-status-badge st-' + st + '" style="font-size:10px;white-space:nowrap;">' + escapeHtml(a.status || '') + '</span>' +
+            chBadge +
+          '</div>';
+        }).join('');
+    return '<div class="editor-plan">' +
+      '<div class="editor-plan-header">' +
+        '<div class="editor-avatar av-' + e + '">' + editorInitials(e) + '</div>' +
+        '<div><div class="editor-plan-name">' + e + '</div>' +
+        '<div class="editor-plan-rules-inline">' + videos.length + ' video(s) on ' + dateStr + '</div></div>' +
+      '</div>' +
+      '<div style="padding:2px 0 4px;">' + videoListHtml + '</div>' +
+    '</div>';
+  }).join('');
+
+  var unscheduled = todayPool;
 
   var editorOpts = function(current) {
     var opts = '<option value="">\u2014</option>';
@@ -4795,7 +4810,7 @@ function renderSchedulerView() {
   };
 
   var rowsHtml = unscheduled.length === 0
-    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No videos due on or before ' + dateStr + ' that still need work. Set ETAs in the Campaigns tab to see them here.</td></tr>'
+    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No Assigned videos for ' + dateStr + '. Set a video\'s status to Assigned and its ETA or assigned date to this date to see it here.</td></tr>'
     : unscheduled.map(function(a) {
         var camp = findCampaignById(a.campaignId);
         var code = camp ? camp.country : '?';
@@ -4823,7 +4838,7 @@ function renderSchedulerView() {
     '</div>' +
     '<div class="section-title">Today\'s plan \u2014 ' + dateStr + '</div>' +
     '<div class="editor-plans">' + planSummaryHtml + '</div>' +
-    '<div class="section-title">Unscheduled videos</div>' +
+    '<div class="section-title">Videos — ' + dateStr + '</div>' +
     '<div class="auto-card" style="padding:0;">' +
       '<div class="table-wrap"><table>' +
         '<thead><tr><th></th><th>Video</th><th>Campaign</th><th>Difficulty</th><th>Editor</th><th>ETA</th></tr></thead>' +
@@ -6305,11 +6320,14 @@ function renderAutomationsView() {
         hist.slice(0, 3).map(function(h) {
           return '<a href="' + escapeHtml(h.url) + '" target="_blank" style="color:var(--text3);">' + h.date + '</a>';
         }).join(' · ') + '</div>';
-      return '<div style="margin-top:8px;">' +
+      return '<div style="margin-top:10px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+          '<div class="editor-avatar av-' + ed + '">' + editorInitials(ed) + '</div>' +
+          '<span style="font-weight:600;font-size:13px;color:var(--text1);">' + ed + '</span>' +
+          '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '" style="margin-left:auto;"></span>' +
+        '</div>' +
         '<div class="webhook-row">' +
-          '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '"></span>' +
-          '<span style="min-width:50px; font-weight:600; color:var(--text1);">' + ed + '</span>' +
-          '<input type="text" id="daily-thread-input-' + ed + '" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx">' +
+          '<input type="text" id="daily-thread-input-' + ed + '" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx" style="flex:1;">' +
           '<button class="save-btn" onclick="App.saveDailyThread(\'' + ed + '\')">Set</button>' +
           (t ? '<button class="edit-btn" onclick="App.clearDailyThread(\'' + ed + '\')" style="margin-left:4px;">Clear</button>' : '') +
         '</div>' + histHtml +
@@ -6319,11 +6337,15 @@ function renderAutomationsView() {
     return '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack threads (per editor)</div><div class="auto-sub">paste each editor\'s daily thread URL — notifications post as replies</div></div></div>' +
       '<div class="auto-desc">Each editor has their own daily Slack thread. Paste today\'s thread URL below and notifications for that editor (Assigned, For Review, Needs Revisions, Approved, CHQ events) will post as replies in the thread instead of the channel. Threads reset at local midnight; the previous day\'s URL is archived. Falls back to the webhook below when no thread is set or when the post fails.</div>' +
-      '<div class="webhook-row" style="margin-top:10px;">' +
-        '<span class="webhook-dot ' + tokenDot + '" title="' + escapeHtml(tokenDotTitle) + '"></span>' +
-        '<span style="min-width:50px; font-weight:600; color:var(--text1);">Bot token</span>' +
-        '<input type="password" id="slack-bot-token-input" value="' + escapeHtml(token) + '" placeholder="xoxb-...">' +
-        '<button class="save-btn" onclick="App.saveBotToken()">Save</button>' +
+      '<div style="margin-top:10px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+          '<span style="font-weight:600;font-size:13px;color:var(--text1);">Bot token</span>' +
+          '<span class="webhook-dot ' + tokenDot + '" title="' + escapeHtml(tokenDotTitle) + '" style="margin-left:auto;"></span>' +
+        '</div>' +
+        '<div class="webhook-row">' +
+          '<input type="password" id="slack-bot-token-input" value="' + escapeHtml(token) + '" placeholder="xoxb-..." style="flex:1;">' +
+          '<button class="save-btn" onclick="App.saveBotToken()">Save</button>' +
+        '</div>' +
       '</div>' +
       rows +
     '</div>';
