@@ -6302,9 +6302,7 @@ function renderAutomationsView() {
   // it's the preferred delivery path now; webhooks are the fallback.
   function renderDailyThreadCard() {
     var today = todayISO();
-    var token = (STATE.slackBotToken || '').trim();
-    var tokenDot = token ? 'ok' : '';
-    var tokenDotTitle = token ? 'Bot token saved (xoxb-...)' : 'No bot token — thread posting disabled';
+    // Bot token no longer needed — thread replies now use the webhook with thread_ts.
     var rows = ['Zidni', 'Sharm', 'Patty'].map(function(ed) {
       var t = (STATE.dailyThreads && STATE.dailyThreads[ed]) || null;
       var url = t ? t.url : '';
@@ -6337,16 +6335,6 @@ function renderAutomationsView() {
     return '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack threads (per editor)</div><div class="auto-sub">paste each editor\'s daily thread URL — notifications post as replies</div></div></div>' +
       '<div class="auto-desc">Each editor has their own daily Slack thread. Paste today\'s thread URL below and notifications for that editor (Assigned, For Review, Needs Revisions, Approved, CHQ events) will post as replies in the thread instead of the channel. Threads reset at local midnight; the previous day\'s URL is archived. Falls back to the webhook below when no thread is set or when the post fails.</div>' +
-      '<div style="margin-top:10px;">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
-          '<span style="font-weight:600;font-size:13px;color:var(--text1);">Bot token</span>' +
-          '<span class="webhook-dot ' + tokenDot + '" title="' + escapeHtml(tokenDotTitle) + '" style="margin-left:auto;"></span>' +
-        '</div>' +
-        '<div class="webhook-row">' +
-          '<input type="password" id="slack-bot-token-input" value="' + escapeHtml(token) + '" placeholder="xoxb-..." style="flex:1;">' +
-          '<button class="save-btn" onclick="App.saveBotToken()">Save</button>' +
-        '</div>' +
-      '</div>' +
       rows +
     '</div>';
   }
@@ -7218,8 +7206,9 @@ function groupItemsByCountry(items) {
 
 // Shared Slack sender. Returns a Promise that resolves { ok, body, status } or rejects on hard network failure.
 // Uses Slack's documented form-encoded mode so we can actually read the response.
-function postToSlack(url, text) {
+function postToSlack(url, text, threadTs) {
   var payload = { text: text };
+  if (threadTs) payload.thread_ts = threadTs;
   var formBody = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   return fetch(url, {
     method: 'POST',
@@ -7385,17 +7374,13 @@ function sendDailyTally(triggerKind) {
       logAction('notified', 'Daily tally sent for ' + ed + ' (' + kind + ', ' + reasonTag + ')');
       render();
     }
-    var primary = useThread
-      ? postToSlackThread(thread.channelId, thread.threadTs, msg)
-      : postToSlack(url, msg);
-    primary.then(function(r) {
+    postToSlack(url, msg, useThread ? thread.threadTs : undefined).then(function(r) {
       if (r.ok) {
         logSent(useThread ? 'thread' : 'webhook');
         return;
       }
-      // Thread failure \u2014 try webhook fallback
-      if (useThread && webhookValid(url)) {
-        logAction('updated', 'Daily tally thread post failed for ' + ed + ' (' + r.body + ') \u2014 falling back to webhook');
+      if (useThread) {
+        logAction('updated', 'Daily tally thread post failed for ' + ed + ' (' + r.body + ') \u2014 falling back to channel post');
         postToSlack(url, msg).then(function(r2) {
           if (r2.ok) logSent('webhook-fallback');
           else logAction('deleted', 'Daily tally fallback rejected for ' + ed + ': ' + r2.body);
@@ -7425,18 +7410,14 @@ function sendDailyTallyForEditor(editor) {
   var msg = buildDailyTallyMessageForEditor(editor);
   if (!msg) { toast(editor + ' has no approvals today', ''); return; }
   var thread = resolveDailyThreadForEditor(editor);
-  var token = (STATE.slackBotToken || '').trim();
-  var useThread = !!(thread && token);
+  var useThread = !!thread;
   var url = resolveDailyTallyWebhook();
-  if (!useThread && !webhookValid(url)) {
-    toast('No daily thread + no webhook configured', 'error');
+  if (!webhookValid(url)) {
+    toast('No webhook configured — set one in Automations', 'error');
     return;
   }
   toast('Sending tally for ' + editor + '...', '');
-  var primary = useThread
-    ? postToSlackThread(thread.channelId, thread.threadTs, msg)
-    : postToSlack(url, msg);
-  primary.then(function(r) {
+  postToSlack(url, msg, useThread ? thread.threadTs : undefined).then(function(r) {
     if (r.ok) {
       STATE.sentNotifications.unshift({
         time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
@@ -7554,10 +7535,10 @@ function sendPendingBatch(editor, opts) {
     if (allSame) threadEditor = sharedEditor;
   }
   var thread = threadEditor ? resolveDailyThreadForEditor(threadEditor) : null;
-  var useThread = !!(thread && (STATE.slackBotToken || '').trim());
+  var useThread = !!thread;
 
   var url = resolveWebhookForEditor(editor, windowItems);
-  if (!useThread && !webhookValid(url)) {
+  if (!webhookValid(url)) {
     if (!silent) {
       toast('Webhook URL is missing or a placeholder \u2014 fix it in Automations', 'error');
       App.setTab('automations');
@@ -7596,16 +7577,12 @@ function sendPendingBatch(editor, opts) {
       }
       return;
     }
-    var primary = useThread
-      ? postToSlackThread(thread.channelId, thread.threadTs, msg)
-      : postToSlack(url, msg);
+    var primary = postToSlack(url, msg, useThread ? thread.threadTs : undefined);
     return primary.then(function(r) {
       if (!r.ok) {
-        // If the thread post failed, fall back to webhook (channel post) so the
-        // message still reaches Slack. Log the fallback so Elsa knows it didn't
-        // land in the daily thread as expected.
-        if (useThread && webhookValid(url)) {
-          logAction('updated', editor + ': thread post failed (' + r.body + ') \u2014 falling back to webhook');
+        // If the thread post failed, retry without thread_ts (plain channel post).
+        if (useThread) {
+          logAction('updated', editor + ': thread post failed (' + r.body + ') \u2014 falling back to channel post');
           return postToSlack(url, msg).then(function(r2) {
             if (!r2.ok) {
               clearInFlight();
