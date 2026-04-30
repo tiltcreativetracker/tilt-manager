@@ -7933,9 +7933,10 @@ function buildQcReportMessage(campaignId) {
 //       <url|Brief>
 //
 // Link set per status:
-//   Assigned / In Progress  \u2192 Raw + Brief
-//   For Review              \u2192 Video + Brief
-//   Needs Revisions / Approved / CHQ statuses \u2192 Video only
+//   Assigned / In Progress        → Raw + Brief + Tracker deep-link
+//   For Review                    → Video + Brief + Tracker deep-link
+//   CHQ For Review                → Video + Brief + Raw + Tracker deep-link
+//   Needs Revisions / Approved / CHQ Needs Revisions / CHQ Approved → Video + Tracker deep-link
 //
 // Recipient/sender per status:
 //   Assigned / In Progress          \u2192 editor (no sender)
@@ -7983,6 +7984,12 @@ function buildBatchMessage(recipient, items, opts) {
   }
 
   // Pick which links go below the asset name based on the status.
+  function trackerLink(it) {
+    if (!it.campaignId || !it.assetId) return null;
+    var base = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
+    return base ? '<' + base + '#campaign=' + it.campaignId + '&asset=' + it.assetId + '|Tracker ↗>' : null;
+  }
+
   function linksFor(it) {
     var status = it.status || '';
     var lines = [];
@@ -7991,24 +7998,22 @@ function buildBatchMessage(recipient, items, opts) {
       if (r) lines.push(r);
       if (b) lines.push(b);
     } else if (status === 'For Review') {
-      var b2 = briefLink(it), v = videoLink(it);
+      var v = videoLink(it), b2 = briefLink(it);
       if (v)  lines.push(v);
       if (b2) lines.push(b2);
     } else if (status === 'For Review (Category Head)') {
-      // Category head needs Video + Brief + Raw + a direct tracker link.
       var vChq = videoLink(it), bChq = briefLink(it), rChq = rawLink(it);
-      if (vChq)  lines.push(vChq);
-      if (bChq)  lines.push(bChq);
-      if (rChq)  lines.push(rChq);
-      if (it.campaignId && it.assetId) {
-        var trackerBase = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
-        if (trackerBase) lines.push('<' + trackerBase + '#campaign=' + it.campaignId + '&asset=' + it.assetId + '|Tracker ↗>');
-      }
+      if (vChq) lines.push(vChq);
+      if (bChq) lines.push(bChq);
+      if (rChq) lines.push(rChq);
     } else {
-      // Needs Revisions / Approved / CHQ Needs Revisions / CHQ Approved \u2014 Video only.
+      // Needs Revisions / Approved / CHQ Needs Revisions / CHQ Approved — Video only.
       var v2 = videoLink(it);
       if (v2) lines.push(v2);
     }
+    // Tracker deep-link appended to every notification.
+    var tl = trackerLink(it);
+    if (tl) lines.push(tl);
     return lines;
   }
 
