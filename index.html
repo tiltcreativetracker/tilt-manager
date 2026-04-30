@@ -6541,15 +6541,28 @@ function parseCSV(csvText) {
   var lines = csvText.trim().split('\n');
   if (lines.length < 2) return { header: [], rows: [] };
 
-  var header = parseCSVLine(lines[0]);
-  var rows = lines.slice(1).map(function(line) {
+  // Skip empty rows and section header rows (like "Overview, Editing Space, etc.")
+  // Find the actual header row that contains "PN #" or "Video Name"
+  var headerIdx = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (line && (line.includes('PN #') || line.includes('Video Name'))) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  var header = parseCSVLine(lines[headerIdx]);
+  var rows = lines.slice(headerIdx + 1).map(function(line) {
+    var trimmed = line.trim();
+    if (!trimmed) return null; // skip empty rows
     var values = parseCSVLine(line);
     var obj = {};
     header.forEach(function(key, idx) {
       obj[key] = values[idx] || '';
     });
     return obj;
-  });
+  }).filter(function(row) { return row !== null; });
 
   return { header: header, rows: rows };
 }
