@@ -189,6 +189,8 @@
   th { padding: 9px 12px; text-align: left; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); border-bottom: 1px solid var(--border2); white-space: nowrap; }
   td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tbody tr:hover td { background: rgba(127,119,221,0.03); }
+  @keyframes rowFlash { 0%,100% { background: transparent; } 20%,60% { background: rgba(127,119,221,0.18); } }
+  tr.row-highlight-flash td { animation: rowFlash 2.5s ease; }
   .pn { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text3); }
   .video-name-cell { max-width: 260px; display: flex; align-items: center; gap: 6px; }
   .video-name-cell > .editable-cell:first-child { flex: 1; min-width: 0; overflow: hidden; }
@@ -4654,7 +4656,7 @@ function renderCampaignsView() {
     for (var i = 0; i < filtered.length; i++) {
       var a = filtered[i];
       rows +=
-        '<tr>' +
+        '<tr data-asset-id="' + a.id + '">' +
           '<td><span class="pn">' + a.pn + '</span></td>' +
           '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + renderVersionHistoryBtn(a) + '</div></td>' +
           '<td>' + renderEditableCell(a, 'category') + '</td>' +
@@ -6384,8 +6386,8 @@ function renderAutomationsView() {
         '</div>' +
         '<div class="webhook-row">' +
           '<input type="text" id="' + safeId + '" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx" style="flex:1;">' +
-          '<button class="save-btn" onclick="App.saveCatHeadDailyThread(' + JSON.stringify(cat) + ')">Set</button>' +
-          (t ? '<button class="edit-btn" onclick="App.clearCatHeadDailyThread(' + JSON.stringify(cat) + ')" style="margin-left:4px;">Clear</button>' : '') +
+          '<button class="save-btn" onclick="App.saveCatHeadDailyThread(\'' + safeId + '\', \'' + escapeHtml(cat.replace(/'/g, "\\'")) + '\')">Set</button>' +
+          (t ? '<button class="edit-btn" onclick="App.clearCatHeadDailyThread(\'' + escapeHtml(cat.replace(/'/g, "\\'")) + '\')" style="margin-left:4px;">Clear</button>' : '') +
         '</div>' + histHtml +
       '</div>';
     }).join('');
@@ -7992,8 +7994,18 @@ function buildBatchMessage(recipient, items, opts) {
       var b2 = briefLink(it), v = videoLink(it);
       if (v)  lines.push(v);
       if (b2) lines.push(b2);
+    } else if (status === 'For Review (Category Head)') {
+      // Category head needs Video + Brief + Raw + a direct tracker link.
+      var vChq = videoLink(it), bChq = briefLink(it), rChq = rawLink(it);
+      if (vChq)  lines.push(vChq);
+      if (bChq)  lines.push(bChq);
+      if (rChq)  lines.push(rChq);
+      if (it.campaignId && it.assetId) {
+        var trackerBase = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
+        if (trackerBase) lines.push('<' + trackerBase + '#campaign=' + it.campaignId + '&asset=' + it.assetId + '|Tracker ↗>');
+      }
     } else {
-      // Needs Revisions / Approved / all CHQ events \u2014 Video link only.
+      // Needs Revisions / Approved / CHQ Needs Revisions / CHQ Approved \u2014 Video only.
       var v2 = videoLink(it);
       if (v2) lines.push(v2);
     }
@@ -9815,9 +9827,8 @@ var App = {
     logAction('updated', 'Cleared daily thread for ' + editor);
     render();
   },
-  saveCatHeadDailyThread: function(cat) {
+  saveCatHeadDailyThread: function(safeId, cat) {
     if (!STATE.catHeadDailyThreads) STATE.catHeadDailyThreads = {};
-    var safeId = 'cat-thread-input-' + cat.replace(/\s+/g, '-');
     var input = document.getElementById(safeId);
     if (!input) return;
     var url = (input.value || '').trim();
@@ -10604,20 +10615,29 @@ bootApp = function() {
     // and expands its country). Guard ensures this runs only once per session.
     if (!window.__deepLinkApplied) {
       window.__deepLinkApplied = true;
-      var match = (location.hash || '').match(/^#campaign=(\d+)/);
+      var match = (location.hash || '').match(/^#campaign=([^&]+)(?:&asset=([^&]+))?/);
       if (match) {
         var targetId = parseInt(match[1], 10);
+        var targetAssetId = match[2] ? parseInt(match[2], 10) : null;
         var targetCamp = findCampaignById(targetId);
         if (targetCamp) {
           STATE.activeSubCampaignId = targetCamp.id;
           STATE.expandedCountries[targetCamp.country] = true;
           STATE.tab = 'campaigns';
-          // Save so the deep link state survives a refresh (tab + active id).
           if (typeof saveState === 'function') saveState();
           render();
-          // Show a small toast so the user knows the link worked
           setTimeout(function() {
-            if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
+            if (targetAssetId) {
+              var row = document.querySelector('tr[data-asset-id="' + targetAssetId + '"]');
+              if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                row.classList.add('row-highlight-flash');
+                setTimeout(function() { row.classList.remove('row-highlight-flash'); }, 2500);
+              }
+              if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
+            } else {
+              if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
+            }
           }, 400);
         } else {
           setTimeout(function() {
