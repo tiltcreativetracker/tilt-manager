@@ -2403,10 +2403,7 @@ function recordUndo(asset, fields, label) {
 function undoLastEdit() {
   if (UndoStack.length === 0) { toast('Nothing to undo', ''); return; }
   var snap = UndoStack.pop();
-  var asset = null;
-  for (var i = 0; i < STATE.assets.length; i++) {
-    if (STATE.assets[i].id === snap.assetId) { asset = STATE.assets[i]; break; }
-  }
+  var asset = findAssetById(snap.assetId);
   if (!asset) { toast('Cannot undo \u2014 video was deleted', 'error'); return; }
   _undoSuppressRecording = true;
   try {
@@ -2572,7 +2569,7 @@ function deriveVersionFromName(asset) {
 function renderEditableCell(asset, field) {
   var def = EDITABLE_FIELDS[field];
   if (!def) return '';
-  var editing = EditState.assetId === asset.id && EditState.field === field;
+  var editing = String(EditState.assetId) === String(asset.id) && EditState.field === field;
 
   // URL fields are a special read-only shape: a link (click opens URL) plus a \u270e pencil
   // (click starts edit). Not a single clickable area like other kinds, so we branch early.
@@ -2584,7 +2581,7 @@ function renderEditableCell(asset, field) {
       : '<span class="no-link">\u2014</span>';
     return '<span class="link-cell-inline">' + link +
       ' <button type="button" class="url-edit-pencil" ' +
-        'onclick="App.startEdit(' + asset.id + ', \'' + field + '\')" ' +
+        'onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" ' +
         'title="Edit ' + field + ' URL">\u270E</button>' +
     '</span>';
   }
@@ -2595,7 +2592,7 @@ function renderEditableCell(asset, field) {
     if (def.readOnly) {
       return '<div class="editable-cell editable-cell-readonly">' + def.display(asset) + '</div>';
     }
-    return '<div class="editable-cell" onclick="App.startEdit(' + asset.id + ', \'' + field + '\')" title="Click to edit ' + field + '">' +
+    return '<div class="editable-cell" onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" title="Click to edit ' + field + '">' +
       def.display(asset) +
     '</div>';
   }
@@ -2981,7 +2978,7 @@ function vhRenderEntryRow(a, entry, selectedId) {
   // it in single-quotes inside the double-quoted onclick attribute.
   var idStr = "'" + entry.id + "'";
   return '<div class="' + cls + '" ' +
-    'onclick="App.vhSelectEntry(' + a.id + ', ' + idStr + ')">' +
+    'onclick="App.vhSelectEntry(\'' + a.id + '\', ' + idStr + ')">' +
     '<div class="vh-entry-row-top">' + star + primary + currentBadge + '</div>' +
     '<div class="vh-entry-row-meta">' + metaText + '</div>' +
   '</div>';
@@ -3031,15 +3028,15 @@ function vhRenderPreview(a, entry) {
   var restoreBtn = entry.isCurrent
     ? '<button class="vh-action-btn" disabled title="This IS the current version">Restore</button>'
     : '<button class="vh-action-btn vh-action-btn-primary" ' +
-      'onclick="App.restoreVersion(' + a.id + ', ' + idStr + ')" ' +
+      'onclick="App.restoreVersion(\'' + a.id + '\', ' + idStr + ')" ' +
       'title="Copy this version\'s fields back onto the asset (current state will be saved first)">\u21BA Restore</button>';
   var deleteBtn = entry.isCurrent
     ? ''
     : '<button class="vh-action-btn vh-action-btn-danger" ' +
-      'onclick="App.deleteVersionHistoryEntry(' + a.id + ', ' + idStr + ')" ' +
+      'onclick="App.deleteVersionHistoryEntry(\'' + a.id + '\', ' + idStr + ')" ' +
       'title="Permanently remove this history entry">\u2715 Delete</button>';
   var nameBtn = '<button class="vh-action-btn" ' +
-    'onclick="App.nameVersion(' + a.id + ', ' + idStr + ')" ' +
+    'onclick="App.nameVersion(\'' + a.id + '\', ' + idStr + ')" ' +
     'title="Give this version a label so it survives auto-eviction">' + nameBtnLabel + '</button>';
 
   // "What changed" summary row \u2014 only for non-current entries with changedFields.
@@ -3085,7 +3082,7 @@ function renderVersionHistoryBtn(asset) {
   var countTxt = n === 0 ? '\u2013' : String(n);
   return '<button type="button" class="version-history-btn' + emptyCls + '" ' +
     'title="' + title + '" ' +
-    'onclick="App.showVersionHistory(' + asset.id + ')">' +
+    'onclick="App.showVersionHistory(\'' + asset.id + '\')">' +
     '\u{1F552}<span class="vh-count' + countCls + '">' + countTxt + '</span>' +
   '</button>';
 }
@@ -3096,13 +3093,14 @@ function renderStatusSelect(asset) {
     return '<option value="' + s + '"' + (s === asset.status ? ' selected' : '') + '>' + s + '</option>';
   }).join('');
   return '<select class="status-select ' + statusClass(asset.status) + '" ' +
-         'onchange="App.setAssetStatus(' + asset.id + ', this.value)">' +
+         'onchange="App.setAssetStatus(\'' + asset.id + '\', this.value)">' +
          opts + '</select>';
 }
 
 function getActiveCampaign() {
+  var aid = String(STATE.activeSubCampaignId);
   for (var i = 0; i < STATE.campaigns.length; i++) {
-    if (STATE.campaigns[i].id === STATE.activeSubCampaignId) return STATE.campaigns[i];
+    if (String(STATE.campaigns[i].id) === aid) return STATE.campaigns[i];
   }
   return null;
 }
@@ -3165,7 +3163,7 @@ function categoryBadgeSelectHtml(camp) {
     '<span class="cat-pill cat-pill-display" style="--cat-bg:' + c.bg + '; --cat-fg:' + c.fg + '; --cat-bg-light:' + bgL + '; --cat-fg-light:' + fgL + ';">' +
       escapeHtml(camp.category || '\u2014') + ' <span class="cat-pill-chev">\u25be</span>' +
     '</span>' +
-    '<select class="cat-pill-overlay" onchange="App.setCampaignCategory(' + camp.id + ', this.value)">' + opts + '</select>' +
+    '<select class="cat-pill-overlay" onchange="App.setCampaignCategory(\'' + camp.id + '\', this.value)">' + opts + '</select>' +
   '</span>';
 }
 
@@ -3218,7 +3216,14 @@ function categoryUsageCount(name) {
 }
 
 function findCampaignById(id) {
-  for (var i = 0; i < STATE.campaigns.length; i++) if (STATE.campaigns[i].id === id) return STATE.campaigns[i];
+  var sid = String(id);
+  for (var i = 0; i < STATE.campaigns.length; i++) if (String(STATE.campaigns[i].id) === sid) return STATE.campaigns[i];
+  return null;
+}
+
+function findAssetById(id) {
+  var sid = String(id);
+  for (var i = 0; i < STATE.assets.length; i++) if (String(STATE.assets[i].id) === sid) return STATE.assets[i];
   return null;
 }
 
@@ -4110,17 +4115,17 @@ function moveCampaignWithinCountry(srcId, targetId, placeBefore) {
   var src = findCampaignById(srcId);
   var target = findCampaignById(targetId);
   if (!src || !target || src.country !== target.country) return false;
-  if (srcId === targetId) return false;
+  if (String(srcId) === String(targetId)) return false;
 
   // Work against the current ordered list within the country.
   // Remove src from STATE.campaigns, then re-insert at the computed index.
   var countryCode = src.country;
   var beforeSrcCount = 0;
-  STATE.campaigns = STATE.campaigns.filter(function(c) { return c.id !== srcId; });
+  STATE.campaigns = STATE.campaigns.filter(function(c) { return String(c.id) !== String(srcId); });
   var siblings = getSubCampaignsForCountry(countryCode);
   var targetIdx = -1;
   for (var i = 0; i < siblings.length; i++) {
-    if (siblings[i].id === targetId) { targetIdx = i; break; }
+    if (String(siblings[i].id) === String(targetId)) { targetIdx = i; break; }
   }
   if (targetIdx < 0) { // shouldn't happen; push src back to end and bail
     STATE.campaigns.push(src);
@@ -4135,12 +4140,12 @@ function moveCampaignWithinCountry(srcId, targetId, placeBefore) {
     // after the last sibling \u2014 find index just after the last sibling in STATE.campaigns
     var lastSibling = siblings[siblings.length - 1];
     for (var k = 0; k < STATE.campaigns.length; k++) {
-      if (STATE.campaigns[k].id === lastSibling.id) { globalInsertIdx = k + 1; break; }
+      if (String(STATE.campaigns[k].id) === String(lastSibling.id)) { globalInsertIdx = k + 1; break; }
     }
   } else {
     var pivot = siblings[insertIdx];
     for (var m = 0; m < STATE.campaigns.length; m++) {
-      if (STATE.campaigns[m].id === pivot.id) { globalInsertIdx = m; break; }
+      if (String(STATE.campaigns[m].id) === String(pivot.id)) { globalInsertIdx = m; break; }
     }
   }
   if (globalInsertIdx === undefined) globalInsertIdx = STATE.campaigns.length;
@@ -4291,11 +4296,10 @@ function deleteAsset(id) {
     toast('Only admins can delete assets', 'error');
     return;
   }
-  var a = null;
-  for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+  var a = findAssetById(id);
   if (!a) return;
   if (!confirm('Delete "' + a.name + '"?')) return;
-  STATE.assets = STATE.assets.filter(function(x) { return x.id !== id; });
+  STATE.assets = STATE.assets.filter(function(x) { return String(x.id) !== String(id); });
   logAction('deleted', 'Asset "' + a.name + '" deleted');
   toast('Asset deleted', 'success');
   render();
@@ -4305,8 +4309,7 @@ function deleteAsset(id) {
 // and a new pn (next available in that campaign), appends "_copy" to the name.
 // Resets scheduledFor/released/dateApproved/finalVideo since those are per-asset workflow state.
 function duplicateAsset(id) {
-  var src = null;
-  for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { src = STATE.assets[i]; break; }
+  var src = findAssetById(id);
   if (!src) return;
   var copy = {
     id: STATE.nextAssetId++,
@@ -4528,11 +4531,11 @@ function renderSidebar() {
       // Full mode keeps showing every sub-campaign as before. `subs` is already filtered
       // by the month dropdown if active.
       var subsToRender = compact
-        ? subs.filter(function(s) { return s.id === STATE.activeSubCampaignId; })
+        ? subs.filter(function(s) { return String(s.id) === String(STATE.activeSubCampaignId); })
         : subs;
       for (var j = 0; j < subsToRender.length; j++) {
         var s = subsToRender[j];
-        var active = s.id === STATE.activeSubCampaignId;
+        var active = String(s.id) === String(STATE.activeSubCampaignId);
         // In compact mode: flag + rank only (no name, no category pill, no drag handle).
         // Tooltip keeps the full name discoverable on hover.
         if (compact) {
@@ -4542,12 +4545,12 @@ function renderSidebar() {
               'data-camp-id="' + s.id + '" ' +
               'data-country="' + country.code + '" ' +
               'title="' + escapeHtml(s.name) + '" ' +
-              'onclick="App.selectCampaign(' + s.id + ')" ' +
-              'oncontextmenu="App.showSubcampContextMenu(event, ' + s.id + ')" ' +
-              'ondragstart="App.onSubcampDragStart(event, ' + s.id + ', \'' + country.code + '\')" ' +
+              'onclick="App.selectCampaign(\'' + s.id + '\')" ' +
+              'oncontextmenu="App.showSubcampContextMenu(event, \'' + s.id + '\')" ' +
+              'ondragstart="App.onSubcampDragStart(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
               'ondragover="App.onSubcampDragOver(event)" ' +
               'ondragleave="App.onSubcampDragLeave(event)" ' +
-              'ondrop="App.onSubcampDrop(event, ' + s.id + ', \'' + country.code + '\')" ' +
+              'ondrop="App.onSubcampDrop(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
               'ondragend="App.onSubcampDragEnd(event)">' +
               '<div class="country-flag flag-' + country.code + '" style="width:18px; height:13px; font-size:8px;">' + country.code + '</div>' +
               '<div class="rank-badge">' + s.rank + '</div>' +
@@ -4555,12 +4558,12 @@ function renderSidebar() {
         } else {
           // In full mode: if this row is currently being renamed, render an inline
           // <input> in place of the name div. Otherwise render the normal name.
-          var isRenaming = SidebarEditState.renameCampId === s.id;
+          var isRenaming = String(SidebarEditState.renameCampId) === String(s.id);
           var nameHtml = isRenaming
             ? '<input type="text" class="subcamp-rename-input" id="subcamp-rename-' + s.id + '" ' +
                 'value="' + escapeHtml(s.name) + '" ' +
                 'onclick="event.stopPropagation();" ' +
-                'onblur="App.commitRenameSubcamp(' + s.id + ', this.value)" ' +
+                'onblur="App.commitRenameSubcamp(\'' + s.id + '\', this.value)" ' +
                 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();App.cancelRenameSubcamp();}">'
             : '<div class="subcamp-name">' + escapeHtml(s.name) + '</div>';
           // draggable disabled while renaming so drag doesn't hijack the input's cursor
@@ -4569,12 +4572,12 @@ function renderSidebar() {
               (isRenaming ? '' : 'draggable="true" ') +
               'data-camp-id="' + s.id + '" ' +
               'data-country="' + country.code + '" ' +
-              (isRenaming ? '' : 'onclick="App.selectCampaign(' + s.id + ')" ') +
-              'oncontextmenu="App.showSubcampContextMenu(event, ' + s.id + ')" ' +
-              'ondragstart="App.onSubcampDragStart(event, ' + s.id + ', \'' + country.code + '\')" ' +
+              (isRenaming ? '' : 'onclick="App.selectCampaign(\'' + s.id + '\')" ') +
+              'oncontextmenu="App.showSubcampContextMenu(event, \'' + s.id + '\')" ' +
+              'ondragstart="App.onSubcampDragStart(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
               'ondragover="App.onSubcampDragOver(event)" ' +
               'ondragleave="App.onSubcampDragLeave(event)" ' +
-              'ondrop="App.onSubcampDrop(event, ' + s.id + ', \'' + country.code + '\')" ' +
+              'ondrop="App.onSubcampDrop(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
               'ondragend="App.onSubcampDragEnd(event)">' +
               '<span class="drag-handle" title="Drag to reorder">\u205D</span>' +
               '<div class="rank-badge">' + s.rank + '</div>' +
@@ -4682,7 +4685,7 @@ function renderCampaignsView() {
             return '<div class="cat-head-cell">' + nameHtml + renderEditableCell(a, 'categoryHeadQc') + '</div>';
           })() + '</td>' +
           '<td>' + renderEditableCell(a, 'chDateApproved') + '</td>' +
-          '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(' + a.id + ')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(' + a.id + ')" title="Duplicate this row">Dup</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(' + a.id + ')" title="Delete this row">Del</button>' : '') + '</div></td>' +
+          '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(\'' + a.id + '\')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(\'' + a.id + '\')" title="Duplicate this row">Dup</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(\'' + a.id + '\')" title="Delete this row">Del</button>' : '') + '</div></td>' +
         '</tr>';
     }
   }
@@ -4746,7 +4749,7 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(' + camp.id + ')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(' + camp.id + ')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(' + camp.id + ')">\u{1F4AC} Export for Slack</button></div></div></div>' +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(\'' + camp.id + '\')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(\'' + camp.id + '\')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(\'' + camp.id + '\')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
       : '<div class="camp-brief">' + (camp.brief ? escapeHtml(camp.brief) : '<em style="color:var(--text3)">No brief set</em>') + '</div>') +
@@ -4839,8 +4842,8 @@ function renderSchedulerView() {
           '<td>' + escapeHtml(a.name) + '</td>' +
           '<td title="' + escapeHtml(campName) + '" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(campName) + '</td>' +
           '<td><span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span></td>' +
-          '<td><select class="form-select" onchange="App.scheduleAssignEditor(' + a.id + ', this.value)">' + editorOpts(a.editor) + '</select></td>' +
-          '<td><input type="date" class="form-input" value="' + (a.estDelivery || '') + '" onchange="App.scheduleSetEta(' + a.id + ', this.value)"></td>' +
+          '<td><select class="form-select" onchange="App.scheduleAssignEditor(\'' + a.id + '\', this.value)">' + editorOpts(a.editor) + '</select></td>' +
+          '<td><input type="date" class="form-input" value="' + (a.estDelivery || '') + '" onchange="App.scheduleSetEta(\'' + a.id + '\', this.value)"></td>' +
         '</tr>';
       }).join('');
 
@@ -5133,11 +5136,9 @@ function getApprovedTodayByCountry() {
 //   - placement === 'end'   : push to the end of STATE.assets (bottom of column)
 //   - placement === 'before': insert just before the asset with anchorId
 function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
-  var a = null, idx = -1;
-  for (var i = 0; i < STATE.assets.length; i++) {
-    if (STATE.assets[i].id === id) { a = STATE.assets[i]; idx = i; break; }
-  }
+  var a = findAssetById(id);
   if (!a) return;
+  var idx = STATE.assets.indexOf(a);
   var oldStatus = a.status;
   var oldEditor = a.editor;
   var statusChanging = oldStatus !== targetStatus;
@@ -5168,9 +5169,8 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   if (idx >= 0) STATE.assets.splice(idx, 1);
   if (placement === 'before' && anchorId !== null && anchorId !== undefined) {
     var anchorIdx = -1;
-    for (var k = 0; k < STATE.assets.length; k++) {
-      if (STATE.assets[k].id === anchorId) { anchorIdx = k; break; }
-    }
+    var anchorAsset = findAssetById(anchorId);
+    anchorIdx = anchorAsset ? STATE.assets.indexOf(anchorAsset) : -1;
     if (anchorIdx < 0) STATE.assets.push(a);
     else STATE.assets.splice(anchorIdx, 0, a);
   } else {
@@ -5190,27 +5190,21 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
 // (via the existing App setter so notifications + version history are captured)
 // and then repositions the asset in STATE.assets for visual drop placement.
 function applyCategoryHeadQcChangeThenReorder(id, targetVal, placement, anchorId) {
-  var a = null, idx = -1;
-  for (var i = 0; i < STATE.assets.length; i++) {
-    if (STATE.assets[i].id === id) { a = STATE.assets[i]; idx = i; break; }
-  }
+  var a = findAssetById(id);
   if (!a) return;
+  var idx = STATE.assets.indexOf(a);
   // Delegate to App setter — handles validation, version snapshot, activity log,
   // and CHQ/CHA/editor Slack notifications. It calls render() at end which is
   // harmless; we override with our own render after the reorder below.
   App.setAssetCategoryHeadQc(id, targetVal);
   // Re-find idx after App setter may have triggered state changes.
-  idx = -1;
-  for (var j = 0; j < STATE.assets.length; j++) {
-    if (STATE.assets[j].id === id) { idx = j; break; }
-  }
+  idx = STATE.assets.indexOf(a);
   if (idx < 0) return;
   STATE.assets.splice(idx, 1);
   if (placement === 'before' && anchorId !== null && anchorId !== undefined) {
     var anchorIdx = -1;
-    for (var k = 0; k < STATE.assets.length; k++) {
-      if (STATE.assets[k].id === anchorId) { anchorIdx = k; break; }
-    }
+    var anchorAsset2 = findAssetById(anchorId);
+    anchorIdx = anchorAsset2 ? STATE.assets.indexOf(anchorAsset2) : -1;
     if (anchorIdx < 0) STATE.assets.push(a);
     else STATE.assets.splice(anchorIdx, 0, a);
   } else {
@@ -5349,8 +5343,8 @@ function renderTodayView() {
     // document-level mouseup handler figures out whether the drop was on another
     // card (insert before it) or on empty column space (append at end).
     return '<div class="today-card" data-asset-id="' + a.id + '" ' +
-        'onmousedown="pdragStart(event, \'card\', ' + a.id + ')" ' +
-        'ondblclick="App.editAssetById(' + a.id + ')" ' +
+        'onmousedown="pdragStart(event, \'card\', \'' + a.id + '\')" ' +
+        'ondblclick="App.editAssetById(\'' + a.id + '\')" ' +
         'title="Drag onto another card to drop there \u00B7 double-click to open editor">' +
       '<div class="today-card-top">' +
         (countryCode ? '<div class="country-flag flag-' + countryCode + '">' + countryCode + '</div>' : '') +
@@ -5458,8 +5452,8 @@ function renderTodayView() {
           (r.weekApproved > 0 ? ' (' + r.weekApproved + ' approved this week)' : '') +
           '. Click to open the campaign.';
         return '<div class="' + cls + '" data-camp-id="' + r.campaign.id + '" ' +
-            'onmousedown="pdragStart(event, \'campcard\', ' + r.campaign.id + ')" ' +
-            'onclick="if (pdragCheckClick(event, ' + r.campaign.id + ')) App.goToCampaign(' + r.campaign.id + ')" ' +
+            'onmousedown="pdragStart(event, \'campcard\', \'' + r.campaign.id + '\')" ' +
+            'onclick="if (pdragCheckClick(event, \'' + r.campaign.id + '\')) App.goToCampaign(\'' + r.campaign.id + '\')" ' +
             'title="' + escapeHtml(title) + '">' +
           '<div class="week-camp-card-head">' +
             '<span class="country-flag flag-' + r.campaign.country + '">' + r.campaign.country + '</span>' +
@@ -5772,7 +5766,7 @@ function renderDailyLogView() {
           '</div>';
         var done = a.status === 'Approved';
         return '<div class="log-day-vid-row' + (done ? ' is-done' : '') + '" ' +
-          'onclick="App.editAssetById(' + a.id + ')" title="Click to open edit modal">' +
+          'onclick="App.editAssetById(\'' + a.id + '\')" title="Click to open edit modal">' +
           '<div class="log-day-vid-name">' +
             '<div class="log-day-vid-title">' + escapeHtml(a.name) + ' <span class="log-day-vid-ver">' + escapeHtml(version) + '</span></div>' +
             '<div class="log-day-vid-camp">' + escapeHtml(campLabel) + '</div>' +
@@ -6199,8 +6193,8 @@ function renderNotificationsView() {
                 '<span style="color:var(--green-text);">' + ready.length + ' Ready</span>' +
               '</div>' +
             '</div>' +
-            '<button ' + sendAttrs + ' onclick="App.sendQcReport(' + camp.id + ')">\u{1F680}</button>' +
-            '<button class="sent-copy-btn" title="Copy QC report" onclick="App.copyQcReport(' + camp.id + ')">\u{1F4CB}</button>' +
+            '<button ' + sendAttrs + ' onclick="App.sendQcReport(\'' + camp.id + '\')">\u{1F680}</button>' +
+            '<button class="sent-copy-btn" title="Copy QC report" onclick="App.copyQcReport(\'' + camp.id + '\')">\u{1F4CB}</button>' +
           '</div>' +
           missingList +
         '</div>';
@@ -8710,9 +8704,9 @@ function render() {
         menuLayer.innerHTML =
           '<div class="subcamp-context-menu" style="left:' + ContextMenuState.x + 'px; top:' + ContextMenuState.y + 'px;">' +
             '<div class="subcamp-context-menu-header">' + escapeHtml(targetCamp.name) + '</div>' +
-            '<button class="subcamp-context-menu-item" onclick="App.startRenameSubcamp(' + targetCamp.id + ')">\u270E Rename</button>' +
-            '<button class="subcamp-context-menu-item" onclick="App.duplicateSubcamp(' + targetCamp.id + ')">\u29C9 Duplicate</button>' +
-            (roleAtLeast('admin') ? '<button class="subcamp-context-menu-item subcamp-context-menu-destructive" onclick="App.deleteSubcamp(' + targetCamp.id + ')">\u{1F5D1} Delete</button>' : '') +
+            '<button class="subcamp-context-menu-item" onclick="App.startRenameSubcamp(\'' + targetCamp.id + '\')">\u270E Rename</button>' +
+            '<button class="subcamp-context-menu-item" onclick="App.duplicateSubcamp(\'' + targetCamp.id + '\')">\u29C9 Duplicate</button>' +
+            (roleAtLeast('admin') ? '<button class="subcamp-context-menu-item subcamp-context-menu-destructive" onclick="App.deleteSubcamp(\'' + targetCamp.id + '\')">\u{1F5D1} Delete</button>' : '') +
           '</div>';
       } else {
         menuLayer.innerHTML = '';
@@ -8895,7 +8889,8 @@ var App = {
   },
   addSub: function(code) { showAddSubCampaignModal(code); },
   editAssetById: function(id) {
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { showAssetModal(STATE.assets[i]); return; }
+    var a = findAssetById(id);
+    if (a) showAssetModal(a);
   },
   // Daily Log tab editor picker. Validates against DAILY_LOG_EDITORS so we
   // never store a name the tab can't render (e.g. Elsa, who's excluded), and
@@ -8906,8 +8901,7 @@ var App = {
     render();
   },
   setAssetStatus: function(id, newStatus) {
-    var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    var a = findAssetById(id);
     if (!a) return;
     if (a.status === newStatus) return;
     // Guard: can't move out of Draft without an editor (force Draft back if user tries)
@@ -9105,10 +9099,7 @@ var App = {
     if (draggedId === null || draggedId === undefined || draggedId === targetCardId) { render(); return; }
     // Figure out the target status by looking up the target card's current status \u2014
     // that's the column the user is dropping INTO.
-    var target = null;
-    for (var j = 0; j < STATE.assets.length; j++) {
-      if (STATE.assets[j].id === targetCardId) { target = STATE.assets[j]; break; }
-    }
+    var target = findAssetById(targetCardId);
     if (!target) { render(); return; }
     applyStatusChangeThenReorder(draggedId, target.status, 'before', targetCardId);
   },
@@ -9119,7 +9110,7 @@ var App = {
   startEdit: function(assetId, field) {
     // If another cell is already in edit mode, bail \u2014 user must finish or cancel first.
     // (Can't happen through normal UI because the other input would have blurred, but be safe.)
-    if (EditState.assetId !== null && (EditState.assetId !== assetId || EditState.field !== field)) {
+    if (EditState.assetId !== null && (String(EditState.assetId) !== String(assetId) || EditState.field !== field)) {
       EditState.assetId = null;
       EditState.field = null;
     }
@@ -9151,7 +9142,7 @@ var App = {
 
   setAssetName: function(id, newName) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var trimmed = String(newName || '').trim();
     if (!trimmed) { toast('Video name cannot be empty', 'error'); render(); return; }
@@ -9167,7 +9158,7 @@ var App = {
 
   setAssetVersion: function(id, newVersion) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var trimmed = String(newVersion || '').trim() || 'V1';
     if (a.version === trimmed) { render(); return; }
@@ -9180,7 +9171,7 @@ var App = {
 
   setAssetDifficulty: function(id, newDiff) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     if (DIFFICULTIES.indexOf(newDiff) < 0) { render(); return; } // invalid \u2014 ignore
     if (a.difficulty === newDiff) { render(); return; }
@@ -9199,7 +9190,7 @@ var App = {
   // render time, so no extra wiring needed there).
   setAssetCategory: function(id, newCat) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var validNames = (STATE.categories || []).map(function(c) { return c.name; });
     if (validNames.indexOf(newCat) < 0) { render(); return; } // unknown \u2014 ignore
@@ -9217,7 +9208,7 @@ var App = {
   // is added/removed, then emit assignment/revision notifications via the dispatcher.
   setAssetEditor: function(id, newEditor) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var cleanEditor = newEditor || '';
     // Reject if editor is unknown (defensive \u2014 dropdown shouldn't allow it)
@@ -9248,7 +9239,7 @@ var App = {
 
   setAssetEta: function(id, newDate) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     // <input type="date"> gives us 'YYYY-MM-DD' or '' directly. Normalize defensively anyway.
     var iso = toISODate(newDate);
@@ -9263,7 +9254,7 @@ var App = {
 
   setAssetDateApproved: function(id, newDate) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var iso = toISODate(newDate);
     if (a.dateApproved === iso) { render(); return; }
@@ -9276,7 +9267,7 @@ var App = {
   },
   setAssetChDateApproved: function(id, newDate) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var iso = toISODate(newDate);
     if (a.chDateApproved === iso) { render(); return; }
@@ -9293,7 +9284,7 @@ var App = {
   // field is returned to edit mode so the user can fix it without retyping from scratch.
   setAssetRawVideo: function(id, newUrl) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var trimmed = String(newUrl || '').trim();
     if (a.rawVideo === trimmed) { render(); return; }
@@ -9313,7 +9304,7 @@ var App = {
 
   setAssetBrief: function(id, newUrl) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var trimmed = String(newUrl || '').trim();
     if (a.editingBrief === trimmed) { render(); return; }
@@ -9333,7 +9324,7 @@ var App = {
 
   setAssetFinalVideo: function(id, newUrl) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var trimmed = String(newUrl || '').trim();
     if (a.finalVideo === trimmed) { render(); return; }
@@ -9357,7 +9348,7 @@ var App = {
   // and Ready are set by whoever does QC on the video. Validated against QC_VALUES.
   setAssetQc: function(id, newQc) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     if (QC_VALUES.indexOf(newQc) < 0) { render(); return; }
     var old = a.qc || 'Draft';
@@ -9381,7 +9372,7 @@ var App = {
   // it only updates the head's review verdict on the produced video.
   setAssetCategoryHeadQc: function(id, newVal) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     if (CATEGORY_HEAD_QC_VALUES.indexOf(newVal) < 0) { render(); return; }
     var old = a.categoryHeadQc || 'Draft';
@@ -9901,7 +9892,7 @@ var App = {
   // snapshot fields back onto the live asset), or delete a version.
   showVersionHistory: function(assetId) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === assetId) { a = STATE.assets[i]; break; }
+    a = findAssetById(assetId);
     if (!a) return;
     VhState.assetId = assetId;
     var hist = Array.isArray(a.versionHistory) ? a.versionHistory : [];
@@ -9917,7 +9908,7 @@ var App = {
   // Called from onclick handlers on each .vh-entry-row.
   vhSelectEntry: function(assetId, entryId) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === assetId) { a = STATE.assets[i]; break; }
+    a = findAssetById(assetId);
     if (!a) return;
     VhState.assetId = assetId;
     VhState.selectedId = entryId;
@@ -9928,7 +9919,7 @@ var App = {
   // Named versions are protected from auto-eviction when the cap is reached.
   nameVersion: function(assetId, entryId) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === assetId) { a = STATE.assets[i]; break; }
+    a = findAssetById(assetId);
     if (!a) return;
     if (entryId === '__current__') {
       // Name the CURRENT state \u2014 push a brand-new labeled snapshot then prompt.
@@ -9982,7 +9973,7 @@ var App = {
   // with the user since this overwrites every tracked field.
   restoreVersion: function(assetId, entryId) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === assetId) { a = STATE.assets[i]; break; }
+    a = findAssetById(assetId);
     if (!a) return;
     if (entryId === '__current__') {
       toast('Already viewing the current version', 'error');
@@ -10052,7 +10043,7 @@ var App = {
 
   deleteVersionHistoryEntry: function(assetId, entryId) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === assetId) { a = STATE.assets[i]; break; }
+    a = findAssetById(assetId);
     if (!a || !Array.isArray(a.versionHistory)) return;
     if (entryId === '__current__') return;
     var idx = -1;
@@ -10093,7 +10084,7 @@ var App = {
   onSubcampDragOver: function(event) {
     if (DragState.srcId === null) return;
     var el = event.currentTarget;
-    var targetId = parseInt(el.getAttribute('data-camp-id'), 10);
+    var targetId = el.getAttribute('data-camp-id');
     var targetCountry = el.getAttribute('data-country');
 
     // Different country \u2014 not a valid drop target; show a blocked cursor.
@@ -10106,7 +10097,7 @@ var App = {
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     // Skip highlighting the dragged element itself
-    if (targetId === DragState.srcId) return;
+    if (String(targetId) === String(DragState.srcId)) return;
     var rect = el.getBoundingClientRect();
     var midY = rect.top + rect.height / 2;
     el.classList.remove('drag-over-top', 'drag-over-bottom');
@@ -10126,7 +10117,7 @@ var App = {
       DragState.srcCountry = null;
       return; // cross-country drop is a no-op
     }
-    if (targetId === DragState.srcId) {
+    if (String(targetId) === String(DragState.srcId)) {
       DragState.srcId = null;
       DragState.srcCountry = null;
       return;
@@ -10195,7 +10186,7 @@ var App = {
   // rename mode cleanly. Restores compact mode if we force-expanded on rename entry.
   commitRenameSubcamp: function(subcampId, newName) {
     // Ignore if user already cancelled (blur may still fire after Escape)
-    if (SidebarEditState.renameCampId !== subcampId) return;
+    if (String(SidebarEditState.renameCampId) !== String(subcampId)) return;
     var camp = findCampaignById(subcampId);
     if (!camp) { App.cancelRenameSubcamp(); return; }
     var trimmed = String(newName || '').trim();
@@ -10682,7 +10673,7 @@ var App = {
   },
   scheduleSetEta: function(id, iso) {
     var a = null;
-    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    a = findAssetById(id);
     if (!a) return;
     var clean = toISODate(iso);
     var vhPre = snapshotAsset(a);
@@ -10978,7 +10969,7 @@ function pdragFindTargetAt(x, y) {
   if (PtrDrag.kind === 'card') {
     var card = el.closest && el.closest('.today-card');
     if (card) {
-      var aid = parseInt(card.getAttribute('data-asset-id'), 10);
+      var aid = card.getAttribute('data-asset-id');
       return { kind: 'card', id: aid, el: card };
     }
     var col = el.closest && el.closest('.today-col');
@@ -10994,7 +10985,7 @@ function pdragFindTargetAt(x, y) {
     // nothing functional; the drag is visual-only, matching the user's ask.
     var cc = el.closest && el.closest('.week-camp-card');
     if (cc) {
-      var cid = parseInt(cc.getAttribute('data-camp-id'), 10);
+      var cid = cc.getAttribute('data-camp-id');
       return { kind: 'campcard', id: cid, el: cc };
     }
   }
@@ -11092,17 +11083,14 @@ function pdragOnMouseUp(e) {
   }
   if (kind === 'card') {
     if (!target) { render(); return; }
-    if (target.kind === 'card' && target.id !== sourceId) {
+    if (target.kind === 'card' && String(target.id) !== String(sourceId)) {
       // Determine which column the target card is in so we know which track to use.
       var colEl = target.el && target.el.closest && target.el.closest('.today-col');
       var dropTrack = colEl ? (colEl.getAttribute('data-track') || 'pm') : 'pm';
       var dropVal   = colEl ? (colEl.getAttribute('data-status') || '') : '';
       if (!dropVal) {
         // Fallback: read from target card's asset status (PM track only).
-        var tgt2 = null;
-        for (var j2 = 0; j2 < STATE.assets.length; j2++) {
-          if (STATE.assets[j2].id === target.id) { tgt2 = STATE.assets[j2]; break; }
-        }
+        var tgt2 = findAssetById(target.id);
         dropVal = tgt2 ? tgt2.status : '';
       }
       if (dropTrack === 'ch') applyCategoryHeadQcChangeThenReorder(sourceId, dropVal, 'before', target.id);
