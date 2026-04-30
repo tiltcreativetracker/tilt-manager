@@ -2210,6 +2210,9 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     // video (Draft, For Review, Needs Revisions, Approved). The responsible head
     // is auto-derived from the asset's category via CATEGORY_HEADS.
     categoryHeadQc: 'Draft',
+    // ISO date stamped when categoryHeadQc transitions to 'Approved'. Cleared when
+    // categoryHeadQc moves away from 'Approved'.
+    chDateApproved: '',
     // Version history: Google-Sheets-style full-asset snapshots captured before any
     // field mutation (see VERSION HISTORY HELPERS block). Entries have the shape
     // {id, snappedAt, label, named, changedFields, snapshot:{...VH_SNAPSHOT_FIELDS}}.
@@ -2489,6 +2492,12 @@ var EDITABLE_FIELDS = {
     value: function(a) { return toISODate(a.dateApproved); },
     appMethod: 'setAssetDateApproved'
   },
+  chDateApproved: {
+    kind: 'date',
+    display: function(a) { return '<span class="date-cell">' + (a.chDateApproved ? escapeHtml(formatDate(a.chDateApproved)) : '\u2014') + '</span>'; },
+    value: function(a) { return toISODate(a.chDateApproved); },
+    appMethod: 'setAssetChDateApproved'
+  },
   // URL fields \u2014 rendered as clickable link + \u270e pencil to enter edit mode.
   // `linkLabel` is the short text shown in the link.
   rawVideo: {
@@ -2657,20 +2666,20 @@ function renderEditableCell(asset, field) {
 var VH_MAX_ENTRIES = 50;
 var VH_SNAPSHOT_FIELDS = [
   'name', 'version', 'category', 'difficulty',
-  'editor', 'status', 'qc',
+  'editor', 'status', 'qc', 'categoryHeadQc',
   'rawVideo', 'editingBrief', 'finalVideo',
-  'estDelivery', 'dateApproved', 'assignedAt'
+  'estDelivery', 'dateApproved', 'assignedAt', 'chDateApproved'
 ];
 var VH_FIELD_LABELS = {
   name: 'Name', version: 'Version', category: 'Category', difficulty: 'Difficulty',
-  editor: 'Editor', status: 'Status', qc: 'Footage QC',
+  editor: 'Editor', status: 'Status', qc: 'Footage QC', categoryHeadQc: 'CH QC',
   rawVideo: 'Drive', editingBrief: 'Brief', finalVideo: 'Video',
-  estDelivery: 'ETA', dateApproved: 'Approved', assignedAt: 'Assigned'
+  estDelivery: 'ETA', dateApproved: 'Approved', assignedAt: 'Assigned', chDateApproved: 'CH Approved'
 };
 // Fields the preview renders as clickable URLs instead of plain text.
 var VH_URL_FIELDS = { rawVideo: 1, editingBrief: 1, finalVideo: 1 };
 // Fields the preview renders as human-readable dates.
-var VH_DATE_FIELDS = { estDelivery: 1, dateApproved: 1, assignedAt: 1 };
+var VH_DATE_FIELDS = { estDelivery: 1, dateApproved: 1, assignedAt: 1, chDateApproved: 1 };
 
 // Transient state for the open version-history modal. Rebuilt each time
 // App.showVersionHistory is called; updated in-place as the user clicks entries.
@@ -4316,6 +4325,7 @@ function duplicateAsset(id) {
     version: src.version,
     qc: 'Draft',               // QC resets to Draft for the new copy
     categoryHeadQc: 'Draft',   // Category head review state also resets
+    chDateApproved: '',        // cleared
     versionHistory: [],        // History starts clean \u2014 copy is a fresh asset
     assignedAt: ''             // Stamped below if the editor is kept (auto-Assigned path)
   };
@@ -4669,6 +4679,7 @@ function renderCampaignsView() {
               : '<span class="cat-head-chip cat-head-chip-empty" title="No head assigned for this category">—</span>';
             return '<div class="cat-head-cell">' + nameHtml + renderEditableCell(a, 'categoryHeadQc') + '</div>';
           })() + '</td>' +
+          '<td>' + renderEditableCell(a, 'chDateApproved') + '</td>' +
           '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(' + a.id + ')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(' + a.id + ')" title="Duplicate this row">Dup</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(' + a.id + ')" title="Delete this row">Del</button>' : '') + '</div></td>' +
         '</tr>';
     }
@@ -4754,7 +4765,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th>CH Date Approved</th><th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -7030,6 +7041,9 @@ function loadState() {
       if (QC_VALUES.indexOf(a.qc) < 0) a.qc = 'Draft';
       // Category Head QC added later \u2014 same default behavior
       if (CATEGORY_HEAD_QC_VALUES.indexOf(a.categoryHeadQc) < 0) a.categoryHeadQc = 'Draft';
+      // chDateApproved added later \u2014 default to empty string
+      if (a.chDateApproved === undefined || a.chDateApproved === null) a.chDateApproved = '';
+      if (a.chDateApproved) a.chDateApproved = toISODate(a.chDateApproved) || a.chDateApproved;
       // versionHistory added in this version \u2014 migrate any asset missing it.
       // Also migrate legacy entries (url-only shape pre-Google-Sheets-rewrite)
       // to the new full-snapshot shape.
@@ -7909,25 +7923,24 @@ function buildQcReportMessage(campaignId) {
 // `opts.countryLabel` (optional, e.g. 'ES') annotates the header when a batch is being
 // sent as one of several country-split groups. Has no effect for PM batches.
 //
-// Per-item format (status-aware):
-//   N. Video name \u2014 Current Status
-//        Raw: <url|Drive>    \u2190 shown for Assigned / other
-//        Brief: <url|Notion>
-//     \u2014 OR \u2014 (For Review)
-//        Video: <url|Frame>
-//        Brief: <url|Notion>
-//     \u2014 OR \u2014 (Needs Revisions / Approved / CHQ statuses)
-//        Video: <url|Video>
+// Format: items with the same header are grouped under one header block.
+// Header: <@Recipient> \u2014 STATUS [from <@Sender>]  (status is UPPERCASE)
+// Each item:
+//   N. AssetName
+//       <url|Raw>
+//       <url|Brief>
 //
-// Missing URLs render as '\u2014'. Slack renders <url|label> as a clickable chip.
-// New per-item format. Each batch item renders its own header block:
-//   <@Recipient> \u2014 <Status> [from <@Sender>]
+// Link set per status:
+//   Assigned / In Progress  \u2192 Raw + Brief
+//   For Review              \u2192 Video + Brief
+//   Needs Revisions / Approved / CHQ statuses \u2192 Video only
 //
-//   <AssetName>
-//         <\u2026|Raw>
-//         <\u2026|Brief>
-// Items are concatenated with a blank line between them. Header recipient/sender
-// are computed per item from it.status + it.editor + it.category + it.country.
+// Recipient/sender per status:
+//   Assigned / In Progress          \u2192 editor (no sender)
+//   For Review                      \u2192 PM, sender = editor
+//   Needs Revisions / Approved      \u2192 editor, sender = PM
+//   CHQ For Review                  \u2192 category head, sender = editor
+//   CHQ Needs Revisions / Approved  \u2192 editor, sender = category head
 function buildBatchMessage(recipient, items, opts) {
   opts = opts || {};
   function rawLink(it)   { var u = extractSingleUrl(it.rawVideo);     return u ? '<' + u + '|Raw>'   : null; }
@@ -8666,6 +8679,18 @@ var App = {
     logAction('updated', 'Asset "' + a.name + '" date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     render();
   },
+  setAssetChDateApproved: function(id, newDate) {
+    var a = null;
+    for (var i = 0; i < STATE.assets.length; i++) if (STATE.assets[i].id === id) { a = STATE.assets[i]; break; }
+    if (!a) return;
+    var iso = toISODate(newDate);
+    if (a.chDateApproved === iso) { render(); return; }
+    var vhPre = snapshotAsset(a);
+    a.chDateApproved = iso;
+    pushVersion(a, vhPre, ['chDateApproved']);
+    logAction('updated', 'Asset "' + a.name + '" CH date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    render();
+  },
 
   // URL setters share the same shape: trim, no-op if unchanged, accept empty (clears the
   // link). Non-empty values must pass extractSingleUrl() \u2014 catches typos like "index"
@@ -8768,7 +8793,12 @@ var App = {
     if (old === newVal) { render(); return; }
     var vhPre = snapshotAsset(a);
     a.categoryHeadQc = newVal;
-    pushVersion(a, vhPre, ['categoryHeadQc']);
+    if (newVal === 'Approved') {
+      a.chDateApproved = todayISO();
+    } else {
+      a.chDateApproved = '';
+    }
+    pushVersion(a, vhPre, ['categoryHeadQc', 'chDateApproved']);
     var head = getCategoryHead(a.category) || 'no head';
     logAction('updated', 'Asset "' + a.name + '" category-head QC (' + head + '): ' + old + ' \u2192 ' + newVal);
     // Notification trigger: when transitioning INTO 'For Review', queue the
