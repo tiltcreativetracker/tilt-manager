@@ -6516,9 +6516,549 @@ function renderAutomationsView() {
       '</div>' +
     '</div>' +
 
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">📥</div><div><div class="auto-title">Import Campaigns & Assets</div><div class="auto-sub">load data from Google Sheets CSV export</div></div></div>' +
+      '<div class="auto-desc">Export your campaigns and assets from Google Sheets as CSV files, then import them here. The importer will skip any campaigns or assets that already exist (by name + country). New categories will be auto-created.</div>' +
+      '<button class="run-btn" style="margin-top:8px;" onclick="App.showImportModal()">📥 Open Import Modal</button>' +
+    '</div>' +
+
+    '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">📤</div><div><div class="auto-title">Export Campaigns & Assets</div><div class="auto-sub">download current state as CSV for backup</div></div></div>' +
+      '<div class="auto-desc">Download all campaigns and assets as a CSV file. Great for backup, reporting, or syncing back to Google Sheets. Two sections: campaigns first, then assets with campaign names.</div>' +
+      '<button class="run-btn" style="margin-top:8px;" onclick="App.exportToCSV()">📤 Download CSV</button>' +
+    '</div>' +
+
     '<div class="section-title">Live Activity Log</div>' +
     '<div class="auto-card"><div class="auto-desc" style="margin-bottom:12px">Every action in the creative tracker fires through the notification system. Open the browser console to see the raw payloads.</div><div class="log-list">' + logHtml + '</div></div>' +
   '</div></div>';
+}
+
+// ============================================================================
+// CSV Import/Export Functions
+// ============================================================================
+
+function parseCSV(csvText) {
+  var lines = csvText.trim().split('\n');
+  if (lines.length < 2) return { header: [], rows: [] };
+
+  var header = parseCSVLine(lines[0]);
+  var rows = lines.slice(1).map(function(line) {
+    var values = parseCSVLine(line);
+    var obj = {};
+    header.forEach(function(key, idx) {
+      obj[key] = values[idx] || '';
+    });
+    return obj;
+  });
+
+  return { header: header, rows: rows };
+}
+
+function parseCSVLine(line) {
+  var result = [];
+  var current = '';
+  var insideQuotes = false;
+
+  for (var i = 0; i < line.length; i++) {
+    var char = line[i];
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (char === ',' && !insideQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function validateCampaignRow(row) {
+  var errors = [];
+  if (!row.country) errors.push('Missing country');
+  if (!row.name) errors.push('Missing campaign name');
+  if (row.country && !['UK', 'IT', 'ES', 'US', 'PL'].includes(row.country)) {
+    errors.push('Invalid country: ' + row.country);
+  }
+  if (row.type && !['Paid Ads', 'Organic'].includes(row.type)) {
+    errors.push('Invalid type: ' + row.type);
+  }
+  return { isValid: errors.length === 0, errors: errors };
+}
+
+function validateAssetRow(row) {
+  var errors = [];
+  if (!row.campaignName) errors.push('Missing campaign name');
+  if (!row.name) errors.push('Missing asset name');
+  if (row.difficulty && !['Low', 'Moderate', 'High', 'Max'].includes(row.difficulty)) {
+    errors.push('Invalid difficulty: ' + row.difficulty);
+  }
+  if (row.editor && !['Zidni', 'Sharm', 'Patty', 'Elsa', ''].includes(row.editor)) {
+    errors.push('Invalid editor: ' + row.editor);
+  }
+  return { isValid: errors.length === 0, errors: errors };
+}
+
+function findOrCreateCategory(categoryName) {
+  if (!categoryName) return null;
+
+  var existing = STATE.categories.find(function(cat) {
+    return cat.name.toLowerCase() === categoryName.toLowerCase();
+  });
+
+  if (existing) return existing;
+
+  var colors = [
+    { bg: 'var(--pink-bg)', fg: 'var(--pink-text)' },
+    { bg: 'var(--blue-bg)', fg: 'var(--blue-text)' },
+    { bg: 'var(--gray-bg)', fg: 'var(--gray-text)' },
+    { bg: 'var(--amber-bg)', fg: 'var(--amber-text)' }
+  ];
+  var colorIdx = STATE.categories.length % colors.length;
+  var color = colors[colorIdx];
+
+  var newCat = {
+    name: categoryName,
+    bg: color.bg,
+    fg: color.fg
+  };
+  STATE.categories.push(newCat);
+  return newCat;
+}
+
+function findOrCreateCampaign(countryCode, campaignName) {
+  var existing = STATE.campaigns.find(function(camp) {
+    return camp.country === countryCode && camp.name.toLowerCase() === campaignName.toLowerCase();
+  });
+
+  if (existing) return existing.id;
+
+  var newId = 'c' + (++STATE.nextCampaignId);
+  var rank = (STATE.campaigns.filter(function(c) { return c.country === countryCode; }).length) + 1;
+
+  var newCamp = {
+    id: newId,
+    country: countryCode,
+    rank: rank,
+    name: campaignName,
+    brief: '',
+    driveId: '',
+    category: '',
+    type: 'Paid Ads',
+    slackOverride: '',
+    monthYear: '',
+    hideAssetLinkCols: false
+  };
+
+  STATE.campaigns.push(newCamp);
+  return newId;
+}
+
+function importCampaignsAndAssets(campaignsData, assetsData) {
+  var importedCampaigns = 0;
+  var skippedCampaigns = 0;
+  var importedAssets = 0;
+  var skippedAssets = 0;
+  var errors = [];
+
+  // Import campaigns
+  if (campaignsData.rows && campaignsData.rows.length > 0) {
+    campaignsData.rows.forEach(function(row, idx) {
+      var validation = validateCampaignRow(row);
+      if (!validation.isValid) {
+        errors.push('Campaign row ' + (idx + 2) + ': ' + validation.errors.join(', '));
+        return;
+      }
+
+      // Check for duplicate
+      var isDup = STATE.campaigns.some(function(c) {
+        return c.country === row.country && c.name.toLowerCase() === row.name.toLowerCase();
+      });
+
+      if (isDup) {
+        skippedCampaigns++;
+      } else {
+        var newId = 'c' + (++STATE.nextCampaignId);
+        var rank = (STATE.campaigns.filter(function(c) { return c.country === row.country; }).length) + 1;
+
+        STATE.campaigns.push({
+          id: newId,
+          country: row.country,
+          rank: rank,
+          name: row.name,
+          brief: row.brief || '',
+          driveId: row.driveId || '',
+          category: row.category || '',
+          type: row.type || 'Paid Ads',
+          slackOverride: row.slackOverride || '',
+          monthYear: row.monthYear || '',
+          hideAssetLinkCols: false
+        });
+        importedCampaigns++;
+      }
+    });
+  }
+
+  // Import assets
+  if (assetsData.rows && assetsData.rows.length > 0) {
+    assetsData.rows.forEach(function(row, idx) {
+      var validation = validateAssetRow(row);
+      if (!validation.isValid) {
+        errors.push('Asset row ' + (idx + 2) + ': ' + validation.errors.join(', '));
+        return;
+      }
+
+      // Find or create campaign
+      var campCountry = '';
+      var campId = '';
+      STATE.campaigns.forEach(function(c) {
+        if (c.name.toLowerCase() === row.campaignName.toLowerCase()) {
+          campCountry = c.country;
+          campId = c.id;
+        }
+      });
+
+      if (!campId) {
+        errors.push('Asset row ' + (idx + 2) + ': Campaign "' + row.campaignName + '" not found');
+        return;
+      }
+
+      // Check for duplicate
+      var isDup = STATE.assets.some(function(a) {
+        return a.campaignId === campId && a.name.toLowerCase() === row.name.toLowerCase();
+      });
+
+      if (isDup) {
+        skippedAssets++;
+      } else {
+        findOrCreateCategory(row.category);
+
+        var newAssetId = 'a' + (++STATE.nextAssetId);
+        var campaignAssetCount = STATE.assets.filter(function(a) { return a.campaignId === campId; }).length;
+        var pn = campaignAssetCount + 1;
+
+        var asset = mkAsset(
+          newAssetId,
+          pn,
+          campId,
+          row.name,
+          row.editor || '',
+          row.difficulty || 'Low',
+          row.estDelivery || ''
+        );
+
+        asset.category = row.category || 'LUXURY';
+        asset.status = row.status || (row.editor ? 'Assigned' : 'Draft');
+        asset.qc = row.qc || 'Draft';
+        asset.categoryHeadQc = row.categoryHeadQc || 'Draft';
+        asset.rawVideo = row.rawVideo || asset.rawVideo;
+        asset.editingBrief = row.editingBrief || asset.editingBrief;
+        asset.finalVideo = row.finalVideo || '';
+        if (row.dateApproved) asset.dateApproved = row.dateApproved;
+
+        STATE.assets.push(asset);
+        importedAssets++;
+      }
+    });
+  }
+
+  if (errors.length > 0) {
+    toast('Import errors:\n' + errors.join('\n'), 'error');
+    return false;
+  }
+
+  saveState();
+  toast('Imported ' + importedCampaigns + ' campaigns (' + skippedCampaigns + ' skipped), ' +
+        importedAssets + ' assets (' + skippedAssets + ' skipped)', 'success');
+  return true;
+}
+
+function exportToCSV() {
+  var lines = [];
+
+  // Export campaigns
+  lines.push('=== CAMPAIGNS ===');
+  lines.push('country,name,brief,driveId,category,type,monthYear');
+  STATE.campaigns.forEach(function(c) {
+    lines.push([
+      c.country,
+      c.name,
+      c.brief || '',
+      c.driveId || '',
+      c.category || '',
+      c.type || 'Paid Ads',
+      c.monthYear || ''
+    ].map(escapeCSVField).join(','));
+  });
+
+  lines.push('');
+  lines.push('=== ASSETS ===');
+  lines.push('campaignName,name,category,difficulty,editor,status,qc,categoryHeadQc,estDelivery,dateApproved,rawVideo,editingBrief,finalVideo');
+  STATE.assets.forEach(function(a) {
+    var campaign = STATE.campaigns.find(function(c) { return c.id === a.campaignId; });
+    var campaignName = campaign ? campaign.name : '?';
+    lines.push([
+      campaignName,
+      a.name,
+      a.category || '',
+      a.difficulty || '',
+      a.editor || '',
+      a.status || '',
+      a.qc || '',
+      a.categoryHeadQc || '',
+      a.estDelivery || '',
+      a.dateApproved || '',
+      a.rawVideo || '',
+      a.editingBrief || '',
+      a.finalVideo || ''
+    ].map(escapeCSVField).join(','));
+  });
+
+  var csvText = lines.join('\n');
+  var blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+  var link = document.createElement('a');
+  var url = URL.createObjectURL(blob);
+  var fileName = 'tilt-export-' + todayISO() + '.csv';
+  link.setAttribute('href', url);
+  link.setAttribute('download', fileName);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  toast('Exported campaigns and assets to ' + fileName, 'success');
+}
+
+function escapeCSVField(field) {
+  var str = String(field || '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function closeAllModals() {
+  var overlays = document.querySelectorAll('.modal-overlay');
+  overlays.forEach(function(o) {
+    if (o.id !== 'modal-overlay') {
+      o.remove();
+    }
+  });
+  closeModal();
+}
+
+function showImportModal() {
+  var html = '<div class="modal-overlay" onclick="if(event.target===this) closeAllModals();">' +
+    '<div class="modal" style="max-width:900px; max-height:90vh; overflow-y:auto;">' +
+      '<div class="modal-header">' +
+        '<h2>Import Google Sheet Campaigns (UK)</h2>' +
+        '<button class="close-btn" onclick="closeAllModals()">×</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<div style="margin-bottom:20px;">' +
+          '<p style="font-size:12px; color:var(--text2); margin-bottom:12px;">Export each Google Sheet tab as CSV (File → Download → CSV). Select all CSV files at once. Format: "Month Year - [Category] Name.csv" (e.g., "Apr \'26 Videos - [TCG] CardHalo.csv")</p>' +
+          '<input type="file" id="sheets-csv-input" accept=".csv" multiple onchange="App.handleSheetsCSVUpload(this)">' +
+          '<div id="sheets-preview" style="margin-top:10px;"></div>' +
+        '</div>' +
+        '<div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">' +
+          '<button class="cancel-btn" onclick="closeAllModals()">Cancel</button>' +
+          '<button class="primary-btn" id="import-btn" disabled onclick="App.executeSheetImport()">Import All</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Store for later use
+  window._importData = { sheets: [] };
+}
+
+function extractCampaignNameFromFilename(filename) {
+  // Parse "Apr '26 Videos - [TCG] CardHalo.csv" → { monthYear: "Apr '26", category: "TCG", name: "CardHalo" }
+  var nameWithoutExt = filename.replace(/\.csv$/i, '');
+  var match = nameWithoutExt.match(/^(.*?)\s*-\s*\[(.*?)\]\s*(.*?)$/);
+  if (match) {
+    return {
+      monthYear: match[1].trim(),
+      category: match[2].trim(),
+      campaignName: '[' + match[2].trim() + '] ' + match[3].trim()
+    };
+  }
+  return { monthYear: '', category: '', campaignName: nameWithoutExt };
+}
+
+function mapGoogleSheetRowToAsset(row, campaignId) {
+  // Map Google Sheet columns to asset fields
+  // Skip: Concepts, Variations, Raw Video File, Ad Status
+  var asset = {
+    pn: parseInt(row['PN #']) || 0,
+    name: row['Video Name'] || '',
+    category: row['Concepts'] ? row['Concepts'].replace(/\[.*?\]\s*/, '').trim() : 'LUXURY',
+    difficulty: 'Low',
+    editor: row['Editor'] || '',
+    status: row['Status'] ? (row['Status'].includes('Appro') ? 'Approved' : 'Draft') : 'Draft',
+    qc: 'Draft',
+    categoryHeadQc: 'Draft',
+    rawVideo: '',
+    editingBrief: row['Editing Brief'] || '',
+    finalVideo: row['Final Video'] || '',
+    estDelivery: '',
+    dateApproved: row['Date Approved'] ? toISODate(row['Date Approved']) : '',
+    campaignId: campaignId
+  };
+  return asset;
+}
+
+function handleSheetsCSVUpload(input) {
+  if (!input.files || input.files.length === 0) return;
+
+  window._importData.sheets = [];
+  var previewHtml = '';
+  var filesProcessed = 0;
+  var totalFiles = input.files.length;
+
+  Array.from(input.files).forEach(function(file, fileIdx) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var csvText = e.target.result;
+      var parsed = parseCSV(csvText);
+      var campaignInfo = extractCampaignNameFromFilename(file.name);
+      var validCount = 0;
+      var errorCount = 0;
+      var sheetPreview = '';
+
+      parsed.rows.forEach(function(row, rowIdx) {
+        // Basic validation: must have Video Name
+        if (!row['Video Name']) {
+          errorCount++;
+          sheetPreview += '<div style="color:var(--red-text); font-size:11px; margin-bottom:2px;">Row ' + (rowIdx + 2) + ': Missing Video Name</div>';
+        } else {
+          validCount++;
+        }
+      });
+
+      window._importData.sheets.push({
+        filename: file.name,
+        campaignInfo: campaignInfo,
+        parsed: parsed,
+        validCount: validCount,
+        errorCount: errorCount
+      });
+
+      previewHtml += '<div style="margin-bottom:12px; padding:10px; background:var(--bg3); border-radius:6px; border-left:3px solid ' +
+        (errorCount > 0 ? 'var(--red-text)' : 'var(--green-text)') + ';">' +
+        '<div style="font-weight:600; font-size:12px; margin-bottom:4px;">' + campaignInfo.campaignName + '</div>' +
+        '<div style="font-size:11px; color:var(--text2); margin-bottom:6px;">' + file.name + '</div>' +
+        '<div style="font-size:11px;"><strong>' + validCount + '</strong> videos' +
+        (errorCount > 0 ? ', <strong style="color:var(--red-text);">' + errorCount + ' errors</strong>' : '') + '</div>' +
+        (sheetPreview ? '<div style="margin-top:4px;">' + sheetPreview + '</div>' : '') +
+        '</div>';
+
+      filesProcessed++;
+      if (filesProcessed === totalFiles) {
+        document.getElementById('sheets-preview').innerHTML = previewHtml;
+        var allValid = window._importData.sheets.every(function(s) { return s.errorCount === 0; });
+        document.getElementById('import-btn').disabled = !allValid || window._importData.sheets.length === 0;
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+function executeSheetImport() {
+  if (!window._importData.sheets || window._importData.sheets.length === 0) {
+    toast('Please upload CSV files first', 'error');
+    return;
+  }
+
+  var importedCampaigns = 0;
+  var skippedCampaigns = 0;
+  var importedAssets = 0;
+  var errors = [];
+
+  // Process each sheet as a campaign
+  window._importData.sheets.forEach(function(sheet) {
+    var campaignInfo = sheet.campaignInfo;
+
+    // Check for duplicate campaign
+    var isDupCampaign = STATE.campaigns.some(function(c) {
+      return c.country === 'UK' && c.name.toLowerCase() === campaignInfo.campaignName.toLowerCase();
+    });
+
+    var campaignId;
+    if (isDupCampaign) {
+      skippedCampaigns++;
+      campaignId = STATE.campaigns.find(function(c) {
+        return c.country === 'UK' && c.name.toLowerCase() === campaignInfo.campaignName.toLowerCase();
+      }).id;
+    } else {
+      campaignId = 'c' + (++STATE.nextCampaignId);
+      var rank = (STATE.campaigns.filter(function(c) { return c.country === 'UK'; }).length) + 1;
+
+      STATE.campaigns.push({
+        id: campaignId,
+        country: 'UK',
+        rank: rank,
+        name: campaignInfo.campaignName,
+        brief: '',
+        driveId: '',
+        category: campaignInfo.category,
+        type: 'Paid Ads',
+        slackOverride: '',
+        monthYear: campaignInfo.monthYear,
+        hideAssetLinkCols: false
+      });
+      importedCampaigns++;
+    }
+
+    // Find or create category
+    findOrCreateCategory(campaignInfo.category);
+
+    // Process assets
+    sheet.parsed.rows.forEach(function(row, rowIdx) {
+      if (!row['Video Name']) return;
+
+      // Check for duplicate asset
+      var isDupAsset = STATE.assets.some(function(a) {
+        return a.campaignId === campaignId && a.name.toLowerCase() === row['Video Name'].toLowerCase();
+      });
+
+      if (isDupAsset) {
+        // Skip duplicate
+      } else {
+        var newAssetId = 'a' + (++STATE.nextAssetId);
+        var campaignAssetCount = STATE.assets.filter(function(a) { return a.campaignId === campaignId; }).length;
+        var pn = campaignAssetCount + 1;
+
+        var asset = mkAsset(
+          newAssetId,
+          pn,
+          campaignId,
+          row['Video Name'],
+          row['Editor'] || '',
+          'Low',
+          ''
+        );
+
+        asset.category = campaignInfo.category || 'LUXURY';
+        asset.editingBrief = row['Editing Brief'] || asset.editingBrief;
+        asset.finalVideo = row['Final Video'] || '';
+        if (row['Date Approved']) asset.dateApproved = toISODate(row['Date Approved']);
+        if (row['Status'] && row['Status'].includes('Appro')) asset.status = 'Approved';
+        if (row['Editor']) asset.status = 'Assigned';
+
+        STATE.assets.push(asset);
+        importedAssets++;
+      }
+    });
+  });
+
+  saveState();
+  toast('Imported ' + importedCampaigns + ' campaigns (' + skippedCampaigns + ' skipped), ' +
+        importedAssets + ' assets', 'success');
+  closeAllModals();
+  render();
 }
 
 function renderConfigView() {
@@ -10226,7 +10766,13 @@ var App = {
     saveState();
     logAction('updated', 'Slack workspace URL ' + (trimmed === '' ? 'cleared' : 'updated'));
   },
-  resetAllData: resetAllData
+  resetAllData: resetAllData,
+
+  // CSV Import/Export functions
+  showImportModal: showImportModal,
+  handleSheetsCSVUpload: handleSheetsCSVUpload,
+  executeSheetImport: executeSheetImport,
+  exportToCSV: exportToCSV
 };
 window.App = App;
 
