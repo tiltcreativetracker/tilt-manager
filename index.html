@@ -505,9 +505,10 @@
   .daily-pace-fill { position: absolute; top: 0; left: 0; bottom: 0; background: var(--green-text); border-radius: 2px; transition: width 0.4s ease-out; }
   .daily-pace-fill.behind { background: var(--amber-text); }
 
+  .today-board-scroll { overflow-x: auto; }
   .today-board {
-    display: grid; grid-template-columns: repeat(7, minmax(220px, 1fr)); gap: 12px;
-    align-items: start;
+    display: grid; grid-template-columns: repeat(7, minmax(200px, 1fr)); gap: 12px;
+    align-items: start; min-width: 1420px;
   }
   .today-col {
     background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
@@ -4648,7 +4649,6 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'editor') + '</td>' +
           '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
           '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
-          '<td><span class="sched-cell">' + (a.scheduledFor ? escapeHtml(formatDate(a.scheduledFor)) : '\u2014') + '</span>' + (a.released ? ' <span class="released-badge">\u2713 sent</span>' : '') + '</td>' +
           '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
           '<td>' + renderStatusSelect(a) + '</td>' +
@@ -4748,7 +4748,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -4773,14 +4773,10 @@ function renderSchedulerView() {
     '</div>';
   }).join('');
 
-  // Unscheduled = no scheduledFor AND not Approved AND not released. Includes Drafts so
-  // you can assign editor + ETA from one place.
+  // Show assets whose Estimated Delivery matches the selected planning date.
   var unscheduled = STATE.assets.filter(function(a) {
-    return !a.scheduledFor && !a.released && a.status !== 'Approved';
+    return a.estDelivery === dateStr && !a.released && a.status !== 'Approved';
   }).sort(function(a, b) {
-    var ea = a.estDelivery || '9999-99-99';
-    var eb = b.estDelivery || '9999-99-99';
-    if (ea !== eb) return ea < eb ? -1 : 1;
     return a.pn - b.pn;
   });
 
@@ -4793,7 +4789,7 @@ function renderSchedulerView() {
   };
 
   var rowsHtml = unscheduled.length === 0
-    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No unscheduled videos. Pick a date and assign editor + ETA on rows in the Campaigns tab to plan more work.</td></tr>'
+    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No videos with Estimated Delivery on ' + dateStr + '. Set the ETA on a video in the Campaigns tab to see it here.</td></tr>'
     : unscheduled.map(function(a) {
         var camp = findCampaignById(a.campaignId);
         var code = camp ? camp.country : '?';
@@ -5453,7 +5449,7 @@ function renderTodayView() {
         '<div class="today-total-per-country">' + chipsHtml + '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="today-board">' + colsHtml + '</div>' +
+    '<div class="today-board-scroll"><div class="today-board">' + colsHtml + '</div></div>' +
     '<div class="today-section-divider"></div>' +
     '<div class="today-head today-head-week">' +
       '<div><div class="today-title">This Week \u2014 ' + escapeHtml(weekLabel) + '</div>' +
