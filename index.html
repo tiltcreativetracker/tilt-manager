@@ -1358,6 +1358,8 @@ var Fb = {
       slackBotToken: STATE.slackBotToken,
       dailyThreads: STATE.dailyThreads,
       dailyThreadHistory: STATE.dailyThreadHistory,
+      catHeadDailyThreads: STATE.catHeadDailyThreads,
+      catHeadDailyThreadHistory: STATE.catHeadDailyThreadHistory,
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
@@ -1899,6 +1901,10 @@ var STATE = {
   dailyThreads: { Zidni: null, Sharm: null, Patty: null },
   // Last 7 archived per-editor threads, kept for audit / re-paste.
   dailyThreadHistory: { Zidni: [], Sharm: [], Patty: [] },
+  // One daily Slack thread per category (keyed by category name). CHQ batches
+  // for that category post as replies in the thread when set; otherwise webhook.
+  catHeadDailyThreads: {},
+  catHeadDailyThreadHistory: {},
   schedulerDate: todayISO(),
   schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
@@ -6340,10 +6346,50 @@ function renderAutomationsView() {
     '</div>';
   }
 
+  function renderCatHeadThreadCard() {
+    var today = todayISO();
+    var cats = Object.keys(CATEGORY_HEADS);
+    var rows = cats.map(function(cat) {
+      var head = CATEGORY_HEADS[cat];
+      var t = (STATE.catHeadDailyThreads && STATE.catHeadDailyThreads[cat]) || null;
+      var url = t ? t.url : '';
+      var dot = '', dotTitle = 'No thread set — falls back to webhook';
+      if (t) {
+        if (t.date === today) { dot = 'ok'; dotTitle = 'Thread set for today'; }
+        else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale)'; }
+      }
+      var hist = (STATE.catHeadDailyThreadHistory && STATE.catHeadDailyThreadHistory[cat]) || [];
+      var histHtml = hist.length === 0 ? '' :
+        '<div style="font-size:11px; color:var(--text3); margin-top:4px;">Recent: ' +
+        hist.slice(0, 3).map(function(h) {
+          return '<a href="' + escapeHtml(h.url) + '" target="_blank" style="color:var(--text3);">' + h.date + '</a>';
+        }).join(' · ') + '</div>';
+      var safeId = 'cat-thread-input-' + cat.replace(/\s+/g, '-');
+      return '<div style="margin-top:10px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+          '<span style="font-weight:600;font-size:13px;color:var(--text1);">' + escapeHtml(cat) + '</span>' +
+          '<span style="font-size:12px;color:var(--text3);">→ ' + escapeHtml(head) + '</span>' +
+          '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '" style="margin-left:auto;"></span>' +
+        '</div>' +
+        '<div class="webhook-row">' +
+          '<input type="text" id="' + safeId + '" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx" style="flex:1;">' +
+          '<button class="save-btn" onclick="App.saveCatHeadDailyThread(' + JSON.stringify(cat) + ')">Set</button>' +
+          (t ? '<button class="edit-btn" onclick="App.clearCatHeadDailyThread(' + JSON.stringify(cat) + ')" style="margin-left:4px;">Clear</button>' : '') +
+        '</div>' + histHtml +
+      '</div>';
+    }).join('');
+    return '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack threads (per category head)</div><div class="auto-sub">paste each category\'s daily thread URL — CHQ notifications post as replies</div></div></div>' +
+      '<div class="auto-desc">Each category has a daily thread for its category head. CHQ notifications (For Review, Needs Revisions, Approved) for that category post as thread replies. Falls back to the category head webhook when not set.</div>' +
+      rows +
+    '</div>';
+  }
+
   return '<div class="content"><div class="automation-panel">' +
     '<div class="section-title">Automations</div>' +
 
     renderDailyThreadCard() +
+    renderCatHeadThreadCard() +
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">01</div><div><div class="auto-title">Auto-reorder Campaigns by Rank</div><div class="auto-sub">trigger: Campaigns.Rank field updated</div></div></div>' +
@@ -6794,6 +6840,8 @@ function saveState() {
       slackBotToken: STATE.slackBotToken,
       dailyThreads: STATE.dailyThreads,
       dailyThreadHistory: STATE.dailyThreadHistory,
+      catHeadDailyThreads: STATE.catHeadDailyThreads,
+      catHeadDailyThreadHistory: STATE.catHeadDailyThreadHistory,
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       countries: STATE.countries,
       categories: STATE.categories,
@@ -7251,6 +7299,15 @@ function resolveDailyThreadForEditor(editor) {
   return t;
 }
 
+// Returns the daily-thread descriptor for a category IFF its date matches today.
+function resolveDailyThreadForCategory(category) {
+  var t = STATE.catHeadDailyThreads && STATE.catHeadDailyThreads[category];
+  if (!t) return null;
+  if (t.date !== todayISO()) return null;
+  if (!t.channelId || !t.threadTs) return null;
+  return t;
+}
+
 // POST a Slack chat.postMessage as a thread reply. Requires slackBotToken with
 // chat:write scope. Returns { ok, body, status } the same shape as postToSlack
 // so the caller can handle uniformly.
@@ -7285,7 +7342,6 @@ function sweepStaleDailyThreads() {
     var t = STATE.dailyThreads[editor];
     if (!t) return;
     if (t.date === today) return;
-    // Archive
     if (!STATE.dailyThreadHistory) STATE.dailyThreadHistory = {};
     if (!STATE.dailyThreadHistory[editor]) STATE.dailyThreadHistory[editor] = [];
     STATE.dailyThreadHistory[editor].unshift({ date: t.date, url: t.url });
@@ -7294,6 +7350,20 @@ function sweepStaleDailyThreads() {
     logAction('updated', 'Daily thread reset for ' + editor + ' (was ' + t.date + ')');
     changed = true;
   });
+  if (STATE.catHeadDailyThreads) {
+    Object.keys(STATE.catHeadDailyThreads).forEach(function(cat) {
+      var t = STATE.catHeadDailyThreads[cat];
+      if (!t) return;
+      if (t.date === today) return;
+      if (!STATE.catHeadDailyThreadHistory) STATE.catHeadDailyThreadHistory = {};
+      if (!STATE.catHeadDailyThreadHistory[cat]) STATE.catHeadDailyThreadHistory[cat] = [];
+      STATE.catHeadDailyThreadHistory[cat].unshift({ date: t.date, url: t.url });
+      while (STATE.catHeadDailyThreadHistory[cat].length > 7) STATE.catHeadDailyThreadHistory[cat].pop();
+      STATE.catHeadDailyThreads[cat] = null;
+      logAction('updated', 'Category head thread reset for ' + cat + ' (was ' + t.date + ')');
+      changed = true;
+    });
+  }
   return changed;
 }
 
@@ -7526,16 +7596,13 @@ function sendPendingBatch(editor, opts) {
   // Daily-thread path: when the recipient is an editor (or a CHQ batch whose items
   // share one editor) and that editor has a daily thread set for today plus a bot
   // token, POST as a thread reply via chat.postMessage instead of using the webhook.
-  var threadEditor = null;
+  var thread = null;
   if (EDITORS.indexOf(editor) >= 0) {
-    threadEditor = editor;
-  } else {
-    // CHQ:Category \u2014 only thread-post when every item shares the same editor.
-    var sharedEditor = windowItems[0] && windowItems[0].editor;
-    var allSame = sharedEditor && windowItems.every(function(it) { return it.editor === sharedEditor; });
-    if (allSame) threadEditor = sharedEditor;
+    thread = resolveDailyThreadForEditor(editor);
+  } else if (typeof editor === 'string' && editor.indexOf('CHQ:') === 0) {
+    var chqCategory = editor.slice(4);
+    thread = resolveDailyThreadForCategory(chqCategory);
   }
-  var thread = threadEditor ? resolveDailyThreadForEditor(threadEditor) : null;
   var useThread = !!thread;
 
   var url = resolveWebhookForEditor(editor, windowItems);
@@ -9716,6 +9783,40 @@ var App = {
     STATE.dailyThreads[editor] = null;
     saveState();
     logAction('updated', 'Cleared daily thread for ' + editor);
+    render();
+  },
+  saveCatHeadDailyThread: function(cat) {
+    if (!STATE.catHeadDailyThreads) STATE.catHeadDailyThreads = {};
+    var safeId = 'cat-thread-input-' + cat.replace(/\s+/g, '-');
+    var input = document.getElementById(safeId);
+    if (!input) return;
+    var url = (input.value || '').trim();
+    if (!url) {
+      STATE.catHeadDailyThreads[cat] = null;
+      saveState();
+      logAction('updated', 'Cleared category head thread for ' + cat);
+      toast('Cleared', 'success');
+      render();
+      return;
+    }
+    var parsed = parseSlackThreadUrl(url);
+    if (!parsed) { toast('Not a valid Slack thread URL', 'error'); return; }
+    STATE.catHeadDailyThreads[cat] = { date: todayISO(), url: url, channelId: parsed.channelId, threadTs: parsed.threadTs };
+    saveState();
+    logAction('updated', 'Category head thread set for ' + cat + ' (channel ' + parsed.channelId + ')');
+    toast('✓ Thread set for ' + cat, 'success');
+    render();
+  },
+  clearCatHeadDailyThread: function(cat) {
+    if (!STATE.catHeadDailyThreads || !STATE.catHeadDailyThreads[cat]) return;
+    var t = STATE.catHeadDailyThreads[cat];
+    if (!STATE.catHeadDailyThreadHistory) STATE.catHeadDailyThreadHistory = {};
+    if (!STATE.catHeadDailyThreadHistory[cat]) STATE.catHeadDailyThreadHistory[cat] = [];
+    STATE.catHeadDailyThreadHistory[cat].unshift({ date: t.date, url: t.url });
+    while (STATE.catHeadDailyThreadHistory[cat].length > 7) STATE.catHeadDailyThreadHistory[cat].pop();
+    STATE.catHeadDailyThreads[cat] = null;
+    saveState();
+    logAction('updated', 'Cleared category head thread for ' + cat);
     render();
   },
   saveBotToken: function() {
