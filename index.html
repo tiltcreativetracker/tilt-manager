@@ -7894,7 +7894,7 @@ function buildBatchMessage(recipient, items, opts) {
       default:
         recipientMention = editorM; break;
     }
-    var displayStatus = status.replace(' (Category Head)', '');
+    var displayStatus = status.replace(' (Category Head)', '').replace('Needs Revisions', 'NEED REVISIONS').toUpperCase();
     var headerText = recipientMention + ' \u2014 ' + displayStatus;
     if (senderMention) headerText += ' from ' + senderMention;
     return headerText;
@@ -7909,10 +7909,9 @@ function buildBatchMessage(recipient, items, opts) {
       if (r) lines.push(r);
       if (b) lines.push(b);
     } else if (status === 'For Review') {
-      var r2 = rawLink(it), b2 = briefLink(it), v = videoLink(it);
-      if (r2) lines.push(r2);
-      if (b2) lines.push(b2);
+      var b2 = briefLink(it), v = videoLink(it);
       if (v)  lines.push(v);
+      if (b2) lines.push(b2);
     } else {
       // Needs Revisions / Approved / all CHQ events \u2014 Video link only.
       var v2 = videoLink(it);
@@ -7934,22 +7933,12 @@ function buildBatchMessage(recipient, items, opts) {
 
   var blocks = groupOrder.map(function(header) {
     var group = groupMap[header];
-    if (group.length === 1) {
-      var it = group[0];
-      var name = it.name || '';
-      var links = linksFor(it);
-      var body = name;
-      if (links.length) {
-        body += '\n' + links.map(function(L, i) { return (i + 1) + '.' + L; }).join('\n');
-      }
-      return header + '\n\n' + body;
-    }
     var itemBlocks = group.map(function(it, idx) {
       var name = it.name || '';
       var links = linksFor(it);
-      var body = (idx + 1) + '.' + name;
+      var body = (idx + 1) + '. ' + name;
       if (links.length) {
-        body += '\n' + links.map(function(L) { return '-' + L; }).join('\n');
+        body += '\n' + links.map(function(L) { return '    ' + L; }).join('\n');
       }
       return body;
     });
