@@ -326,7 +326,7 @@
   /* ===================== TODAY KANBAN BOARD =====================
      Four columns, equal-width, horizontal scroll on narrow viewports. Cards are draggable
      between columns and moving a card changes the underlying status. */
-  .today-wrap { padding: 16px 20px 96px; overflow-y: auto; height: 100%; }
+  .today-wrap { padding: 16px 20px 96px; overflow: auto; height: 100%; }
   .today-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
   .today-title { font-size: 18px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; }
   .today-sub { font-size: 11.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
@@ -505,9 +505,10 @@
   .daily-pace-fill { position: absolute; top: 0; left: 0; bottom: 0; background: var(--green-text); border-radius: 2px; transition: width 0.4s ease-out; }
   .daily-pace-fill.behind { background: var(--amber-text); }
 
+  .today-board-scroll { overflow-x: auto; }
   .today-board {
-    display: grid; grid-template-columns: repeat(7, minmax(220px, 1fr)); gap: 12px;
-    align-items: start;
+    display: grid; grid-template-columns: repeat(7, minmax(200px, 1fr)); gap: 12px;
+    align-items: start; min-width: 1420px;
   }
   .today-col {
     background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
@@ -4648,7 +4649,6 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'editor') + '</td>' +
           '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
           '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
-          '<td><span class="sched-cell">' + (a.scheduledFor ? escapeHtml(formatDate(a.scheduledFor)) : '\u2014') + '</span>' + (a.released ? ' <span class="released-badge">\u2713 sent</span>' : '') + '</td>' +
           '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
           '<td>' + renderStatusSelect(a) + '</td>' +
@@ -4748,7 +4748,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Scheduled For</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -4773,10 +4773,12 @@ function renderSchedulerView() {
     '</div>';
   }).join('');
 
-  // Unscheduled = no scheduledFor AND not Approved AND not released. Includes Drafts so
-  // you can assign editor + ETA from one place.
+  // Show assets due on or before the selected date, excluding anything fully approved.
   var unscheduled = STATE.assets.filter(function(a) {
-    return !a.scheduledFor && !a.released && a.status !== 'Approved';
+    return a.estDelivery && a.estDelivery <= dateStr &&
+      !a.released &&
+      a.status !== 'Approved' &&
+      a.categoryHeadQc !== 'Approved';
   }).sort(function(a, b) {
     var ea = a.estDelivery || '9999-99-99';
     var eb = b.estDelivery || '9999-99-99';
@@ -4793,7 +4795,7 @@ function renderSchedulerView() {
   };
 
   var rowsHtml = unscheduled.length === 0
-    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No unscheduled videos. Pick a date and assign editor + ETA on rows in the Campaigns tab to plan more work.</td></tr>'
+    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No videos due on or before ' + dateStr + ' that still need work. Set ETAs in the Campaigns tab to see them here.</td></tr>'
     : unscheduled.map(function(a) {
         var camp = findCampaignById(a.campaignId);
         var code = camp ? camp.country : '?';
@@ -5453,7 +5455,7 @@ function renderTodayView() {
         '<div class="today-total-per-country">' + chipsHtml + '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="today-board">' + colsHtml + '</div>' +
+    '<div class="today-board-scroll"><div class="today-board">' + colsHtml + '</div></div>' +
     '<div class="today-section-divider"></div>' +
     '<div class="today-head today-head-week">' +
       '<div><div class="today-title">This Week \u2014 ' + escapeHtml(weekLabel) + '</div>' +
