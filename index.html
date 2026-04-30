@@ -6848,7 +6848,7 @@ function closeAllModals() {
 }
 
 function showImportModal() {
-  var html = '<div class="modal-overlay" onclick="if(event.target===this) closeAllModals();">' +
+  var html = '<div class="modal-overlay open" onclick="if(event.target===this) closeAllModals();">' +
     '<div class="modal" style="max-width:900px; max-height:90vh; overflow-y:auto;">' +
       '<div class="modal-header">' +
         '<h2>Import Google Sheet Campaigns (UK)</h2>' +
