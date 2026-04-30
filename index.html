@@ -6542,11 +6542,11 @@ function parseCSV(csvText) {
   if (lines.length < 2) return { header: [], rows: [] };
 
   // Skip empty rows and section header rows (like "Overview, Editing Space, etc.")
-  // Find the actual header row that contains "PN #" or "Video Name"
+  // Find the actual header row that contains BOTH "PN #" AND "Video Name"
   var headerIdx = 0;
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
-    if (line && (line.includes('PN #') || line.includes('Video Name'))) {
+    if (line && line.includes('PN #') && line.includes('Video Name')) {
       headerIdx = i;
       break;
     }
