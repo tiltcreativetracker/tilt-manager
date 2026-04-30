@@ -7209,7 +7209,7 @@ function groupItemsByCountry(items) {
 // Uses Slack's documented form-encoded mode so we can actually read the response.
 function postToSlack(url, text, threadTs) {
   var payload = { text: text };
-  if (threadTs) payload.thread_ts = threadTs;
+  if (threadTs) { payload.thread_ts = threadTs; payload.reply_broadcast = false; }
   var formBody = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   return fetch(url, {
     method: 'POST',
