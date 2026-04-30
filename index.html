@@ -4911,7 +4911,8 @@ function sortTodoBucketByEta(items) {
 //   PM Approved  : status === 'Approved' AND dateApproved === today
 //                  (today-only so column doesn't balloon; main counter uses same filter)
 //   CH Review    : categoryHeadQc === 'For Review' OR categoryHeadQc === 'Needs Revisions'
-//   CH Approved  : categoryHeadQc === 'Approved'
+//   CH Approved  : categoryHeadQc === 'Approved' AND dateApproved === today
+//                  (today-only, mirrors PM Approved so the column doesn't balloon)
 function getTodayBoardBuckets() {
   var today = todayISO();
   var buckets = {
@@ -4936,7 +4937,7 @@ function getTodayBoardBuckets() {
     // CH track (categoryHeadQc-based) \u2014 independent, so any asset can appear here too
     var chq = a.categoryHeadQc || 'Draft';
     if (chq === 'For Review' || chq === 'Needs Revisions') buckets.chReview.items.push(a);
-    else if (chq === 'Approved') buckets.chApproved.items.push(a);
+    else if (chq === 'Approved' && a.dateApproved === today) buckets.chApproved.items.push(a);
   });
   // Sort the To Do column by Estimated Delivery (soonest first), preserving manually-
   // dragged items and items without an ETA. Other columns keep their natural array order.
@@ -7894,7 +7895,7 @@ function buildBatchMessage(recipient, items, opts) {
         recipientMention = editorM; break;
     }
     var displayStatus = status.replace(' (Category Head)', '');
-    var headerText = recipientMention + ' \u2014 <' + displayStatus + '>';
+    var headerText = recipientMention + ' \u2014 ' + displayStatus;
     if (senderMention) headerText += ' from ' + senderMention;
     return headerText;
   }
@@ -7920,13 +7921,39 @@ function buildBatchMessage(recipient, items, opts) {
     return lines;
   }
 
-  var blocks = items.map(function(it) {
-    var header = headerFor(it);
-    var name = it.name || '';
-    var links = linksFor(it).map(function(L) { return '      ' + L; });
-    var block = header + '\n\n' + name;
-    if (links.length) block += ' \n' + links.join('\n');
-    return block;
+  // Group consecutive-or-not items by identical header so a batch with three
+  // Assigned items renders one header followed by a numbered list, instead of
+  // three repeating header blocks. Order of first appearance is preserved.
+  var groupOrder = [];
+  var groupMap = {};
+  items.forEach(function(it) {
+    var h = headerFor(it);
+    if (!groupMap[h]) { groupMap[h] = []; groupOrder.push(h); }
+    groupMap[h].push(it);
+  });
+
+  var blocks = groupOrder.map(function(header) {
+    var group = groupMap[header];
+    if (group.length === 1) {
+      var it = group[0];
+      var name = it.name || '';
+      var links = linksFor(it);
+      var body = name;
+      if (links.length) {
+        body += '\n' + links.map(function(L, i) { return (i + 1) + '.' + L; }).join('\n');
+      }
+      return header + '\n\n' + body;
+    }
+    var itemBlocks = group.map(function(it, idx) {
+      var name = it.name || '';
+      var links = linksFor(it);
+      var body = (idx + 1) + '.' + name;
+      if (links.length) {
+        body += '\n' + links.map(function(L) { return '-' + L; }).join('\n');
+      }
+      return body;
+    });
+    return header + '\n\n' + itemBlocks.join('\n\n');
   });
   return blocks.join('\n\n');
 }
