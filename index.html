@@ -5824,6 +5824,7 @@ function renderDailyLogView() {
           'Target: <b>' + target + '</b> approved videos per editor per day' +
         '</div>' +
       '</div>' +
+      '<button class="run-btn" style="margin-left:auto;white-space:nowrap;" onclick="App.exportDailyLog(' + weekOffset + ')" title="Export this week\'s log for all editors as CSV">\u{1F4E4} Export CSV</button>' +
       legend +
     '</div>' +
     '<div class="log-editor-bar">' +
@@ -6864,6 +6865,76 @@ function exportToCSV() {
   link.click();
   document.body.removeChild(link);
   toast('Exported campaigns and assets to ' + fileName, 'success');
+}
+
+// Export the Daily Log for the selected week as a CSV. One row per approved video
+// per editor, with a blank separator row between editors for readability.
+function exportDailyLogCSV(weekOffset) {
+  var offset = (typeof weekOffset === 'number') ? weekOffset : 0;
+  var days = getWorkdaysForOffset(offset);
+  var data = computeDailyLog(days);
+  var lines = [];
+
+  // Header
+  lines.push(['Editor', 'Day', 'Date', 'Video', 'Version', 'Campaign', 'Country', 'Category', 'Difficulty', 'Status', 'CH Head', 'CH QC', 'Final Video'].map(escapeCSVField).join(','));
+
+  DAILY_LOG_EDITORS.forEach(function(editor) {
+    var row = data[editor] || { videos: [], approvedByDay: days.map(function() { return 0; }) };
+    // Group by day
+    var videosByDay = days.map(function() { return []; });
+    row.videos.forEach(function(v) {
+      var dayIdx = days.indexOf(v.asset.dateApproved);
+      if (dayIdx >= 0) videosByDay[dayIdx].push(v.asset);
+    });
+
+    days.forEach(function(dayIso, dayIdx) {
+      var vids = videosByDay[dayIdx];
+      var d = new Date(dayIso + 'T12:00:00');
+      var dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+      if (vids.length === 0) {
+        lines.push([editor, dayName, dayIso, '', '', '', '', '', '', '', '', '', ''].map(escapeCSVField).join(','));
+      } else {
+        vids.forEach(function(a) {
+          var camp = findCampaignById(a.campaignId);
+          var version = (typeof deriveVersionFromName === 'function') ? deriveVersionFromName(a) : (a.version || 'V1');
+          lines.push([
+            editor,
+            dayName,
+            dayIso,
+            a.name || '',
+            version,
+            camp ? camp.name : '',
+            camp ? camp.country : '',
+            a.category || '',
+            a.difficulty || '',
+            a.status || '',
+            getCategoryHead(a.category) || '',
+            a.categoryHeadQc || '',
+            a.finalVideo || ''
+          ].map(escapeCSVField).join(','));
+        });
+      }
+    });
+    lines.push(''); // blank row between editors
+  });
+
+  var csvText = lines.join('\n');
+  var blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+  var link = document.createElement('a');
+  var url = URL.createObjectURL(blob);
+  // Filename: daily-log-YYYY-WNN.csv (ISO week number)
+  var weekStart = days[0];
+  var d0 = new Date(weekStart + 'T12:00:00');
+  var jan4 = new Date(d0.getFullYear(), 0, 4);
+  var weekNum = Math.ceil(((d0 - jan4) / 86400000 + jan4.getDay() + 1) / 7);
+  var fileName = 'daily-log-' + d0.getFullYear() + '-W' + (weekNum < 10 ? '0' + weekNum : weekNum) + '.csv';
+  link.setAttribute('href', url);
+  link.setAttribute('download', fileName);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  toast('Exported daily log to ' + fileName, 'success');
 }
 
 function escapeCSVField(field) {
@@ -8948,6 +9019,9 @@ var App = {
     if (isNaN(n) || n > 0) return;
     STATE.logWeekOffset = n;
     render();
+  },
+  exportDailyLog: function(offset) {
+    exportDailyLogCSV(parseInt(offset, 10) || 0);
   },
   setAssetStatus: function(id, newStatus) {
     var a = findAssetById(id);
