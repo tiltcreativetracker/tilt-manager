@@ -2015,11 +2015,11 @@ function getThisMonthRange() {
 
 // Like getThisMonthRange() but for any year/month (month is 0-indexed).
 function getMonthRange(year, month) {
-  var first = new Date(year, month, 1);
-  var last = new Date(year, month + 1, 0);
+  var first = new Date(Date.UTC(year, month, 1));
+  var last = new Date(Date.UTC(year, month + 1, 0));
   function fmt(d) {
-    var mm = d.getMonth() + 1, dd = d.getDate();
-    return d.getFullYear() + '-' + (mm < 10 ? '0' + mm : mm) + '-' + (dd < 10 ? '0' + dd : dd);
+    var mm = d.getUTCMonth() + 1, dd = d.getUTCDate();
+    return d.getUTCFullYear() + '-' + (mm < 10 ? '0' + mm : mm) + '-' + (dd < 10 ? '0' + dd : dd);
   }
   var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   return { start: fmt(first), end: fmt(last), year: year, month: month, label: MONTH_LONG[month] + ' ' + year };
