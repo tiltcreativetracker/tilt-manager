@@ -7049,12 +7049,17 @@ function handleSheetsCSVUpload(input) {
         errorCount: errorCount
       });
 
+      var videoColName = getCol(parsed.rows[0] || {}, ['Final Video', 'Video']) ? (parsed.header.find(function(h) { return h === 'Final Video' || h.toLowerCase() === 'final video'; }) || parsed.header.find(function(h) { return h === 'Video' || h.toLowerCase() === 'video'; }) || '?') : null;
+      var videoLinkCount = parsed.rows.filter(function(r) { return getCol(r, ['Final Video', 'Video']); }).length;
       previewHtml += '<div style="margin-bottom:12px; padding:10px; background:var(--bg3); border-radius:6px; border-left:3px solid ' +
         (errorCount > 0 ? 'var(--red-text)' : 'var(--green-text)') + ';">' +
         '<div style="font-weight:600; font-size:12px; margin-bottom:4px;">' + campaignInfo.campaignName + '</div>' +
         '<div style="font-size:11px; color:var(--text2); margin-bottom:6px;">' + file.name + '</div>' +
         '<div style="font-size:11px;"><strong>' + validCount + '</strong> videos' +
         (errorCount > 0 ? ', <strong style="color:var(--red-text);">' + errorCount + ' errors</strong>' : '') + '</div>' +
+        (videoColName
+          ? '<div style="font-size:11px; color:var(--green-text); margin-top:4px;">✓ Video links detected (' + videoLinkCount + '/' + validCount + ' rows) from column "' + escapeHtml(videoColName) + '"</div>'
+          : '<div style="font-size:11px; color:var(--amber-text); margin-top:4px;">⚠ No video link column found — columns: ' + escapeHtml(parsed.header.join(', ')) + '</div>') +
         (sheetPreview ? '<div style="margin-top:4px;">' + sheetPreview + '</div>' : '') +
         '</div>';
 
