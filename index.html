@@ -3165,7 +3165,7 @@ function findCategory(name) {
 // category isn't in STATE.categories (e.g. legacy data with a name that was since deleted).
 function categoryColor(name) {
   var cat = findCategory(name);
-  if (cat) return cat.color;
+  if (cat) return cat.color || { bg: cat.bg || 'var(--bg4)', fg: cat.fg || 'var(--text2)' };
   return { bg: 'var(--bg4)', fg: 'var(--text2)' };
 }
 
@@ -7557,6 +7557,12 @@ function loadState() {
       if (STATE.editorSlackChannels[e] === undefined) STATE.editorSlackChannels[e] = '';
       if (!STATE.editorSlackIds) STATE.editorSlackIds = {};
       if (STATE.editorSlackIds[e] === undefined) STATE.editorSlackIds[e] = '';
+    });
+    // Backfill categories created before the color sub-object was added.
+    (STATE.categories || []).forEach(function(cat) {
+      if (!cat.color && (cat.bg || cat.fg)) {
+        cat.color = { bg: cat.bg || 'var(--bg4)', fg: cat.fg || 'var(--text2)' };
+      }
     });
     // Auto-seed category-head Slack IDs (one per unique head listed in CATEGORY_HEADS).
     if (!STATE.categoryHeadSlackIds) STATE.categoryHeadSlackIds = {};
