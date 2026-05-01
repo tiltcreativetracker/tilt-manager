@@ -7075,7 +7075,7 @@ function executeSheetImport() {
 
         asset.category = campaignInfo.category || 'LUXURY';
         asset.editingBrief = row['Editing Brief'] || asset.editingBrief;
-        asset.finalVideo = row['Final Video'] || '';
+        asset.finalVideo = row['Final Video'] || row['Video'] || '';
         if (row['Date Approved']) asset.dateApproved = toISODate(row['Date Approved']);
         if (row['Status'] && row['Status'].includes('Appro')) asset.status = 'Approved';
         if (row['Editor']) asset.status = 'Assigned';
