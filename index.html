@@ -620,11 +620,16 @@
     min-width: 280px; max-width: 360px;
     max-height: 420px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 6px;
-    padding: 6px; background: var(--bg1);
-    border: 1px solid var(--border); border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    padding: 6px;
+    background: rgba(18, 16, 36, 0.72);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(127,119,221,0.28); border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(127,119,221,0.08);
     z-index: 20;
   }
+  .cal-group { background: rgba(127,119,221,0.07); border-radius: 5px; padding: 5px 6px; display: flex; flex-direction: column; gap: 3px; }
+  .cal-group-head { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text2); padding-bottom: 3px; border-bottom: 1px solid rgba(127,119,221,0.15); }
+  .cal-group-item:hover { background: rgba(127,119,221,0.12); }
   .cal-group {
     background: var(--bg2); border-radius: 4px; padding: 5px 6px;
     display: flex; flex-direction: column; gap: 3px;
@@ -4594,10 +4599,10 @@ function renderTopbar() {
   Object.keys(TAB_DEFS).forEach(function(k) { if (order.indexOf(k) < 0) order.push(k); });
   // Drop any stale ids that no longer exist.
   order = order.filter(function(k) { return TAB_DEFS[k]; });
-  // Migration: ensure editingCalendar sits after log (not before notifications).
+  // Migration: always place editingCalendar immediately after log.
   (function() {
     var ec = order.indexOf('editingCalendar'), lg = order.indexOf('log');
-    if (ec >= 0 && lg >= 0 && ec < lg) {
+    if (ec >= 0 && lg >= 0 && ec !== lg + 1) {
       order.splice(ec, 1);
       lg = order.indexOf('log');
       order.splice(lg + 1, 0, 'editingCalendar');
