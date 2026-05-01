@@ -446,7 +446,7 @@
   .month-panel-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
   .month-panel-title { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); }
   .month-panel-month { font-size: 18px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; }
-  .tally-month-select { font-size: 17px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-family: inherit; outline: none; appearance: none; -webkit-appearance: none; }
+  .tally-month-select { font-size: 12px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-family: inherit; outline: none; appearance: none; -webkit-appearance: none; }
   .tally-month-select:hover { border-color: var(--accent); }
   .month-panel-pace { margin-left: auto; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; color: var(--text3); display: inline-flex; align-items: center; gap: 6px; }
   .month-panel-pace .pace-dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -5326,7 +5326,7 @@ function renderMonthPanel() {
   var availableMonths = getAvailableTallyMonths();
   var dropdownHtml = '<select class="tally-month-select" onchange="window._tallyMonthKey=this.value;render();" onclick="event.stopPropagation();">' +
     availableMonths.map(function(mo) {
-      var key = mo.year + '-' + (mo.month < 9 ? '0' + (mo.month + 1) : '' + (mo.month + 1));
+      var key = mo.year + '-' + (mo.month < 9 ? '0' : '') + (mo.month + 1);
       return '<option value="' + key + '"' + (key === selectedKey ? ' selected' : '') + '>' +
         escapeHtml(mo.label) + (key === currentKey ? ' \u25C6' : '') + '</option>';
     }).join('') +
@@ -6978,6 +6978,8 @@ function extractCampaignNameFromFilename(filename) {
 }
 
 // Case-insensitive column lookup — tries each name in order, first non-empty wins.
+// Also matches columns whose name STARTS WITH the search term, so "Final Video (Frame.io Link)"
+// matches a search for "Final Video".
 function getCol(row, names) {
   for (var i = 0; i < names.length; i++) {
     var direct = row[names[i]];
@@ -6985,7 +6987,8 @@ function getCol(row, names) {
     var lower = names[i].toLowerCase();
     var keys = Object.keys(row);
     for (var j = 0; j < keys.length; j++) {
-      if (keys[j].trim().toLowerCase() === lower && row[keys[j]]) return row[keys[j]];
+      var keyLower = keys[j].trim().toLowerCase();
+      if ((keyLower === lower || keyLower.indexOf(lower) === 0) && row[keys[j]]) return row[keys[j]];
     }
   }
   return '';
