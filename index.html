@@ -558,48 +558,69 @@
     display: flex; flex-direction: column; gap: 4px;
     border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
     min-height: 110px;
+    position: relative;
   }
+  .cal-cell-details[open] { z-index: 20; }
   .cal-cell-other-month .cal-cell-num { color: var(--text3); opacity: 0.4; }
   .cal-cell-num {
     font-size: 12px; font-weight: 500; color: var(--text2);
     padding: 4px 6px 2px; line-height: 1;
   }
   .cal-cell-today .cal-cell-num { color: var(--accent); font-weight: 700; }
-  .cal-cell-details { width: 100%; }
+  .cal-cell-details { width: 100%; position: relative; }
   .cal-cell-summary {
     list-style: none; cursor: pointer;
-    display: flex; align-items: center; gap: 6px;
-    padding: 5px 6px; border-radius: 5px;
-    background: var(--bg2); border: 1px solid transparent;
-    transition: background 0.12s, border-color 0.12s;
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 0; border-radius: 4px;
+    transition: background 0.12s;
   }
   .cal-cell-summary::-webkit-details-marker { display: none; }
-  .cal-cell-summary:hover { background: var(--bg3); border-color: var(--border); }
-  .cal-cell-summary .cal-cell-num { padding: 0; flex-shrink: 0; }
-  .cal-cell-count {
-    font-size: 10.5px; font-family: 'JetBrains Mono', monospace; font-weight: 600;
-    background: var(--bg4); color: var(--text2);
-    padding: 1px 6px; border-radius: 9px; min-width: 18px; text-align: center;
+  .cal-cell-summary-top {
+    display: flex; align-items: center; gap: 6px;
   }
-  .cal-cell-summary-label {
-    font-size: 10.5px; color: var(--text3);
+  .cal-cell-count {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 600;
+    background: var(--bg3); color: var(--text2);
+    padding: 1px 5px; border-radius: 8px;
+  }
+  .cal-cell-bars { display: flex; flex-direction: column; gap: 3px; }
+  .cal-bar {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--bg2); border-radius: 4px;
+    padding: 4px 6px; font-size: 11px; overflow: hidden;
+    border-left: 2px solid var(--text3);
+    transition: background 0.1s;
+  }
+  .cal-bar:hover { background: var(--bg3); }
+  .cal-bar-approved { border-left-color: #5fbf6f; background: rgba(95,191,111,0.08); }
+  .cal-bar-approved:hover { background: rgba(95,191,111,0.15); }
+  .cal-bar .country-flag { width: 16px; height: 11px; font-size: 7.5px; flex-shrink: 0; }
+  .cal-bar-name {
+    font-weight: 600; color: var(--text1);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex: 1; min-width: 0;
   }
-  .cal-cell-chevron {
-    font-size: 10px; color: var(--text3); transition: transform 0.15s;
-    flex-shrink: 0;
+  .cal-bar-meta {
+    font-size: 10px; color: var(--text3);
+    white-space: nowrap; flex-shrink: 0;
   }
-  .cal-cell-details[open] .cal-cell-chevron { transform: rotate(180deg); }
-  .cal-cell-details[open] .cal-cell-summary {
-    background: var(--bg3); border-color: var(--border);
-    border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+  .cal-bar-count {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    color: var(--text3); flex-shrink: 0;
   }
+  .cal-bar-more {
+    font-size: 10.5px; color: var(--text3); padding: 2px 4px;
+  }
+  .cal-cell-details[open] .cal-cell-summary { opacity: 0.8; }
   .cal-groups {
+    position: absolute; top: calc(100% + 2px); left: 0;
+    min-width: 280px; max-width: 360px;
+    max-height: 420px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 6px;
     padding: 6px; background: var(--bg1);
-    border: 1px solid var(--border); border-top: none;
-    border-bottom-left-radius: 5px; border-bottom-right-radius: 5px;
+    border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    z-index: 20;
   }
   .cal-group {
     background: var(--bg2); border-radius: 4px; padding: 5px 6px;
@@ -5844,13 +5865,14 @@ function renderEditingCalendarView() {
     return groups;
   }
 
-  function renderGroupedDropdown(entries) {
+  // Popover body: full grouped list, rendered as absolute popover.
+  function renderGroupedPopover(entries, dateIso) {
     var groups = groupByCampaignEditor(entries);
     var groupsHtml = groups.map(function(g) {
       var itemsHtml = g.assets.map(function(a) {
         var isApproved = (a.status === 'Approved');
         return '<div class="cal-group-item ' + (isApproved ? 'cal-group-item-approved' : '') + '" ' +
-            'onclick="App.editAssetById(\'' + a.id + '\')" ' +
+            'onclick="event.stopPropagation();App.editAssetById(\'' + a.id + '\')" ' +
             'title="' + escapeHtml(a.name) + (isApproved ? ' — Approved' : '') + '">' +
           '<span class="cal-group-item-name">' + escapeHtml(a.name) + '</span>' +
           (isApproved ? '<span class="cal-group-item-tag">✓</span>' : '') +
@@ -5867,11 +5889,34 @@ function renderEditingCalendarView() {
         '<div class="cal-group-items">' + itemsHtml + '</div>' +
       '</div>';
     }).join('');
-    return '<div class="cal-groups">' + groupsHtml + '</div>';
+    return '<div class="cal-groups" onclick="event.stopPropagation()">' + groupsHtml + '</div>';
   }
 
-  // Build 6 rows x 7 cols = 42 cells. Each cell with entries is a <details>
-  // dropdown — summary shows the count, body lists assets grouped by campaign + editor.
+  // Campaign bars shown inline in the cell — always visible, scannable.
+  // Shows up to MAX_BARS campaign-editor groups; overflow becomes a "+N more" chip.
+  var MAX_BARS = 3;
+  function renderCampaignBars(groups, totalEntries) {
+    var visible = groups.slice(0, MAX_BARS);
+    var hidden = groups.length - visible.length;
+    var barsHtml = visible.map(function(g) {
+      var allApproved = g.assets.every(function(a) { return a.status === 'Approved'; });
+      return '<div class="cal-bar' + (allApproved ? ' cal-bar-approved' : '') + '" ' +
+          'title="' + escapeHtml(g.campName) + ' · ' + escapeHtml(g.editor) + ' (' + g.assets.length + ')">' +
+        (g.country ? '<div class="country-flag flag-' + g.country + '">' + g.country + '</div>' : '') +
+        '<span class="cal-bar-name">' + escapeHtml(g.campName) + '</span>' +
+        '<span class="cal-bar-meta">' + escapeHtml(g.editor) + '</span>' +
+        '<span class="cal-bar-count">' + g.assets.length + '</span>' +
+      '</div>';
+    }).join('');
+    if (hidden > 0) {
+      barsHtml += '<div class="cal-bar-more">+' + hidden + ' more</div>';
+    }
+    return barsHtml;
+  }
+
+  // Build 6 rows x 7 cols = 42 cells.
+  // Each cell shows campaign bars inline (always visible) plus a <details> popover
+  // that floats above the grid when opened.
   var cellsHtml = '';
   for (var i = 0; i < 42; i++) {
     var d = new Date(gridStart.getTime() + i * 86400000);
@@ -5886,18 +5931,18 @@ function renderEditingCalendarView() {
     if (entries.length === 0) {
       bodyHtml = '<div class="cal-cell-num">' + dayLabel + '</div>';
     } else {
-      var groupCount = groupByCampaignEditor(entries).length;
-      var summaryLabel = entries.length + ' video' + (entries.length === 1 ? '' : 's') +
-        ' · ' + groupCount + ' group' + (groupCount === 1 ? '' : 's');
+      var groups = groupByCampaignEditor(entries);
+      var barsHtml = renderCampaignBars(groups, entries.length);
       bodyHtml =
         '<details class="cal-cell-details">' +
           '<summary class="cal-cell-summary">' +
-            '<span class="cal-cell-num">' + dayLabel + '</span>' +
-            '<span class="cal-cell-count">' + entries.length + '</span>' +
-            '<span class="cal-cell-summary-label">' + summaryLabel + '</span>' +
-            '<span class="cal-cell-chevron">▾</span>' +
+            '<div class="cal-cell-summary-top">' +
+              '<span class="cal-cell-num">' + dayLabel + '</span>' +
+              '<span class="cal-cell-count">' + entries.length + '</span>' +
+            '</div>' +
+            '<div class="cal-cell-bars">' + barsHtml + '</div>' +
           '</summary>' +
-          renderGroupedDropdown(entries) +
+          renderGroupedPopover(entries, dIso) +
         '</details>';
     }
 
