@@ -446,6 +446,8 @@
   .month-panel-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
   .month-panel-title { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); }
   .month-panel-month { font-size: 18px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; }
+  .tally-month-select { font-size: 17px; font-weight: 700; color: var(--text1); letter-spacing: -0.3px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-family: inherit; outline: none; appearance: none; -webkit-appearance: none; }
+  .tally-month-select:hover { border-color: var(--accent); }
   .month-panel-pace { margin-left: auto; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; color: var(--text3); display: inline-flex; align-items: center; gap: 6px; }
   .month-panel-pace .pace-dot { width: 7px; height: 7px; border-radius: 50%; }
   .month-panel-pace.on-track .pace-dot { background: var(--green-text); box-shadow: 0 0 6px var(--green-text); }
@@ -2005,6 +2007,40 @@ function getThisMonthRange() {
   };
 }
 
+// Like getThisMonthRange() but for any year/month (month is 0-indexed).
+function getMonthRange(year, month) {
+  var first = new Date(year, month, 1);
+  var last = new Date(year, month + 1, 0);
+  function fmt(d) {
+    var mm = d.getMonth() + 1, dd = d.getDate();
+    return d.getFullYear() + '-' + (mm < 10 ? '0' + mm : mm) + '-' + (dd < 10 ? '0' + dd : dd);
+  }
+  var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return { start: fmt(first), end: fmt(last), year: year, month: month, label: MONTH_LONG[month] + ' ' + year };
+}
+
+// Returns months from the oldest approved asset to the current month, newest first.
+function getAvailableTallyMonths() {
+  var now = new Date();
+  var cy = now.getFullYear(), cm = now.getMonth();
+  var earliest = null;
+  STATE.assets.forEach(function(a) {
+    if (a.status === 'Approved' && a.dateApproved && (!earliest || a.dateApproved < earliest)) earliest = a.dateApproved;
+  });
+  var sy, sm;
+  if (earliest) {
+    var d = new Date(earliest + 'T12:00:00');
+    sy = d.getFullYear(); sm = d.getMonth();
+  } else { sy = cy; sm = cm; }
+  var months = [];
+  var y = sy, m = sm;
+  while (y < cy || (y === cy && m <= cm)) {
+    months.push(getMonthRange(y, m));
+    m++; if (m > 11) { m = 0; y++; }
+  }
+  return months.reverse();
+}
+
 // Count approvals whose dateApproved lies inside a [startISO, endISO] range (inclusive).
 // Only counts assets currently in Approved status (so items that were Approved then
 // moved back to Needs Revisions don't inflate the tally).
@@ -2058,8 +2094,8 @@ function countWorkdays(startISO, endISO) {
 // stub). Each row has { label, start, end, approvals, isCurrent, isFuture }.
 // This matches the user's mental model of "every Friday add up the week's
 // confirmed approvals."
-function getMonthlyWeeklyBreakdown(filterFn) {
-  var range = getThisMonthRange();
+function getMonthlyWeeklyBreakdown(filterFn, mr) {
+  var range = mr || getThisMonthRange();
   var today = todayISO();
   var MONTH_SHORT_LOCAL = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fmtISO(d) {
@@ -5226,35 +5262,50 @@ function classifyMonthPace(actual, expected, target) {
 }
 
 function renderMonthPanel() {
-  var mr = getThisMonthRange();
+  var now = new Date();
+  var cy = now.getFullYear(), cm = now.getMonth();
+  var currentKey = cy + '-' + (cm < 9 ? '0' + (cm + 1) : '' + (cm + 1));
+  var selectedKey = window._tallyMonthKey || currentKey;
+  var isCurrentMonth = selectedKey === currentKey;
+
+  var parts = selectedKey.split('-');
+  var mr = getMonthRange(parseInt(parts[0]), parseInt(parts[1]) - 1);
+
   var today = todayISO();
-  // The 200/month goal is scoped to UK Paid Ads. Organic and non-UK approvals
-  // are tracked in a separate sub-tally with no target.
   var approved = countApprovedInRange(mr.start, mr.end, isPaidAdsUKApproval);
   var organicApproved = countApprovedInRange(mr.start, mr.end, isOrganicApproval);
   var target = MONTHLY_APPROVAL_TARGET;
   var pct = Math.min(100, Math.round((approved / target) * 100));
   var totalWorkdays = countWorkdays(mr.start, mr.end);
-  var elapsedWorkdays = countWorkdays(mr.start, today < mr.end ? today : mr.end);
-  var expected = totalWorkdays > 0 ? Math.round(target * elapsedWorkdays / totalWorkdays) : target;
-  var pace = classifyMonthPace(approved, expected, target);
-  var paceLabel = pace === 'ahead' ? 'Ahead of pace'
-               : pace === 'on-track' ? 'On pace'
-               : pace === 'behind' ? 'Behind pace'
-               : 'At risk';
-  var remaining = Math.max(0, target - approved);
-  var daysLeft = countWorkdays(today > mr.start ? today : mr.start, mr.end);
-  // "Days left" includes today; subtract 1 to get weekdays remaining AFTER today, clamped to 0.
-  var daysLeftAfterToday = Math.max(0, daysLeft - 1);
-  // Pace is expressed as fixed targets (not derived from remaining/time). 10 videos
-  // per workday, and the month's workday count (20\u201323 depending on the month) acts
-  // as the weekly figure since that's how the team plans capacity.
   var dailyGoal = DAILY_APPROVAL_TARGET;
   var weeklyGoal = totalWorkdays;
 
-  // Per-week chips. Fridays (plus the month's trailing stub) each get a chip.
-  // Filter matches the main progress: UK Paid Ads only.
-  var weeks = getMonthlyWeeklyBreakdown(isPaidAdsUKApproval);
+  var pace, expected, paceOrFinalHtml, remainingSuffix;
+  if (isCurrentMonth) {
+    var elapsedWorkdays = countWorkdays(mr.start, today < mr.end ? today : mr.end);
+    expected = totalWorkdays > 0 ? Math.round(target * elapsedWorkdays / totalWorkdays) : target;
+    pace = classifyMonthPace(approved, expected, target);
+    var paceLabel = pace === 'ahead' ? 'Ahead of pace'
+                 : pace === 'on-track' ? 'On pace'
+                 : pace === 'behind' ? 'Behind pace'
+                 : 'At risk';
+    paceOrFinalHtml = '<span class="month-panel-pace ' + pace + '"><span class="pace-dot"></span>' + paceLabel + '</span>';
+    var daysLeft = countWorkdays(today > mr.start ? today : mr.start, mr.end);
+    var daysLeftAfterToday = Math.max(0, daysLeft - 1);
+    var remaining = Math.max(0, target - approved);
+    remainingSuffix = remaining === 0
+      ? 'Goal reached \uD83C\uDF89'
+      : (daysLeftAfterToday === 0
+          ? 'Last day \u2014 ' + remaining + ' to go'
+          : remaining + ' to go \u00B7 ' + dailyGoal + '/day \u00B7 ' + weeklyGoal + '/week');
+  } else {
+    expected = target;
+    pace = approved >= target ? 'ahead' : 'behind';
+    paceOrFinalHtml = '<span class="month-panel-pace ' + pace + '"><span class="pace-dot"></span>' + (approved >= target ? 'Goal met' : 'Goal not met') + '</span>';
+    remainingSuffix = approved >= target ? 'Goal reached' : (target - approved) + ' short of goal';
+  }
+
+  var weeks = getMonthlyWeeklyBreakdown(isPaidAdsUKApproval, mr);
   var weekChipsHtml = weeks.map(function(w) {
     var cls = 'month-week-chip' + (w.isCurrent ? ' is-current' : '') + (w.isFuture ? ' is-future' : '');
     return '<div class="' + cls + '" title="' + escapeHtml(w.start + ' \u2192 ' + w.end) + '">' +
@@ -5263,19 +5314,19 @@ function renderMonthPanel() {
     '</div>';
   }).join('');
 
-  // Expected-pace marker on the progress bar (shown as a thin vertical line at the
-  // expected-% position, so the user can see if they're above or below the line).
   var expectedPct = Math.min(100, Math.round((expected / target) * 100));
   var markerHtml = '<div class="month-progress-marker" style="left: ' + expectedPct + '%;" title="Expected at this point: ' + expected + '"></div>';
 
-  var remainingSuffix = remaining === 0
-    ? 'Goal reached \uD83C\uDF89'
-    : (daysLeftAfterToday === 0
-        ? 'Last day \u2014 ' + remaining + ' to go'
-        : remaining + ' to go \u00B7 ' + dailyGoal + '/day \u00B7 ' + weeklyGoal + '/week');
+  var availableMonths = getAvailableTallyMonths();
+  var dropdownHtml = '<select class="tally-month-select" onchange="window._tallyMonthKey=this.value;render();" onclick="event.stopPropagation();">' +
+    availableMonths.map(function(mo) {
+      var key = mo.year + '-' + (mo.month < 9 ? '0' + (mo.month + 1) : '' + (mo.month + 1));
+      return '<option value="' + key + '"' + (key === selectedKey ? ' selected' : '') + '>' +
+        escapeHtml(mo.label) + (key === currentKey ? ' \u25C6' : '') + '</option>';
+    }).join('') +
+  '</select>';
 
-  // Organic aside \u2014 no monthly target, just a running count so Organic work stays visible.
-  var organicAsideHtml = '<div class="month-organic-aside" title="Organic approvals this month \u2014 tracked separately from the ' + target + '-video UK Paid Ads goal.">' +
+  var organicAsideHtml = '<div class="month-organic-aside" title="Organic approvals \u2014 tracked separately from the ' + target + '-video UK Paid Ads goal.">' +
     '<span class="month-organic-label">Organic this month</span>' +
     '<span class="month-organic-num">' + organicApproved + '</span>' +
     '<span class="month-organic-sub">no target</span>' +
@@ -5284,8 +5335,8 @@ function renderMonthPanel() {
   return '<div class="month-panel">' +
     '<div class="month-panel-head">' +
       '<span class="month-panel-title">Monthly tally \u00B7 UK Paid Ads</span>' +
-      '<span class="month-panel-month">' + escapeHtml(mr.label) + '</span>' +
-      '<span class="month-panel-pace ' + pace + '"><span class="pace-dot"></span>' + paceLabel + '</span>' +
+      dropdownHtml +
+      paceOrFinalHtml +
     '</div>' +
     '<div class="month-progress-row">' +
       '<span class="month-progress-num">' + approved + '<span class="of-target">/ ' + target + '</span></span>' +
@@ -6652,7 +6703,8 @@ function findOrCreateCategory(categoryName) {
   var newCat = {
     name: categoryName,
     bg: color.bg,
-    fg: color.fg
+    fg: color.fg,
+    color: { bg: color.bg, fg: color.fg }
   };
   STATE.categories.push(newCat);
   return newCat;
