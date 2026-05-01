@@ -543,38 +543,47 @@
   .cal-today-btn:hover { background: var(--bg3); border-color: var(--accent); }
   .cal-grid {
     display: grid; grid-template-columns: repeat(7, 1fr);
-    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
-    background: var(--border);
+    grid-auto-rows: minmax(150px, 1fr);
+    border-top: 1px solid var(--border); border-left: 1px solid var(--border);
+    background: transparent;
   }
   .cal-weekday {
-    background: var(--bg1); padding: 8px 10px; font-size: 11px; font-weight: 600;
-    color: var(--text2); letter-spacing: 0.04em; text-transform: none;
+    padding: 6px 10px 8px; font-size: 11px; font-weight: 400;
+    color: var(--text3); letter-spacing: 0;
+    border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    background: transparent;
   }
   .cal-cell {
-    background: var(--bg1); min-height: 120px; padding: 6px 6px 8px;
-    display: flex; flex-direction: column; gap: 4px;
+    background: transparent; padding: 4px 4px 6px;
+    display: flex; flex-direction: column; gap: 2px;
+    overflow: hidden; position: relative;
+    border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
   }
-  .cal-cell-other-month { background: var(--bg2); }
-  .cal-cell-other-month .cal-cell-num { color: var(--text3); }
-  .cal-cell-num { font-size: 12px; font-weight: 600; color: var(--text2); padding: 2px 4px; }
-  .cal-cell-today .cal-cell-num {
-    background: var(--accent); color: #fff; border-radius: 50%;
-    width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
-    padding: 0; align-self: flex-start;
+  .cal-cell-other-month .cal-cell-num { color: var(--text3); opacity: 0.4; }
+  .cal-cell-num {
+    font-size: 12px; font-weight: 500; color: var(--text2);
+    padding: 4px 6px 2px; align-self: flex-start; line-height: 1;
+  }
+  .cal-cell-today .cal-cell-num { color: var(--accent); font-weight: 700; }
+  .cal-cell-overflow {
+    font-size: 10.5px; color: var(--text3); padding: 2px 6px; cursor: default;
   }
   .cal-entry {
-    background: var(--bg3); border-radius: 5px; padding: 5px 7px;
-    font-size: 11.5px; color: var(--text1); cursor: pointer;
+    background: var(--bg2); border-radius: 4px; padding: 5px 7px 6px;
+    font-size: 11px; color: var(--text1); cursor: pointer;
     display: flex; flex-direction: column; gap: 4px;
-    border-left: 3px solid var(--text3);
     overflow: hidden;
   }
-  .cal-entry:hover { background: var(--bg4); }
-  .cal-entry-approved { border-left-color: #5fbf6f; }
+  .cal-entry:hover { background: var(--bg3); }
+  .cal-entry-approved { background: rgba(95, 191, 111, 0.10); }
+  .cal-entry-approved:hover { background: rgba(95, 191, 111, 0.18); }
   .cal-entry-name {
     font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.25;
   }
-  .cal-entry .country-flag { width: 20px; height: 14px; font-size: 8.5px; }
+  .cal-entry .country-flag {
+    width: 18px; height: 12px; font-size: 8px; flex-shrink: 0;
+  }
   .today-col.drag-over { background: var(--accent-dim); border-color: var(--accent); }
   .today-col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 2px 4px; }
   .today-col-title { font-size: 12px; font-weight: 700; color: var(--text1); letter-spacing: 0.02em; flex: 1; min-width: 0; }
@@ -5771,12 +5780,14 @@ function renderEditingCalendarView() {
     return '<div class="cal-entry ' + (isApproved ? 'cal-entry-approved' : '') + '" ' +
         'onclick="App.editAssetById(\'' + a.id + '\')" ' +
         'title="' + escapeHtml(label) + (isApproved ? ' — Approved ' + a.dateApproved : ' — ETA ' + (a.estDelivery || '')) + '">' +
-      '<div class="cal-entry-name">' + escapeHtml(label) + '</div>' +
       (countryCode ? '<div class="country-flag flag-' + countryCode + '">' + countryCode + '</div>' : '') +
+      '<div class="cal-entry-name">' + escapeHtml(label) + '</div>' +
     '</div>';
   }
 
-  // Build 6 rows x 7 cols = 42 cells.
+  // Build 6 rows x 7 cols = 42 cells. Cap visible entries per cell so the row
+  // height stays uniform; surface the overflow as a "+N more" footer.
+  var MAX_PER_CELL = 4;
   var cellsHtml = '';
   for (var i = 0; i < 42; i++) {
     var d = new Date(gridStart.getTime() + i * 86400000);
@@ -5784,7 +5795,12 @@ function renderEditingCalendarView() {
     var inMonth = (d.getUTCMonth() === viewMonth0 && d.getUTCFullYear() === viewYear);
     var isToday = (dIso === todayStr);
     var entries = byDate[dIso] || [];
-    var entriesHtml = entries.map(renderEntry).join('');
+    var visible = entries.slice(0, MAX_PER_CELL);
+    var hidden = entries.length - visible.length;
+    var entriesHtml = visible.map(renderEntry).join('');
+    if (hidden > 0) {
+      entriesHtml += '<div class="cal-cell-overflow" title="' + hidden + ' more on this day">+ ' + hidden + ' more</div>';
+    }
     var dayNum = d.getUTCDate();
     var dayLabel = (dayNum === 1) ? (monthNamesFull[d.getUTCMonth()].slice(0,3) + ' 1') : ('' + dayNum);
     cellsHtml += '<div class="cal-cell ' + (inMonth ? '' : 'cal-cell-other-month') + ' ' + (isToday ? 'cal-cell-today' : '') + '">' +
