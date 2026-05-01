@@ -5824,7 +5824,10 @@ function renderDailyLogView() {
           'Target: <b>' + target + '</b> approved videos per editor per day' +
         '</div>' +
       '</div>' +
-      '<button class="run-btn" style="margin-left:auto;white-space:nowrap;" onclick="App.exportDailyLog(' + weekOffset + ')" title="Export this week\'s log for all editors as CSV">\u{1F4E4} Export CSV</button>' +
+      '<div style="display:flex;gap:8px;margin-left:auto;">' +
+        '<button class="run-btn" style="white-space:nowrap;" onclick="App.showDailyLogSlack(' + weekOffset + ',\'' + escapeHtml(selectedEditor) + '\')" title="Copy this week\'s log as a Slack message">💬 Copy for Slack</button>' +
+        '<button class="run-btn" style="white-space:nowrap;" onclick="App.exportDailyLog(' + weekOffset + ')" title="Export this week\'s log for all editors as CSV">📤 Export CSV</button>' +
+      '</div>' +
       legend +
     '</div>' +
     '<div class="log-editor-bar">' +
@@ -6935,6 +6938,94 @@ function exportDailyLogCSV(weekOffset) {
   link.click();
   document.body.removeChild(link);
   toast('Exported daily log to ' + fileName, 'success');
+}
+
+// Build a Slack-formatted summary of one editor's week from the daily log data.
+function buildDailyLogSlackMessage(editor, days, data) {
+  var target = DAILY_EDITOR_APPROVAL_TARGET;
+  var row = data[editor] || { videos: [], approvedByDay: days.map(function() { return 0; }) };
+
+  var videosByDay = days.map(function() { return []; });
+  row.videos.forEach(function(v) {
+    var idx = days.indexOf(v.asset.dateApproved);
+    if (idx >= 0) videosByDay[idx].push(v.asset);
+  });
+
+  var firstDay = formatDate(days[0]);
+  var lastDay = formatDate(days[days.length - 1]);
+  var lines = [':bar_chart: *Daily Log — ' + editor + '* | ' + firstDay + ' – ' + lastDay];
+  lines.push('');
+
+  var totalApproved = 0;
+  var daysOnTarget = 0;
+
+  days.forEach(function(dayIso, i) {
+    var count = row.approvedByDay[i];
+    totalApproved += count;
+    var d = new Date(dayIso + 'T12:00:00');
+    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var label = '*' + dayNames[d.getDay()] + ' ' + d.getDate() + ' ' + monthNames[d.getMonth()] + '*';
+    var icon = count >= target ? ' ✅' : (count > 0 ? ' ⚠️' : ' ❌');
+    var countStr = count + '/' + target;
+    lines.push(label + ' · ' + countStr + icon);
+    videosByDay[i].forEach(function(a, idx) {
+      var camp = findCampaignById(a.campaignId);
+      var version = (typeof deriveVersionFromName === 'function') ? deriveVersionFromName(a) : (a.version || 'V1');
+      var campTag = camp ? ' _(' + camp.country + ' · ' + camp.name + ')_' : '';
+      lines.push('  ' + (idx + 1) + '. ' + a.name + ' ' + version + campTag);
+    });
+    if (count >= target) daysOnTarget++;
+  });
+
+  lines.push('');
+  lines.push('*Total:* ' + totalApproved + ' approved · ' + daysOnTarget + '/' + days.length + ' days on target');
+
+  return lines.join('\n');
+}
+
+// Show a modal with the Slack-formatted daily log for the given editor + week,
+// editable before copying.
+function showDailyLogSlackModal(weekOffset, editor) {
+  var offset = (typeof weekOffset === 'number') ? weekOffset : 0;
+  var days = getWorkdaysForOffset(offset);
+  var data = computeDailyLog(days);
+
+  // Editor picker options
+  var editorOpts = DAILY_LOG_EDITORS.map(function(e) {
+    return '<option value="' + escapeHtml(e) + '"' + (e === editor ? ' selected' : '') + '>' + escapeHtml(e) + '</option>';
+  }).join('');
+
+  var html =
+    '<div class="modal-title">Copy Daily Log for Slack</div>' +
+    '<div class="form-row full" style="display:flex;gap:10px;align-items:center;">' +
+      '<div style="flex:1;"><label class="form-label">Editor</label>' +
+        '<select id="dlog-slack-editor" class="form-select">' + editorOpts + '</select></div>' +
+    '</div>' +
+    '<div class="form-row full" style="margin-top:10px;"><label class="form-label">Message preview — edit freely before copying</label>' +
+      '<textarea id="dlog-slack-preview" class="form-textarea" style="min-height:260px;font-family:monospace;font-size:12px;"></textarea></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;">' +
+      '<button class="submit-btn" id="dlog-slack-copy">📋 Copy message</button>' +
+      '<button class="edit-btn" id="dlog-slack-open">📨 Open Slack</button>' +
+    '</div>' +
+    '<div class="modal-actions" style="margin-top:14px;"><button class="cancel-btn" id="modal-cancel">Close</button></div>';
+
+  openModal(html, function() {});
+  setTimeout(function() {
+    var editorSel = document.getElementById('dlog-slack-editor');
+    var preview = document.getElementById('dlog-slack-preview');
+    function refreshPreview() {
+      preview.value = buildDailyLogSlackMessage(editorSel.value, days, data);
+    }
+    refreshPreview();
+    editorSel.addEventListener('change', refreshPreview);
+    document.getElementById('dlog-slack-copy').addEventListener('click', function() {
+      copyToClipboard(preview.value, 'Copied — paste into Slack');
+    });
+    document.getElementById('dlog-slack-open').addEventListener('click', function() {
+      openSlackChannel(editorSel.value);
+    });
+  }, 60);
 }
 
 function escapeCSVField(field) {
@@ -9022,6 +9113,9 @@ var App = {
   },
   exportDailyLog: function(offset) {
     exportDailyLogCSV(parseInt(offset, 10) || 0);
+  },
+  showDailyLogSlack: function(offset, editor) {
+    showDailyLogSlackModal(parseInt(offset, 10) || 0, editor);
   },
   setAssetStatus: function(id, newStatus) {
     var a = findAssetById(id);
