@@ -7056,7 +7056,12 @@ function executeSheetImport() {
       });
 
       if (isDupAsset) {
-        // Skip duplicate
+        var existingAsset = STATE.assets.find(function(a) {
+          return a.campaignId === campaignId && a.name.toLowerCase() === row['Video Name'].toLowerCase();
+        });
+        if (existingAsset && !existingAsset.finalVideo) {
+          existingAsset.finalVideo = row['Final Video'] || row['Video'] || '';
+        }
       } else {
         var newAssetId = 'a' + (++STATE.nextAssetId);
         var campaignAssetCount = STATE.assets.filter(function(a) { return a.campaignId === campaignId; }).length;
