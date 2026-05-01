@@ -147,7 +147,7 @@
   .reorder-btn { margin: 0 12px 8px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; justify-content: center; transition: all 0.12s; }
   .reorder-btn:hover { background: var(--accent-dim); color: var(--accent2); border-color: var(--accent); }
 
-  .content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .content { flex: 1; overflow: auto; display: flex; flex-direction: column; }
   .camp-header { padding: 16px 20px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .breadcrumb { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
   .breadcrumb-flag-inline { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 14px; border-radius: 2px; font-size: 9px; font-weight: 700; }
@@ -556,8 +556,12 @@
     background: transparent; padding: 4px;
     display: flex; flex-direction: column; gap: 4px;
     border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
-    height: 160px; overflow: hidden;
+    height: 160px; overflow: visible;
     position: relative;
+  }
+  .cal-cell-inner {
+    display: flex; flex-direction: column; gap: 4px;
+    overflow: hidden; flex: 1;
   }
   .cal-cell-details[open] { z-index: 20; }
   .cal-cell-other-month .cal-cell-num { color: var(--text3); opacity: 0.4; }
@@ -4548,7 +4552,7 @@ var TAB_DEFS = {
   automations:      { label: 'Automations' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'editingCalendar', 'notifications', 'log', 'automations', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'config'];
 
 // Role-based tab visibility. Editors see the day-to-day tabs; PMs add Notifications
 // and Scheduler so they can drive comms; Admins see everything including Automations
@@ -4590,6 +4594,16 @@ function renderTopbar() {
   Object.keys(TAB_DEFS).forEach(function(k) { if (order.indexOf(k) < 0) order.push(k); });
   // Drop any stale ids that no longer exist.
   order = order.filter(function(k) { return TAB_DEFS[k]; });
+  // Migration: ensure editingCalendar sits after log (not before notifications).
+  (function() {
+    var ec = order.indexOf('editingCalendar'), lg = order.indexOf('log');
+    if (ec >= 0 && lg >= 0 && ec < lg) {
+      order.splice(ec, 1);
+      lg = order.indexOf('log');
+      order.splice(lg + 1, 0, 'editingCalendar');
+      STATE.tabOrder = order.slice();
+    }
+  })();
   // Role gate: keep only the tabs the current user's role is allowed to see.
   // (See ROLE_TAB_VISIBILITY for the matrix.)
   var role = (Auth && Auth.user && Auth.user.role) ? Auth.user.role : 'editor';
@@ -5928,18 +5942,20 @@ function renderEditingCalendarView() {
 
     var bodyHtml;
     if (entries.length === 0) {
-      bodyHtml = '<div class="cal-cell-num">' + dayLabel + '</div>';
+      bodyHtml = '<div class="cal-cell-inner"><div class="cal-cell-num">' + dayLabel + '</div></div>';
     } else {
       var groups = groupByCampaignEditor(entries);
       var barsHtml = renderCampaignBars(groups, entries.length);
       bodyHtml =
         '<details class="cal-cell-details" ontoggle="if(this.open) App.calendarCloseOthers(this)">' +
           '<summary class="cal-cell-summary">' +
-            '<div class="cal-cell-summary-top">' +
-              '<span class="cal-cell-num">' + dayLabel + '</span>' +
-              '<span class="cal-cell-count">' + entries.length + '</span>' +
+            '<div class="cal-cell-inner">' +
+              '<div class="cal-cell-summary-top">' +
+                '<span class="cal-cell-num">' + dayLabel + '</span>' +
+                '<span class="cal-cell-count">' + entries.length + '</span>' +
+              '</div>' +
+              '<div class="cal-cell-bars">' + barsHtml + '</div>' +
             '</div>' +
-            '<div class="cal-cell-bars">' + barsHtml + '</div>' +
           '</summary>' +
           renderGroupedPopover(entries, dIso) +
         '</details>';
@@ -9279,7 +9295,7 @@ function captureRenderSnapshot() {
     }
     // Capture scroll positions of known-scrollable containers. Add more selectors here
     // if other scroll-preserve candidates appear.
-    ['.table-wrap', '.sidebar-scroll', '.scheduler-panel', '.notif-panel', '.automation-panel', '.config-panel', '.today-wrap', '.log-wrap'].forEach(function(sel) {
+    ['.table-wrap', '.sidebar-scroll', '.scheduler-panel', '.notif-panel', '.automation-panel', '.config-panel', '.today-wrap', '.log-wrap', '.cal-wrap'].forEach(function(sel) {
       var el = document.querySelector(sel);
       if (el) snap.scrolls[sel] = { top: el.scrollTop, left: el.scrollLeft };
     });
