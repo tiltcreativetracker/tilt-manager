@@ -5270,7 +5270,7 @@ function classifyMonthPace(actual, expected, target) {
 function renderMonthPanel() {
   var now = new Date();
   var cy = now.getFullYear(), cm = now.getMonth();
-  var currentKey = cy + '-' + (cm < 9 ? '0' + (cm + 1) : '' + (cm + 1));
+  var currentKey = cy + '-' + (cm < 9 ? '0' : '') + (cm + 1);
   var selectedKey = window._tallyMonthKey || currentKey;
   var isCurrentMonth = selectedKey === currentKey;
 
