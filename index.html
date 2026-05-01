@@ -1425,6 +1425,7 @@ var Fb = {
         qcFilter: true,
         search: true,
         logEditor: true,
+        logWeekOffset: true,
         schedulerDate: true,
         qcDismissed: true,
         noSplit: true
@@ -1850,7 +1851,7 @@ var STATE = {
   // persist it; renderTopbar iterates this array. Default set via DEFAULT_TAB_ORDER
   // (declared below near renderTopbar). Kept in STATE so loadState migration can
   // top it up with any tab ids added in future versions.
-  tabOrder: ['campaigns', 'today', 'notifications', 'scheduler', 'log', 'automations', 'config'],
+  tabOrder: ['campaigns', 'today', 'notifications', 'log', 'automations', 'config'],
   activeSubCampaignId: 1,
   expandedCountries: { UK: true, IT: false, ES: false, US: false, PL: false },
   // UI preference: when true, sidebar collapses to a compact strip showing only flags +
@@ -1920,6 +1921,9 @@ var STATE = {
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
   // Null = show first editor. Changed via the dropdown; persisted by saveState.
   logEditor: null,
+  // Daily Log tab: week offset from current week. 0 = this week, -1 = last week, etc.
+  // Per-user UI preference, not shared via Firestore.
+  logWeekOffset: 0,
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -5537,6 +5541,23 @@ function getCurrentWeekWorkdays() {
   return days;
 }
 
+// Returns Mon–Fri dates for the week at `offset` from the current week.
+// offset=0 → this week, offset=-1 → last week, offset=-2 → two weeks ago, etc.
+function getWorkdaysForOffset(offset) {
+  var d = new Date();
+  var dow = d.getDay();
+  var daysToMonday = dow === 0 ? -6 : (1 - dow);
+  var monday = new Date(d);
+  monday.setDate(d.getDate() + daysToMonday + offset * 7);
+  var days = [];
+  for (var i = 0; i < 5; i++) {
+    var dt = new Date(monday);
+    dt.setDate(monday.getDate() + i);
+    days.push(toLocalISODate(dt));
+  }
+  return days;
+}
+
 // Reconstruct the asset's state at end-of-day on dateISO using versionHistory.
 // Returns a snapshot object (same shape as snapshotAsset). Strategy:
 //   - versionHistory is most-recent-first; each entry's .snapshot is the
@@ -5641,8 +5662,9 @@ function renderDailyLogDayHeader(dateISO) {
 }
 
 function renderDailyLogView() {
-  // Always show Mon-Fri of the current work week (anchored, not a rolling window).
-  var days = getCurrentWeekWorkdays();
+  // Show Mon-Fri of the selected week (offset 0 = this week, -1 = last week, etc.)
+  var weekOffset = (typeof STATE.logWeekOffset === 'number') ? STATE.logWeekOffset : 0;
+  var days = getWorkdaysForOffset(weekOffset);
   var data = computeDailyLog(days);
   var target = DAILY_EDITOR_APPROVAL_TARGET;
 
@@ -5653,6 +5675,20 @@ function renderDailyLogView() {
   var selectedEditor = STATE.logEditor && DAILY_LOG_EDITORS.indexOf(STATE.logEditor) >= 0
     ? STATE.logEditor
     : DAILY_LOG_EDITORS[0];
+
+  // Week picker \u2014 options from current week back 8 weeks.
+  var weekOptHtml = '';
+  for (var wo = 0; wo >= -8; wo--) {
+    var wDays = getWorkdaysForOffset(wo);
+    var wLabel = wo === 0 ? 'This week' : (wo === -1 ? 'Last week' : Math.abs(wo) + ' weeks ago');
+    var wRange = formatDate(wDays[0]) + ' \u2013 ' + formatDate(wDays[wDays.length - 1]);
+    var wSel = wo === weekOffset ? ' selected' : '';
+    weekOptHtml += '<option value="' + wo + '"' + wSel + '>' + wLabel + ' (' + wRange + ')</option>';
+  }
+  var weekPickerHtml = '<div class="log-editor-picker">' +
+    '<label class="log-editor-picker-label">Week</label>' +
+    '<select class="log-editor-select" onchange="App.setLogWeekOffset(this.value)">' + weekOptHtml + '</select>' +
+  '</div>';
 
   // Editor dropdown \u2014 one <option> per tracked editor with their week total inline.
   var optionsHtml = DAILY_LOG_EDITORS.map(function(e) {
@@ -5777,12 +5813,14 @@ function renderDailyLogView() {
   // Shared legend (same row used on the Today board's weekly section).
   var legend = renderStatusLegend('log-status-badge');
 
+  var weekLabel = weekOffset === 0 ? 'This week' : (weekOffset === -1 ? 'Last week' : Math.abs(weekOffset) + ' weeks ago');
+
   return '<div class="log-wrap">' +
     '<div class="log-top">' +
       '<div class="log-top-left">' +
         '<h2 class="log-title">Daily Log</h2>' +
         '<div class="log-sub">' +
-          'Last ' + days.length + ' workdays (' + firstDay + ' \u2013 ' + lastDay + ') \u00B7 ' +
+          weekLabel + ' (' + firstDay + ' \u2013 ' + lastDay + ') \u00B7 ' +
           'Target: <b>' + target + '</b> approved videos per editor per day' +
         '</div>' +
       '</div>' +
@@ -5791,6 +5829,7 @@ function renderDailyLogView() {
     '<div class="log-editor-bar">' +
       '<div class="log-editor-bar-left">' +
         '<div class="editor-avatar av-' + selectedEditor + '">' + editorInitials(selectedEditor) + '</div>' +
+        weekPickerHtml +
         editorPickerHtml +
       '</div>' +
       summaryHtml +
@@ -7451,7 +7490,7 @@ function loadState() {
     });
     // Migrate tabOrder (added in this version). Start from stored value or default,
     // top up any new tab ids, and drop any stale ids.
-    var defaultOrder = ['campaigns', 'today', 'notifications', 'scheduler', 'log', 'automations', 'config'];
+    var defaultOrder = ['campaigns', 'today', 'notifications', 'log', 'automations', 'config'];
     if (!Array.isArray(STATE.tabOrder) || STATE.tabOrder.length === 0) {
       STATE.tabOrder = defaultOrder.slice();
     } else {
@@ -7485,6 +7524,11 @@ function loadState() {
           STATE.tabOrder.splice(newSchedIdx + 1, 0, 'log');
         }
         STATE._tabOrderMigratedV3 = true;
+      }
+      // V4: Scheduler tab removed — purge any saved 'scheduler' entry from tabOrder.
+      if (!STATE._tabOrderMigratedV4) {
+        STATE.tabOrder = STATE.tabOrder.filter(function(k) { return k !== 'scheduler'; });
+        STATE._tabOrderMigratedV4 = true;
       }
     }
     // Ensure editor batches, Slack channels, and Slack member IDs exist for all editors
@@ -8897,6 +8941,12 @@ var App = {
   setLogEditor: function(name) {
     if (!name || DAILY_LOG_EDITORS.indexOf(name) < 0) return;
     STATE.logEditor = name;
+    render();
+  },
+  setLogWeekOffset: function(offset) {
+    var n = parseInt(offset, 10);
+    if (isNaN(n) || n > 0) return;
+    STATE.logWeekOffset = n;
     render();
   },
   setAssetStatus: function(id, newStatus) {
