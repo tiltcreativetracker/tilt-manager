@@ -6977,6 +6977,20 @@ function extractCampaignNameFromFilename(filename) {
   return { monthYear: '', category: '', campaignName: nameWithoutExt };
 }
 
+// Case-insensitive column lookup — tries each name in order, first non-empty wins.
+function getCol(row, names) {
+  for (var i = 0; i < names.length; i++) {
+    var direct = row[names[i]];
+    if (direct) return direct;
+    var lower = names[i].toLowerCase();
+    var keys = Object.keys(row);
+    for (var j = 0; j < keys.length; j++) {
+      if (keys[j].trim().toLowerCase() === lower && row[keys[j]]) return row[keys[j]];
+    }
+  }
+  return '';
+}
+
 function mapGoogleSheetRowToAsset(row, campaignId) {
   // Map Google Sheet columns to asset fields
   // Skip: Concepts, Variations, Raw Video File, Ad Status
@@ -6991,7 +7005,7 @@ function mapGoogleSheetRowToAsset(row, campaignId) {
     categoryHeadQc: 'Draft',
     rawVideo: '',
     editingBrief: row['Editing Brief'] || '',
-    finalVideo: row['Final Video'] || '',
+    finalVideo: getCol(row, ['Final Video', 'Video']) || '',
     estDelivery: '',
     dateApproved: row['Date Approved'] ? toISODate(row['Date Approved']) : '',
     campaignId: campaignId
@@ -7118,7 +7132,7 @@ function executeSheetImport() {
           return a.campaignId === campaignId && a.name.toLowerCase() === row['Video Name'].toLowerCase();
         });
         if (existingAsset && !existingAsset.finalVideo) {
-          existingAsset.finalVideo = row['Final Video'] || row['Video'] || '';
+          existingAsset.finalVideo = getCol(row, ['Final Video', 'Video']) || '';
         }
       } else {
         var newAssetId = 'a' + (++STATE.nextAssetId);
@@ -7137,8 +7151,8 @@ function executeSheetImport() {
         );
 
         asset.category = campaignInfo.category || 'LUXURY';
-        asset.editingBrief = row['Editing Brief'] || asset.editingBrief;
-        asset.finalVideo = row['Final Video'] || row['Video'] || '';
+        asset.editingBrief = getCol(row, ['Editing Brief', 'Brief']) || asset.editingBrief;
+        asset.finalVideo = getCol(row, ['Final Video', 'Video']) || '';
         if (row['Date Approved']) asset.dateApproved = toISODate(row['Date Approved']);
         if (row['Status'] && row['Status'].includes('Appro')) asset.status = 'Approved';
         if (row['Editor']) asset.status = 'Assigned';
