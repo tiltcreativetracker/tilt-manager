@@ -7389,7 +7389,7 @@ function renderConfigView() {
           var canDelete = usage === 0;
           var delTitle = canDelete ? 'Delete this category' : usage + ' campaign(s) use this category \u2014 reassign them before deleting';
           return '<div class="cat-manage-row" data-cat-idx="' + idx + '">' +
-            '<span class="cat-swatch" style="background:' + cat.color.bg + ';"></span>' +
+            '<span class="cat-swatch" style="background:' + ((cat.color || cat).bg || 'var(--bg4)') + ';"></span>' +
             '<input type="text" class="form-input cat-name-input" data-orig="' + escapeHtml(cat.name) + '" ' +
               'value="' + escapeHtml(cat.name) + '" ' +
               'onblur="App.renameCategory(' + idx + ', this.value)">' +
