@@ -543,10 +543,9 @@
   .cal-today-btn:hover { background: var(--bg3); border-color: var(--accent); }
   .cal-grid {
     display: grid; grid-template-columns: repeat(7, 1fr);
-    grid-auto-rows: minmax(110px, auto);
+    grid-auto-rows: 160px;
     border-top: 1px solid var(--border); border-left: 1px solid var(--border);
     background: transparent;
-    align-items: start;
   }
   .cal-weekday {
     padding: 6px 10px 8px; font-size: 11px; font-weight: 400;
@@ -557,7 +556,7 @@
     background: transparent; padding: 4px;
     display: flex; flex-direction: column; gap: 4px;
     border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
-    min-height: 110px;
+    height: 160px; overflow: hidden;
     position: relative;
   }
   .cal-cell-details[open] { z-index: 20; }
@@ -5934,7 +5933,7 @@ function renderEditingCalendarView() {
       var groups = groupByCampaignEditor(entries);
       var barsHtml = renderCampaignBars(groups, entries.length);
       bodyHtml =
-        '<details class="cal-cell-details">' +
+        '<details class="cal-cell-details" ontoggle="if(this.open) App.calendarCloseOthers(this)">' +
           '<summary class="cal-cell-summary">' +
             '<div class="cal-cell-summary-top">' +
               '<span class="cal-cell-num">' + dayLabel + '</span>' +
@@ -9352,6 +9351,11 @@ var App = {
     render();
   },
   calendarToday: function() { STATE.calendarMonth = null; render(); },
+  calendarCloseOthers: function(el) {
+    document.querySelectorAll('.cal-cell-details[open]').forEach(function(d) {
+      if (d !== el) d.removeAttribute('open');
+    });
+  },
 
   // ===== Firebase migration helpers =====
   exportLocalBackup: function() {
