@@ -1437,6 +1437,12 @@ var Fb = {
         if (PER_USER_UI_FIELDS[k]) return;
         STATE[k] = data[k];
       });
+      // Backfill categories missing the color sub-object (created before this field existed).
+      (STATE.categories || []).forEach(function(cat) {
+        if (!cat.color && (cat.bg || cat.fg)) {
+          cat.color = { bg: cat.bg || 'var(--bg4)', fg: cat.fg || 'var(--text2)' };
+        }
+      });
       // Mirror to localStorage as a cache so offline reloads still work. Strip per-user
       // UI fields from the incoming snapshot, then MERGE into the existing localStorage
       // copy so we don't clobber the user's locally-saved sidebar/tab state. Without
