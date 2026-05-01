@@ -4400,12 +4400,11 @@ var TAB_DEFS = {
   campaigns:     { label: 'Campaigns' },
   today:         { label: 'Board' },
   log:           { label: 'Daily Log' },
-  scheduler:     { label: 'Scheduler' },
   notifications: { label: 'Notifications', badge: true },
   automations:   { label: 'Automations' },
   config:        { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'scheduler', 'log', 'automations', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'automations', 'config'];
 
 // Role-based tab visibility. Editors see the day-to-day tabs; PMs add Notifications
 // and Scheduler so they can drive comms; Admins see everything including Automations
@@ -4414,8 +4413,8 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'scheduler', 'lo
 // the documents these tabs touch (config/app and the users collection).
 var ROLE_TAB_VISIBILITY = {
   editor: ['campaigns', 'today', 'log'],
-  pm:     ['campaigns', 'today', 'log', 'notifications', 'scheduler'],
-  admin:  ['campaigns', 'today', 'log', 'notifications', 'scheduler', 'automations', 'config']
+  pm:     ['campaigns', 'today', 'log', 'notifications'],
+  admin:  ['campaigns', 'today', 'log', 'notifications', 'automations', 'config']
 };
 
 // Returns the list of tab IDs the given role is allowed to see. Unknown roles
@@ -4816,101 +4815,6 @@ function renderCampaignsView() {
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
-function renderSchedulerView() {
-  var dateStr = STATE.schedulerDate;
-  var weekend = isWeekend(dateStr);
-
-  // Same pool as Board "To Do Today": Assigned with assignedAt or estDelivery on this date.
-  var todayPool = STATE.assets.filter(function(a) {
-    return a.status === 'Assigned' &&
-      (a.assignedAt === dateStr || a.estDelivery === dateStr) &&
-      !a.released;
-  }).sort(function(a, b) {
-    var ea = a.estDelivery || '9999-99-99';
-    var eb = b.estDelivery || '9999-99-99';
-    if (ea !== eb) return ea < eb ? -1 : 1;
-    return a.pn - b.pn;
-  });
-
-  var byEditor = { Zidni: [], Sharm: [], Patty: [], Elsa: [] };
-  todayPool.forEach(function(a) {
-    if (a.editor && byEditor[a.editor]) byEditor[a.editor].push(a);
-  });
-
-  var planSummaryHtml = ['Zidni','Sharm','Patty','Elsa'].map(function(e) {
-    var videos = byEditor[e];
-    var videoListHtml = videos.length === 0
-      ? '<div style="color:var(--text3);font-size:11px;padding:4px 0;">No videos for ' + dateStr + '</div>'
-      : videos.map(function(a) {
-          var st = (a.status || '').replace(/ /g, '_');
-          var chSt = (a.categoryHeadQc || '').replace(/ /g, '_');
-          var chBadge = (a.categoryHeadQc && a.categoryHeadQc !== 'Draft')
-            ? '<span class="cat-head-status-badge st-' + chSt + '" style="font-size:10px;white-space:nowrap;">CH: ' + escapeHtml(a.categoryHeadQc) + '</span>'
-            : '';
-          return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);">' +
-            '<span style="font-size:11.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text1);" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
-            '<span class="cat-head-status-badge st-' + st + '" style="font-size:10px;white-space:nowrap;">' + escapeHtml(a.status || '') + '</span>' +
-            chBadge +
-          '</div>';
-        }).join('');
-    return '<div class="editor-plan">' +
-      '<div class="editor-plan-header">' +
-        '<div class="editor-avatar av-' + e + '">' + editorInitials(e) + '</div>' +
-        '<div><div class="editor-plan-name">' + e + '</div>' +
-        '<div class="editor-plan-rules-inline">' + videos.length + ' video(s) on ' + dateStr + '</div></div>' +
-      '</div>' +
-      '<div style="padding:2px 0 4px;">' + videoListHtml + '</div>' +
-    '</div>';
-  }).join('');
-
-  var unscheduled = todayPool;
-
-  var editorOpts = function(current) {
-    var opts = '<option value="">\u2014</option>';
-    EDITORS.forEach(function(e) {
-      opts += '<option value="' + e + '"' + (current === e ? ' selected' : '') + '>' + e + '</option>';
-    });
-    return opts;
-  };
-
-  var rowsHtml = unscheduled.length === 0
-    ? '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px;">No Assigned videos for ' + dateStr + '. Set a video\'s status to Assigned and its ETA or assigned date to this date to see it here.</td></tr>'
-    : unscheduled.map(function(a) {
-        var camp = findCampaignById(a.campaignId);
-        var code = camp ? camp.country : '?';
-        var campName = camp ? camp.name : '\u2014';
-        return '<tr>' +
-          '<td><span class="country-flag flag-' + code + '">' + code + '</span></td>' +
-          '<td>' + escapeHtml(a.name) + '</td>' +
-          '<td title="' + escapeHtml(campName) + '" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(campName) + '</td>' +
-          '<td><span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span></td>' +
-          '<td><select class="form-select" onchange="App.scheduleAssignEditor(\'' + a.id + '\', this.value)">' + editorOpts(a.editor) + '</select></td>' +
-          '<td><input type="date" class="form-input" value="' + (a.estDelivery || '') + '" onchange="App.scheduleSetEta(\'' + a.id + '\', this.value)"></td>' +
-        '</tr>';
-      }).join('');
-
-  var weekendNote = weekend ? '<div class="alert-box" style="background:var(--amber-bg);color:var(--amber-text);border-color:var(--amber-text);">\u26A0 ' + dateStr + ' is a weekend.</div>' : '';
-
-  return '<div class="content"><div class="scheduler-panel">' +
-    '<div class="section-title">Daily Scheduler</div>' +
-    '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">\u270E</div><div><div class="auto-title">Manual planner</div><div class="auto-sub">Assign editor + ETA per video. Setting an ETA stamps Scheduled For = the planned date below.</div></div></div>' +
-      '<div class="scheduler-config-row">' +
-        '<div class="scheduler-date-pick"><span>Plan for:</span><input type="date" value="' + dateStr + '" onchange="App.setSchedulerDate(this.value)"></div>' +
-      '</div>' +
-      weekendNote +
-    '</div>' +
-    '<div class="section-title">Today\'s plan \u2014 ' + dateStr + '</div>' +
-    '<div class="editor-plans">' + planSummaryHtml + '</div>' +
-    '<div class="section-title">Videos — ' + dateStr + '</div>' +
-    '<div class="auto-card" style="padding:0;">' +
-      '<div class="table-wrap"><table>' +
-        '<thead><tr><th></th><th>Video</th><th>Campaign</th><th>Difficulty</th><th>Editor</th><th>ETA</th></tr></thead>' +
-        '<tbody>' + rowsHtml + '</tbody>' +
-      '</table></div>' +
-    '</div>' +
-    '</div></div>';
-}
 
 // Drag-lock for To Do columns is now persisted as `a.dragLocked: true` on each asset.
 // When the user drops a card into a manual position within the To Do column, that flag
@@ -4993,7 +4897,7 @@ function getTodayBoardBuckets() {
   // back to a canonical sort slot.
   STATE.assets.forEach(function(a) {
     // PM track (status-based)
-    if (a.status === 'Assigned' && (a.assignedAt === today || a.estDelivery === today)) buckets.todo.items.push(a);
+    if (a.status === 'Assigned' && a.estDelivery === today) buckets.todo.items.push(a);
     else if (a.status === 'In Progress') buckets.progress.items.push(a);
     else if (a.status === 'Needs Revisions') buckets.revision.items.push(a);
     else if (a.status === 'For Review') buckets.review.items.push(a);
@@ -5184,6 +5088,10 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   var oldStatus = a.status;
   var oldEditor = a.editor;
   var statusChanging = oldStatus !== targetStatus;
+  var vhPre = statusChanging ? snapshotAsset(a) : null;
+  if (statusChanging) {
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'dragLocked'], 'status: ' + oldStatus + ' → ' + targetStatus);
+  }
   // Editor guard: any status out of Draft requires an editor.
   if (statusChanging && !a.editor && targetStatus !== 'Draft') {
     toast('Assign an editor first (Draft stays Draft until someone is assigned)', 'error');
@@ -5205,6 +5113,7 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
     }
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + targetStatus);
     emitAssetChangeNotifications(a, { oldEditor: oldEditor, oldStatus: oldStatus });
+    pushVersion(a, vhPre, diffSnapshots(vhPre, snapshotAsset(a)));
   }
   // Reposition in STATE.assets. Splice the dragged item out first (may be a no-op
   // if it's somehow missing, but we recomputed idx above).
@@ -8781,7 +8690,6 @@ function render() {
   if (STATE.tab === 'today') body = renderTodayView();
   else if (STATE.tab === 'campaigns') body = renderSidebar() + renderCampaignsView();
   else if (STATE.tab === 'log') body = renderDailyLogView();
-  else if (STATE.tab === 'scheduler') body = renderSchedulerView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
   else body = renderConfigView();
