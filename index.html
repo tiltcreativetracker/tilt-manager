@@ -104,6 +104,10 @@
   .subcamp-item.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
   .subcamp-item.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
   .subcamp-item.drag-blocked { cursor: not-allowed; opacity: 0.9; }
+  .subcamp-item.done { box-shadow: inset 3px 0 0 #22c55e; background: color-mix(in srgb, #22c55e 6%, transparent); }
+  .subcamp-item.done .subcamp-name { color: var(--text3); }
+  .subcamp-item.done .rank-badge { background: color-mix(in srgb, #22c55e 20%, var(--bg4)); color: #22c55e; }
+  .subcamp-item.done:hover { background: color-mix(in srgb, #22c55e 10%, var(--bg3)); }
   .drag-handle { flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text3); cursor: grab; padding: 2px 2px; user-select: none; line-height: 0.7; }
   .drag-handle:active { cursor: grabbing; }
   .drag-handle:hover { color: var(--text1); }
@@ -4188,12 +4192,16 @@ function showEditCampaignModal() {
       (function() {
         var briefUrl = extractSingleUrl(c.brief);
         var driveUrl = extractSingleUrl(c.driveId);
+        var finalVideosUrl = extractSingleUrl(c.finalVideos || '');
         var briefBtn = briefUrl
           ? '<button type="button" id="f-cbrief-open" class="edit-btn" style="padding:4px 10px; font-size:11px;" title="Open the URL in this brief" onclick="App.openLinkFromField(\'f-cbrief\')">open \u2197</button>'
           : '<button type="button" id="f-cbrief-open" class="edit-btn" disabled style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" title="Field must contain a single URL to open" onclick="App.openLinkFromField(\'f-cbrief\')">open \u2197</button>';
         var driveBtn = driveUrl
           ? '<button type="button" id="f-cdrive-open" class="edit-btn" style="padding:4px 10px; font-size:11px;" title="Open the Google Drive link" onclick="App.openLinkFromField(\'f-cdrive\')">open \u2197</button>'
           : '<button type="button" id="f-cdrive-open" class="edit-btn" disabled style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" title="Field must contain a single URL to open" onclick="App.openLinkFromField(\'f-cdrive\')">open \u2197</button>';
+        var finalVideosBtn = finalVideosUrl
+          ? '<button type="button" id="f-cfinalvideos-open" class="edit-btn" style="padding:4px 10px; font-size:11px;" title="Open the Final Videos link" onclick="App.openLinkFromField(\'f-cfinalvideos\')">open \u2197</button>'
+          : '<button type="button" id="f-cfinalvideos-open" class="edit-btn" disabled style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" title="Field must contain a single URL to open" onclick="App.openLinkFromField(\'f-cfinalvideos\')">open \u2197</button>';
         return (
           '<div class="form-row full">' +
             '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
@@ -4208,6 +4216,13 @@ function showEditCampaignModal() {
               briefBtn +
             '</div>' +
             '<input id="f-cbrief" class="form-input" placeholder="https://notion.so/... (campaign-wide brief link)" value="' + escapeHtml(c.brief) + '" oninput="App.refreshOpenLinkButton(\'f-cbrief\')">' +
+          '</div>' +
+          '<div class="form-row full">' +
+            '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
+              '<label class="form-label" style="margin:0;">Final Videos</label>' +
+              finalVideosBtn +
+            '</div>' +
+            '<input id="f-cfinalvideos" class="form-input" placeholder="https://frame.io/... or https://drive.google.com/..." value="' + escapeHtml(c.finalVideos || '') + '" oninput="App.refreshOpenLinkButton(\'f-cfinalvideos\')">' +
           '</div>'
         );
       })() +
@@ -4233,6 +4248,7 @@ function showEditCampaignModal() {
     c.category = document.getElementById('f-ccat').value;
     c.type = document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE;
     c.driveId = document.getElementById('f-cdrive').value;
+    c.finalVideos = document.getElementById('f-cfinalvideos').value;
     c.slackOverride = document.getElementById('f-cslack').value;
     c.monthYear = document.getElementById('f-cmonth').value || '';
     c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
@@ -4243,6 +4259,14 @@ function showEditCampaignModal() {
     toast('Campaign updated', 'success');
     render();
   });
+}
+
+function toggleCampaignDone() {
+  var c = getActiveCampaign(); if (!c) return;
+  c.done = !c.done;
+  logAction('updated', 'Campaign "' + c.name + '" marked ' + (c.done ? 'done' : 'active'));
+  toast(c.done ? 'Campaign marked done' : 'Campaign reopened', 'success');
+  render();
 }
 
 function deleteCampaign() {
@@ -4771,7 +4795,7 @@ function renderSidebar() {
             : '<div class="subcamp-name">' + escapeHtml(s.name) + '</div>';
           // draggable disabled while renaming so drag doesn't hijack the input's cursor
           html +=
-            '<div class="subcamp-item ' + (active ? 'active' : '') + '" ' +
+            '<div class="subcamp-item ' + (active ? 'active' : '') + (s.done ? ' done' : '') + '" ' +
               (isRenaming ? '' : 'draggable="true" ') +
               'data-camp-id="' + s.id + '" ' +
               'data-country="' + country.code + '" ' +
@@ -4918,6 +4942,18 @@ function renderCampaignsView() {
       '<span class="link-pill-arrow">\u2197</span>' +
     '</a>';
   }
+  var finalVideosPill = '';
+  var finalVideosUrl = extractSingleUrl(camp.finalVideos || '');
+  if (finalVideosUrl) {
+    finalVideosPill = '<a href="' + escapeHtml(finalVideosUrl) + '" target="_blank" rel="noopener" class="meta-chip link-pill" title="' + escapeHtml(finalVideosUrl) + '">' +
+      '<span class="meta-chip-label">finals</span>' +
+      '<span class="link-pill-host">' + escapeHtml(hostnameFromUrl(finalVideosUrl)) + '</span>' +
+      '<span class="link-pill-arrow">\u2197</span>' +
+    '</a>';
+  } else if (camp.finalVideos) {
+    finalVideosPill = '<span class="meta-chip link-pill-invalid" title="Not a valid URL \u2014 edit the campaign to fix">' +
+      '<span class="meta-chip-label">finals</span>invalid link</span>';
+  }
 
   var metaChips =
     '<span class="meta-chip"><span class="meta-chip-label">rank</span>' + camp.rank + ' / ' + getSubCampaignsForCountry(camp.country).length + '</span>' +
@@ -4933,6 +4969,7 @@ function renderCampaignsView() {
     })() +
     drivePill +
     briefPill +
+    finalVideosPill +
     (function() {
       // Only show the slack pill when a per-campaign override is set. No override \u2014 no
       // pill (country/global webhook is doing its job silently). If set but not a valid
@@ -4952,7 +4989,8 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(\'' + camp.id + '\')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(\'' + camp.id + '\')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(\'' + camp.id + '\')">\u{1F4AC} Export for Slack</button></div></div></div>' +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>' +
+      '<button class="edit-btn" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(\'' + camp.id + '\')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(\'' + camp.id + '\')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(\'' + camp.id + '\')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
       : '<div class="camp-brief">' + (camp.brief ? escapeHtml(camp.brief) : '<em style="color:var(--text3)">No brief set</em>') + '</div>') +
