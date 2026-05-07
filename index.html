@@ -4813,6 +4813,12 @@ function renderSidebar() {
             '<div class="country-count">' + subs.length + '</div>' +
           '</div>';
     }
+    if (!compact) {
+      html += '<div class="country-action-btns">' +
+        '<button class="add-sub-btn" onclick="App.addSub(\'' + country.code + '\')">+ Add Campaign</button>' +
+        '<button class="add-sub-btn" onclick="App.showImportModal()">⬇ Import</button>' +
+      '</div>';
+    }
     if (isOpen) {
       html += '<div class="subcamp-list open" data-country="' + country.code + '">';
       // In compact mode, only show the currently-selected sub-campaign for this country.
@@ -4875,12 +4881,6 @@ function renderSidebar() {
         }
       }
       html += '</div>';
-    }
-    if (!compact) {
-      html += '<div class="country-action-btns">' +
-        '<button class="add-sub-btn" onclick="App.addSub(\'' + country.code + '\')">+ Add Campaign</button>' +
-        '<button class="add-sub-btn" onclick="App.showImportModal()">⬇ Import</button>' +
-      '</div>';
     }
     html += '</div>';
   }
