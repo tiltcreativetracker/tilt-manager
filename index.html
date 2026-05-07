@@ -45,6 +45,12 @@
   .tab-badge.alert { background: var(--amber-text); color: var(--amber-bg); }
   .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
   .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-text); box-shadow: 0 0 6px var(--green-text); }
+  .sync-indicator { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text3); transition: opacity 0.4s ease; opacity: 0; pointer-events: none; }
+  .sync-indicator.visible { opacity: 1; }
+  .sync-indicator.saved { color: var(--green-text); }
+  .sync-indicator.error { color: var(--red-text); }
+  .sync-spinner { width: 10px; height: 10px; border: 1.5px solid var(--text3); border-top-color: var(--accent2); border-radius: 50%; animation: sync-spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes sync-spin { to { transform: rotate(360deg); } }
 
   .main { display: flex; flex: 1; overflow: hidden; }
 
@@ -147,6 +153,8 @@
   .cat-usage { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; min-width: 70px; text-align: right; }
   .add-sub-btn { margin: 4px 16px 6px 44px; padding: 5px 8px; border-radius: 5px; border: 1px dashed var(--border2); background: transparent; color: var(--text3); cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 500; width: calc(100% - 60px); transition: all 0.12s; }
   .add-sub-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+  .country-action-btns { display: flex; gap: 6px; padding: 2px 16px 6px 44px; }
+  .country-action-btns .add-sub-btn { margin: 0; width: auto; flex: 1; }
   .sidebar-scroll { flex: 1; overflow-y: auto; padding: 2px 0 8px; }
   .reorder-btn { margin: 0 12px 8px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; justify-content: center; transition: all 0.12s; }
   .reorder-btn:hover { background: var(--accent-dim); color: var(--accent2); border-color: var(--accent); }
@@ -1307,6 +1315,8 @@
 
     /* Top-bar status indicator dot (the small "live" dot) */
     .status-dot { background: #0a7a55; box-shadow: 0 0 6px rgba(10,122,85,0.4); }
+    .sync-indicator.saved { color: #0a7a55; }
+    .sync-spinner { border-color: #bbb; border-top-color: #6a60c8; }
 
     /* Logo brand dot — stronger glow on light bg */
     .logo-dot { box-shadow: 0 0 6px rgba(106,96,200,0.5); }
@@ -1489,6 +1499,8 @@ var Fb = {
   _firstSnapshot: true,     // first incoming snapshot triggers init/migration logic
   _unsub: null,             // unsubscribe handle for the state listener
   _ready: false,            // true once the first snapshot has been processed
+  _syncStatus: 'idle',      // 'idle' | 'pending' | 'saving' | 'saved' | 'error'
+  _syncSavedTimer: null,    // timer to clear 'saved' state after display
 
   // Build the JSON snapshot we persist. Must match the shape that saveState() / loadState()
   // already use, plus a few attribution fields stamped on every write.
@@ -1545,7 +1557,7 @@ var Fb = {
     // doesn't block sync forever.
     var ae = document.activeElement;
     var aeBusy = ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
-    if ((aeBusy || (typeof PtrDrag !== 'undefined' && PtrDrag.active)) && (Fb._snapshotRetries || 0) < 8) {
+    if ((aeBusy || (typeof PtrDrag !== 'undefined' && PtrDrag.active) || Fb._uploadTimer) && (Fb._snapshotRetries || 0) < 8) {
       Fb._pendingSnapshotData = data;
       Fb._snapshotRetries = (Fb._snapshotRetries || 0) + 1;
       clearTimeout(Fb._snapshotRetryTimer);
@@ -1673,6 +1685,9 @@ var Fb = {
     if (!Fb._ready) return; // don't write until we've seen the first snapshot
     if (Fb._uploadTimer) clearTimeout(Fb._uploadTimer);
     Fb._uploadTimer = setTimeout(Fb.uploadNow, 600);
+    if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
+    Fb._syncStatus = 'saving';
+    if (typeof render === 'function' && Auth._booted) render();
   },
 
   uploadNow: function() {
@@ -1682,10 +1697,18 @@ var Fb = {
     var json = JSON.stringify(snap);
     if (json === Fb._lastUploadJson) return Promise.resolve();
     Fb._lastUploadJson = json;
-    return fbDb.doc(Fb.STATE_DOC).set(snap).catch(function(err) {
+    return fbDb.doc(Fb.STATE_DOC).set(snap).then(function() {
+      Fb._syncStatus = 'saved';
+      if (typeof render === 'function' && Auth._booted) render();
+      Fb._syncSavedTimer = setTimeout(function() {
+        Fb._syncStatus = 'idle';
+        if (typeof render === 'function' && Auth._booted) render();
+      }, 2500);
+    }).catch(function(err) {
       console.warn('[Fb] upload failed:', err);
-      // Reset the dedup hash so the next saveState retries.
       Fb._lastUploadJson = null;
+      Fb._syncStatus = 'error';
+      if (typeof render === 'function' && Auth._booted) render();
     });
   },
 
@@ -2713,6 +2736,12 @@ var EDITABLE_FIELDS = {
     linkLabel: 'Frame',
     value: function(a) { return a.finalVideo || ''; },
     appMethod: 'setAssetFinalVideo'
+  },
+  sparksCode: {
+    kind: 'text',
+    display: function(a) { return '<span>' + escapeHtml(a.sparksCode || '') + '</span>'; },
+    value: function(a) { return a.sparksCode || ''; },
+    appMethod: 'setAssetSparksCode'
   },
   qc: {
     kind: 'select',
@@ -4159,7 +4188,14 @@ function showAddSubCampaignModal(forCountry) {
       monthYear: document.getElementById('f-cmonth').value || '',
       hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked
     };
-    STATE.campaigns.push(camp);
+    // Insert above any done campaigns for this country so new work sits at the top.
+    var firstDoneIdx = -1;
+    for (var ci = 0; ci < STATE.campaigns.length; ci++) {
+      if (STATE.campaigns[ci].country === country && STATE.campaigns[ci].done) {
+        firstDoneIdx = ci; break;
+      }
+    }
+    if (firstDoneIdx === -1) { STATE.campaigns.push(camp); } else { STATE.campaigns.splice(firstDoneIdx, 0, camp); }
     reorderCampaigns(true);
     STATE.activeSubCampaignId = camp.id;
     STATE.expandedCountries[country] = true;
@@ -4690,7 +4726,13 @@ function renderTopbar() {
       '<div class="logo"><div class="logo-dot"></div>Tilt <span>/ Creative Tracker</span></div>' +
       '<div class="topbar-tabs">' + tabsHtml + '</div>' +
       '<div class="topbar-right">' +
-        '<div class="status-dot"></div>' +
+        (function() {
+          var s = (typeof Fb !== 'undefined') ? Fb._syncStatus : 'idle';
+          if (s === 'saving') return '<div class="sync-indicator visible"><div class="sync-spinner"></div>Saving\u2026</div>';
+          if (s === 'saved')  return '<div class="sync-indicator visible saved">\u2713 All changes saved</div>';
+          if (s === 'error')  return '<div class="sync-indicator visible error">\u26A0 Save failed</div>';
+          return '<div class="sync-indicator"></div>';
+        })() +
         '<span>' + STATE.countries.length + ' countries \u00B7 ' + STATE.campaigns.length + ' subs \u00B7 ' + STATE.assets.length + ' assets</span>' +
         userChip +
       '</div>' +
@@ -4813,12 +4855,13 @@ function renderSidebar() {
             '</div>';
         }
       }
-      // "Add sub-campaign" button is hidden in compact mode to save room; use full mode
-      // or the Edit modal to add. This is a deliberate tradeoff for the compact width.
-      if (!compact) {
-        html += '<button class="add-sub-btn" onclick="App.addSub(\'' + country.code + '\')">+ Add Campaign</button>';
-      }
       html += '</div>';
+    }
+    if (!compact) {
+      html += '<div class="country-action-btns">' +
+        '<button class="add-sub-btn" onclick="App.addSub(\'' + country.code + '\')">+ Add Campaign</button>' +
+        '<button class="add-sub-btn" onclick="App.showImportModal()">⬇ Import</button>' +
+      '</div>';
     }
     html += '</div>';
   }
@@ -4879,9 +4922,11 @@ function renderCampaignsView() {
   // in the header instead of one-link-per-video. The columns are removed from
   // BOTH the <thead> below and each row, and the empty-state colspan adjusts.
   var hideLinkCols = !!camp.hideAssetLinkCols;
+  var showSparksCode = ['IT', 'ES', 'PL'].indexOf(camp.country) !== -1;
   var rows = '';
   if (filtered.length === 0) {
-    rows = '<tr><td colspan="' + (hideLinkCols ? 13 : 15) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
+    var baseColspan = hideLinkCols ? 13 : 15;
+    rows = '<tr><td colspan="' + (baseColspan + (showSparksCode ? 1 : 0)) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
   } else {
     for (var i = 0; i < filtered.length; i++) {
       var a = filtered[i];
@@ -4896,6 +4941,7 @@ function renderCampaignsView() {
             '<td class="link-cell">' + renderEditableCell(a, 'editingBrief') + '</td>') +
           '<td>' + renderEditableCell(a, 'editor') + '</td>' +
           '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
+          (showSparksCode ? '<td>' + renderEditableCell(a, 'sparksCode') + '</td>' : '') +
           '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
           '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
@@ -5011,7 +5057,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th><th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th>CH Date Approved</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th>CH Date Approved</th><th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -9965,6 +10011,19 @@ var App = {
     a.finalVideo = trimmed;
     pushVersion(a, vhPre, ['finalVideo']);
     logAction('updated', 'Asset "' + a.name + '" final video \u2192 ' + (trimmed ? 'updated' : 'cleared'));
+    render();
+  },
+
+  setAssetSparksCode: function(id, val) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var trimmed = String(val || '').trim();
+    if (a.sparksCode === trimmed) { render(); return; }
+    recordUndo(a, ['sparksCode'], 'sparks code');
+    var vhPre = snapshotAsset(a);
+    a.sparksCode = trimmed;
+    pushVersion(a, vhPre, ['sparksCode']);
+    logAction('updated', 'Asset "' + a.name + '" sparks code → ' + (trimmed || 'cleared'));
     render();
   },
 
