@@ -1679,6 +1679,25 @@ var Fb = {
   },
 
   // Debounced upload. Coalesces rapid saveState() calls into one write per ~600ms.
+  _updateSyncDom: function() {
+    var el = document.querySelector('.sync-indicator');
+    if (!el) return;
+    var s = Fb._syncStatus;
+    if (s === 'saving') {
+      el.className = 'sync-indicator visible';
+      el.innerHTML = '<div class="sync-spinner"></div>Saving…';
+    } else if (s === 'saved') {
+      el.className = 'sync-indicator visible saved';
+      el.innerHTML = '✓ All changes saved';
+    } else if (s === 'error') {
+      el.className = 'sync-indicator visible error';
+      el.innerHTML = '⚠ Save failed';
+    } else {
+      el.className = 'sync-indicator';
+      el.innerHTML = '';
+    }
+  },
+
   scheduleUpload: function() {
     if (Fb._suppressUpload) return;
     if (!Auth.user) return;
@@ -1687,7 +1706,7 @@ var Fb = {
     Fb._uploadTimer = setTimeout(Fb.uploadNow, 600);
     if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
     Fb._syncStatus = 'saving';
-    if (typeof render === 'function' && Auth._booted) render();
+    Fb._updateSyncDom();
   },
 
   uploadNow: function() {
@@ -1699,16 +1718,16 @@ var Fb = {
     Fb._lastUploadJson = json;
     return fbDb.doc(Fb.STATE_DOC).set(snap).then(function() {
       Fb._syncStatus = 'saved';
-      if (typeof render === 'function' && Auth._booted) render();
+      Fb._updateSyncDom();
       Fb._syncSavedTimer = setTimeout(function() {
         Fb._syncStatus = 'idle';
-        if (typeof render === 'function' && Auth._booted) render();
+        Fb._updateSyncDom();
       }, 2500);
     }).catch(function(err) {
       console.warn('[Fb] upload failed:', err);
       Fb._lastUploadJson = null;
       Fb._syncStatus = 'error';
-      if (typeof render === 'function' && Auth._booted) render();
+      Fb._updateSyncDom();
     });
   },
 
