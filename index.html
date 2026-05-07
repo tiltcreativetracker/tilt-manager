@@ -51,6 +51,11 @@
   .sync-indicator.error { color: var(--red-text); }
   .sync-spinner { width: 10px; height: 10px; border: 1.5px solid var(--text3); border-top-color: var(--accent2); border-radius: 50%; animation: sync-spin 0.7s linear infinite; flex-shrink: 0; }
   @keyframes sync-spin { to { transform: rotate(360deg); } }
+  .presence-stack { display: flex; align-items: center; margin-right: 2px; }
+  .presence-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; border: 2px solid var(--bg2); cursor: default; margin-left: -7px; flex-shrink: 0; transition: transform 0.15s; position: relative; }
+  .presence-avatar:first-child { margin-left: 0; }
+  .presence-avatar:hover { transform: translateY(-2px); z-index: 10; }
+  .presence-avatar-more { background: var(--bg4); color: var(--text2); font-size: 9px; border-color: var(--border2); }
 
   .main { display: flex; flex: 1; overflow: hidden; }
 
@@ -1704,9 +1709,6 @@ var Fb = {
     if (!Fb._ready) return; // don't write until we've seen the first snapshot
     if (Fb._uploadTimer) clearTimeout(Fb._uploadTimer);
     Fb._uploadTimer = setTimeout(Fb.uploadNow, 600);
-    if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
-    Fb._syncStatus = 'saving';
-    Fb._updateSyncDom();
   },
 
   uploadNow: function() {
@@ -1715,6 +1717,10 @@ var Fb = {
     var snap = Fb.buildSnapshot();
     var json = JSON.stringify(snap);
     if (json === Fb._lastUploadJson) return Promise.resolve();
+    // Only show the indicator once we know something actually changed.
+    if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
+    Fb._syncStatus = 'saving';
+    Fb._updateSyncDom();
     Fb._lastUploadJson = json;
     return fbDb.doc(Fb.STATE_DOC).set(snap).then(function() {
       Fb._syncStatus = 'saved';
@@ -1840,6 +1846,101 @@ var Fb = {
       return Promise.reject(new Error('Invalid role: ' + role));
     }
     return fbDb.collection('users').doc(uid).update({ role: role });
+  }
+};
+
+// =====================================================================
+// PRESENCE \u2014 tracks who is online and what they're viewing, stored in
+// Firestore `presence/{uid}`. Updates on tab/campaign change and every
+// 30 seconds. Deleted on tab close. Rendered as stacked avatar circles
+// in the topbar, matching Google Sheets' "who's here" pattern.
+// =====================================================================
+var PRESENCE_COLLECTION = 'presence';
+var PRESENCE_COLORS = ['#7f77dd','#1d9e75','#e8a838','#e24b4a','#85b7eb','#c084f5','#5dcaa5','#f472b6'];
+var _presenceUsers = [];
+var _presenceHeartbeat = null;
+
+var Presence = {
+  _color: function(uid) {
+    var h = 0;
+    for (var i = 0; i < uid.length; i++) h = Math.imul(31, h) + uid.charCodeAt(i) | 0;
+    return PRESENCE_COLORS[Math.abs(h) % PRESENCE_COLORS.length];
+  },
+  _initials: function(name) {
+    var parts = (name || '?').trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return (name || '?').slice(0, 2).toUpperCase();
+  },
+  _location: function(tab, campaignId) {
+    var labels = { campaigns: 'Campaigns', board: 'Board', notifications: 'Notifications',
+      log: 'Daily Log', editingCalendar: 'Editing Calendar', automations: 'Automations', config: 'Config' };
+    if (tab === 'campaigns' && campaignId) {
+      var camp = findCampaignById(campaignId);
+      if (camp) return camp.name;
+    }
+    return labels[tab] || tab;
+  },
+  _html: function() {
+    if (!_presenceUsers.length) return '';
+    var MAX = 5;
+    var shown = _presenceUsers.slice(0, MAX);
+    var extra = _presenceUsers.length - MAX;
+    var html = '<div class="presence-stack">';
+    shown.forEach(function(u) {
+      var tip = escapeHtml(u.name + ' \u2014 ' + u.location);
+      html += '<div class="presence-avatar" style="background:' + u.color + '" title="' + tip + '">' + escapeHtml(Presence._initials(u.name)) + '</div>';
+    });
+    if (extra > 0) html += '<div class="presence-avatar presence-avatar-more" title="' + extra + ' more">+' + extra + '</div>';
+    html += '</div>';
+    return html;
+  },
+  _updateDom: function() {
+    var el = document.querySelector('.presence-stack');
+    if (!el) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = Presence._html();
+    var next = tmp.firstChild;
+    el.parentNode.replaceChild(next || document.createTextNode(''), el);
+  },
+  update: function() {
+    if (!Auth.user || typeof fbDb === 'undefined') return;
+    fbDb.collection(PRESENCE_COLLECTION).doc(Auth.user.uid).set({
+      uid: Auth.user.uid,
+      name: Auth.user.displayName || Auth.user.email || 'Unknown',
+      tab: STATE.tab || 'campaigns',
+      campaignId: STATE.activeSubCampaignId ? String(STATE.activeSubCampaignId) : null,
+      lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(e) { console.warn('[Presence] write failed', e); });
+  },
+  leave: function() {
+    if (_presenceHeartbeat) { clearInterval(_presenceHeartbeat); _presenceHeartbeat = null; }
+    if (!Auth.user || typeof fbDb === 'undefined') return;
+    fbDb.collection(PRESENCE_COLLECTION).doc(Auth.user.uid).delete().catch(function() {});
+  },
+  subscribe: function() {
+    if (typeof fbDb === 'undefined') return;
+    fbDb.collection(PRESENCE_COLLECTION).onSnapshot(function(snap) {
+      var now = Date.now();
+      var STALE = 2 * 60 * 1000;
+      _presenceUsers = [];
+      snap.forEach(function(doc) {
+        var d = doc.data();
+        if (!d || !d.uid || d.uid === Auth.user.uid) return;
+        var ts = d.lastSeen && typeof d.lastSeen.toMillis === 'function' ? d.lastSeen.toMillis()
+          : (typeof d.lastSeen === 'number' ? d.lastSeen : 0);
+        if (now - ts > STALE) return;
+        _presenceUsers.push({ uid: d.uid, name: d.name || d.uid,
+          location: Presence._location(d.tab, d.campaignId),
+          color: Presence._color(d.uid) });
+      });
+      Presence._updateDom();
+    }, function(e) { console.warn('[Presence] subscribe failed', e); });
+  },
+  init: function() {
+    Presence.update();
+    Presence.subscribe();
+    _presenceHeartbeat = setInterval(Presence.update, 30000);
+    window.addEventListener('beforeunload', Presence.leave);
   }
 };
 
@@ -4745,6 +4846,7 @@ function renderTopbar() {
       '<div class="logo"><div class="logo-dot"></div>Tilt <span>/ Creative Tracker</span></div>' +
       '<div class="topbar-tabs">' + tabsHtml + '</div>' +
       '<div class="topbar-right">' +
+        (typeof _presenceUsers !== 'undefined' ? Presence._html() : '') +
         (function() {
           var s = (typeof Fb !== 'undefined') ? Fb._syncStatus : 'idle';
           if (s === 'saving') return '<div class="sync-indicator visible"><div class="sync-spinner"></div>Saving\u2026</div>';
@@ -8881,6 +8983,12 @@ function sendPendingBatch(editor, opts) {
       }
       return;
     }
+    // Re-check after the async claim \u2014 user may have dismissed items while the
+    // Firestore transaction was in flight. Rebuild windowItems/msg from current state.
+    windowItems = batch.items.slice(0, BATCH_SIZE_LIMIT);
+    extraItems  = batch.items.slice(BATCH_SIZE_LIMIT);
+    if (!windowItems.length) { clearInFlight(); return; }
+    msg = buildBatchMessage(editor, windowItems);
     var primary = postToSlack(url, msg, useThread ? thread.threadTs : undefined);
     return primary.then(function(r) {
       if (!r.ok) {
@@ -9449,7 +9557,7 @@ function restoreScrollPositions(snap) {
 
 // ===================== EVENTS =====================
 var App = {
-  setTab: function(t) { STATE.tab = t; render(); },
+  setTab: function(t) { STATE.tab = t; Presence.update(); render(); },
 
   // Editing Calendar month nav. STATE.calendarMonth is transient (not in saveState),
   // so reloads always land on the current month.
@@ -9545,6 +9653,7 @@ var App = {
     STATE.activeSubCampaignId = id;
     var c = findCampaignById(id);
     if (c) STATE.expandedCountries[c.country] = true;
+    Presence.update();
     render();
   },
   // Switch to the Campaigns tab AND focus the given sub-campaign. Used by the
@@ -11868,6 +11977,7 @@ bootApp = function() {
     return;
   }
   Auth._booted = true;
+  Presence.init();
 
   // Seed the daily-tally date flag on first run so we don't fire on first load.
   // Lives outside STATE because the scheduler runs across tabs.
