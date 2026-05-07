@@ -1712,17 +1712,23 @@ var Fb = {
   },
 
   uploadNow: function() {
-    if (Fb._uploadTimer) { clearTimeout(Fb._uploadTimer); Fb._uploadTimer = null; }
-    if (!Auth.user) return Promise.resolve();
+    if (Fb._uploadTimer) clearTimeout(Fb._uploadTimer);
+    // Use a truthy sentinel (not null) so applySnapshot retries keep waiting
+    // until the async Firestore write fully resolves. Clearing to null immediately
+    // (as before) opened a window where a queued retry could apply stale data.
+    var _sentinel = {};
+    Fb._uploadTimer = _sentinel;
+    if (!Auth.user) { Fb._uploadTimer = null; return Promise.resolve(); }
     var snap = Fb.buildSnapshot();
     var json = JSON.stringify(snap);
-    if (json === Fb._lastUploadJson) return Promise.resolve();
+    if (json === Fb._lastUploadJson) { Fb._uploadTimer = null; return Promise.resolve(); }
     // Only show the indicator once we know something actually changed.
     if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
     Fb._syncStatus = 'saving';
     Fb._updateSyncDom();
     Fb._lastUploadJson = json;
     return fbDb.doc(Fb.STATE_DOC).set(snap).then(function() {
+      if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       Fb._syncStatus = 'saved';
       Fb._updateSyncDom();
       Fb._syncSavedTimer = setTimeout(function() {
@@ -1730,6 +1736,7 @@ var Fb = {
         Fb._updateSyncDom();
       }, 2500);
     }).catch(function(err) {
+      if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
       Fb._lastUploadJson = null;
       Fb._syncStatus = 'error';
@@ -7734,6 +7741,14 @@ function executeSheetImport() {
     return;
   }
 
+  // Discard any queued Firestore snapshot retry before mutating STATE.
+  // A pending retry carries pre-import data and would overwrite the new campaign.
+  if (typeof Fb !== 'undefined') {
+    Fb._pendingSnapshotData = null;
+    clearTimeout(Fb._snapshotRetryTimer);
+    Fb._snapshotRetries = 0;
+  }
+
   var importedCampaigns = 0;
   var skippedCampaigns = 0;
   var importedAssets = 0;
@@ -7827,6 +7842,9 @@ function executeSheetImport() {
         importedAssets + ' assets', 'success');
   closeAllModals();
   render();
+  // Force an immediate Firestore write instead of waiting for the 600ms debounce.
+  // This ensures the new campaign is committed before any incoming snapshot can overwrite it.
+  if (typeof Fb !== 'undefined' && Fb.uploadNow) Fb.uploadNow();
 }
 
 function renderConfigView() {
