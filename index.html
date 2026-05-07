@@ -1880,27 +1880,24 @@ var Presence = {
     }
     return labels[tab] || tab;
   },
-  _html: function() {
-    if (!_presenceUsers.length) return '';
+  // Returns just the avatar elements (not the wrapper) \u2014 used both by renderTopbar
+  // and _updateDom so the wrapper <div class="presence-stack"> always stays in the DOM.
+  _avatarsHtml: function() {
     var MAX = 5;
     var shown = _presenceUsers.slice(0, MAX);
     var extra = _presenceUsers.length - MAX;
-    var html = '<div class="presence-stack">';
+    var html = '';
     shown.forEach(function(u) {
       var tip = escapeHtml(u.name + ' \u2014 ' + u.location);
       html += '<div class="presence-avatar" style="background:' + u.color + '" title="' + tip + '">' + escapeHtml(Presence._initials(u.name)) + '</div>';
     });
     if (extra > 0) html += '<div class="presence-avatar presence-avatar-more" title="' + extra + ' more">+' + extra + '</div>';
-    html += '</div>';
     return html;
   },
+  // Surgically updates just the wrapper's contents \u2014 no full re-render needed.
   _updateDom: function() {
     var el = document.querySelector('.presence-stack');
-    if (!el) return;
-    var tmp = document.createElement('div');
-    tmp.innerHTML = Presence._html();
-    var next = tmp.firstChild;
-    el.parentNode.replaceChild(next || document.createTextNode(''), el);
+    if (el) el.innerHTML = Presence._avatarsHtml();
   },
   update: function() {
     if (!Auth.user || typeof fbDb === 'undefined') return;
@@ -4846,7 +4843,7 @@ function renderTopbar() {
       '<div class="logo"><div class="logo-dot"></div>Tilt <span>/ Creative Tracker</span></div>' +
       '<div class="topbar-tabs">' + tabsHtml + '</div>' +
       '<div class="topbar-right">' +
-        (typeof _presenceUsers !== 'undefined' ? Presence._html() : '') +
+        '<div class="presence-stack">' + (typeof _presenceUsers !== 'undefined' ? Presence._avatarsHtml() : '') + '</div>' +
         (function() {
           var s = (typeof Fb !== 'undefined') ? Fb._syncStatus : 'idle';
           if (s === 'saving') return '<div class="sync-indicator visible"><div class="sync-spinner"></div>Saving\u2026</div>';
