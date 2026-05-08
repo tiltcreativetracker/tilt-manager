@@ -8408,6 +8408,13 @@ function loadState() {
       // show in "To Do Today" via the ETA filter (not the assignment-date filter).
       if (a.assignedAt === undefined) a.assignedAt = '';
     });
+    // Trim versionHistory on assets belonging to done campaigns \u2014 keeps the
+    // Firestore document under the 1MB hard limit as history accumulates.
+    var _doneCampIds = {};
+    STATE.campaigns.forEach(function(c) { if (c.done) _doneCampIds[String(c.id)] = true; });
+    STATE.assets.forEach(function(a) {
+      if (_doneCampIds[String(a.campaignId)]) a.versionHistory = [];
+    });
     return true;
   } catch (e) {
     console.warn('Failed to load state', e);
