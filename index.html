@@ -45,7 +45,7 @@
   .tab-badge.alert { background: var(--amber-text); color: var(--amber-bg); }
   .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
   .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-text); box-shadow: 0 0 6px var(--green-text); }
-  .sync-indicator { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text3); transition: opacity 0.4s ease; opacity: 0; pointer-events: none; white-space: nowrap; }
+  .sync-indicator { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text3); transition: opacity 0.4s ease; opacity: 0; pointer-events: none; }
   .sync-indicator.visible { opacity: 1; }
   .sync-indicator.saved { color: var(--green-text); }
   .sync-indicator.error { color: var(--red-text); }
@@ -1443,9 +1443,6 @@ var Fb = {
   _ready: false,            // true once the first snapshot has been processed
   _syncStatus: 'idle',      // 'idle' | 'pending' | 'saving' | 'saved' | 'error'
   _syncSavedTimer: null,    // timer to clear 'saved' state after display
-  _pendingLocalJson: null,  // snapshot JSON that failed to reach Firestore; non-null = dirty
-  _retryTimer: null,        // handle for the next retry attempt
-  _retryDelay: 3000,        // current backoff delay in ms (doubles on each failure, caps at 60s)
 
   // Build the JSON snapshot we persist. Must match the shape that saveState() / loadState()
   // already use, plus a few attribution fields stamped on every write.
@@ -1527,12 +1524,6 @@ var Fb = {
     }
     Fb._snapshotRetries = 0;
     Fb._pendingSnapshotData = null;
-    // Guard: if we have unconfirmed local changes, don't let the remote snapshot
-    // overwrite STATE. Schedule a retry so the local data gets pushed to Firestore.
-    if (Fb._pendingLocalJson) {
-      Fb.scheduleRetry(2000);
-      return;
-    }
     Fb._suppressUpload = true;
     try {
       // Per-user UI fields that must NEVER be overwritten by incoming snapshots, even if
@@ -1659,9 +1650,6 @@ var Fb = {
     } else if (s === 'saved') {
       el.className = 'sync-indicator visible saved';
       el.innerHTML = '✓ All changes saved';
-    } else if (s === 'retrying') {
-      el.className = 'sync-indicator visible error';
-      el.innerHTML = '⚠ Saved locally — retrying…';
     } else if (s === 'error') {
       el.className = 'sync-indicator visible error';
       el.innerHTML = '⚠ Save failed';
@@ -1677,15 +1665,6 @@ var Fb = {
     if (!Fb._ready) return; // don't write until we've seen the first snapshot
     if (Fb._uploadTimer) clearTimeout(Fb._uploadTimer);
     Fb._uploadTimer = setTimeout(Fb.uploadNow, 600);
-  },
-
-  scheduleRetry: function(delay) {
-    if (Fb._retryTimer) clearTimeout(Fb._retryTimer);
-    var d = delay != null ? delay : Fb._retryDelay;
-    Fb._retryTimer = setTimeout(function() {
-      Fb._retryTimer = null;
-      if (Fb._pendingLocalJson) Fb.uploadNow();
-    }, d);
   },
 
   uploadNow: function() {
@@ -1732,9 +1711,6 @@ var Fb = {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       Fb._lastUploadJson = json;
       Fb._lastUploadedAssets = currentAssetsMap;
-      Fb._pendingLocalJson = null;  // confirmed — no longer dirty
-      Fb._retryDelay = 3000;        // reset backoff for next failure
-      if (Fb._retryTimer) { clearTimeout(Fb._retryTimer); Fb._retryTimer = null; }
       Fb._syncStatus = 'saved';
       Fb._updateSyncDom();
       Fb._syncSavedTimer = setTimeout(function() {
@@ -1745,15 +1721,10 @@ var Fb = {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
       Fb._lastUploadJson = null;
-      // Persist the failed snapshot so applySnapshot won't clobber it, then retry
-      // with exponential backoff (3s → 8s → 20s → 60s cap).
-      Fb._pendingLocalJson = json;
-      Fb._retryDelay = Math.min((Fb._retryDelay || 3000) * 2.5, 60000);
-      Fb._syncStatus = 'retrying';
+      Fb._syncStatus = 'error';
       Fb._updateSyncDom();
-      Fb.scheduleRetry(Fb._retryDelay);
       if (typeof toast === 'function') {
-        toast('Firebase save failed — data saved locally, retrying…', 'error');
+        toast('Firebase save failed: ' + (err.code || err.message || String(err)), 'error');
       }
     });
   },
