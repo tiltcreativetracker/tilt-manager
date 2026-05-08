@@ -1432,9 +1432,12 @@ function bootApp() { /* replaced at end of script */ }
 // =====================================================================
 var Fb = {
   STATE_DOC: 'state/app',
+  ASSETS_COLL: 'state/app/assets',
   _suppressUpload: false,
   _uploadTimer: null,
   _lastUploadJson: null,    // last-uploaded payload JSON, to skip no-op re-writes
+  _lastUploadedAssets: {},  // map of assetId → JSON string, for subcollection diffing
+  _assetsMigrated: false,   // true once legacy assets have been written to subcollection
   _firstSnapshot: true,     // first incoming snapshot triggers init/migration logic
   _unsub: null,             // unsubscribe handle for the state listener
   _ready: false,            // true once the first snapshot has been processed
@@ -1453,7 +1456,9 @@ var Fb = {
   buildSnapshot: function() {
     // sentNotifications and activityLog are sliced to keep the Firestore
     // document under the 1MB hard limit. Full history stays in localStorage.
-    return {
+    // Target 900KB so there's headroom for campaign/asset growth.
+    var TARGET_BYTES = 900 * 1024;
+    var snap = {
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
@@ -1472,10 +1477,9 @@ var Fb = {
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
-      assets: STATE.assets,
       pendingBatches: STATE.pendingBatches,
-      sentNotifications: STATE.sentNotifications.slice(0, 10),
-      activityLog: STATE.activityLog.slice(0, 100),
+      sentNotifications: STATE.sentNotifications.slice(0, 5),
+      activityLog: STATE.activityLog.slice(0, 50),
       nextAssetId: STATE.nextAssetId,
       nextCampaignId: STATE.nextCampaignId,
       nextBatchItemId: STATE.nextBatchItemId,
@@ -1483,6 +1487,15 @@ var Fb = {
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedAt: Date.now()
     };
+    // Safety net: if still over target, progressively trim history fields.
+    if (JSON.stringify(snap).length > TARGET_BYTES) {
+      snap.activityLog = snap.activityLog.slice(0, 20);
+    }
+    if (JSON.stringify(snap).length > TARGET_BYTES) {
+      snap.activityLog = [];
+      snap.sentNotifications = [];
+    }
+    return snap;
   },
 
   // Apply an incoming snapshot to STATE. Wrapped in suppressUpload so the resulting
@@ -1544,6 +1557,12 @@ var Fb = {
 
         STATE[k] = data[k];
       });
+      // Legacy migration: if the main doc still has an assets array (old format),
+      // seed STATE.assets from it and write them to the subcollection.
+      if (Array.isArray(data.assets) && data.assets.length > 0 && !Fb._assetsMigrated) {
+        STATE.assets = data.assets;
+        setTimeout(function() { Fb.migrateAssetsToSubcollection(); }, 200);
+      }
       // Backfill categories missing the color sub-object (created before this field existed).
       (STATE.categories || []).forEach(function(cat) {
         if (!cat.color && (cat.bg || cat.fg)) {
@@ -1658,14 +1677,40 @@ var Fb = {
     if (!Auth.user) { Fb._uploadTimer = null; return Promise.resolve(); }
     var snap = Fb.buildSnapshot();
     var json = JSON.stringify(snap);
-    if (json === Fb._lastUploadJson) { Fb._uploadTimer = null; return Promise.resolve(); }
+
+    // Diff assets to find what needs writing or deleting in the subcollection.
+    var currentAssetsMap = {};
+    STATE.assets.forEach(function(a) { currentAssetsMap[String(a.id)] = JSON.stringify(a); });
+    var assetsToWrite = STATE.assets.filter(function(a) {
+      return currentAssetsMap[String(a.id)] !== Fb._lastUploadedAssets[String(a.id)];
+    });
+    var assetIdsToDelete = Object.keys(Fb._lastUploadedAssets).filter(function(id) {
+      return !currentAssetsMap[id];
+    });
+
+    var mainDocChanged = (json !== Fb._lastUploadJson);
+    if (!mainDocChanged && assetsToWrite.length === 0 && assetIdsToDelete.length === 0) {
+      Fb._uploadTimer = null; return Promise.resolve();
+    }
+
     // Only show the indicator once we know something actually changed.
     if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
     Fb._syncStatus = 'saving';
     Fb._updateSyncDom();
-    Fb._lastUploadJson = json;
-    return fbDb.doc(Fb.STATE_DOC).set(snap).then(function() {
+
+    var batch = fbDb.batch();
+    if (mainDocChanged) batch.set(fbDb.doc(Fb.STATE_DOC), snap);
+    assetsToWrite.forEach(function(a) {
+      batch.set(fbDb.collection(Fb.ASSETS_COLL).doc(String(a.id)), a);
+    });
+    assetIdsToDelete.forEach(function(id) {
+      batch.delete(fbDb.collection(Fb.ASSETS_COLL).doc(id));
+    });
+
+    return batch.commit().then(function() {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
+      Fb._lastUploadJson = json;
+      Fb._lastUploadedAssets = currentAssetsMap;
       Fb._syncStatus = 'saved';
       Fb._updateSyncDom();
       Fb._syncSavedTimer = setTimeout(function() {
@@ -1678,7 +1723,60 @@ var Fb = {
       Fb._lastUploadJson = null;
       Fb._syncStatus = 'error';
       Fb._updateSyncDom();
+      if (typeof toast === 'function') {
+        toast('Firebase save failed: ' + (err.code || err.message || String(err)), 'error');
+      }
     });
+  },
+
+  // Subscribe to the assets subcollection. Updates STATE.assets in real time.
+  // Also handles the one-time migration: if the subcollection is empty but
+  // STATE.assets already has data (seeded from the legacy main doc), triggers migration.
+  subscribeAssets: function() {
+    fbDb.collection(Fb.ASSETS_COLL).onSnapshot(function(snapshot) {
+      if (snapshot.metadata.hasPendingWrites) return; // our own write, ignore echo
+      var assets = [];
+      snapshot.forEach(function(doc) { assets.push(doc.data()); });
+
+      if (assets.length === 0 && STATE.assets.length > 0 && !Fb._assetsMigrated) {
+        // Subcollection is empty but we have legacy assets from the main doc — migrate now.
+        Fb.migrateAssetsToSubcollection();
+        return;
+      }
+
+      Fb._suppressUpload = true;
+      STATE.assets = assets;
+      // Keep the diff map in sync so uploadNow doesn't re-write what we just received.
+      Fb._lastUploadedAssets = {};
+      assets.forEach(function(a) { Fb._lastUploadedAssets[String(a.id)] = JSON.stringify(a); });
+      if (typeof render === 'function' && Auth._booted) render();
+      setTimeout(function() { Fb._suppressUpload = false; }, 0);
+    }, function(err) {
+      console.warn('[Fb] assets listener error:', err);
+    });
+  },
+
+  // One-time migration: batch-write all STATE.assets into the subcollection.
+  // Splits into chunks of 400 to stay under Firestore's 500-op batch limit.
+  migrateAssetsToSubcollection: function() {
+    if (Fb._assetsMigrated) return;
+    Fb._assetsMigrated = true;
+    var assets = STATE.assets.slice();
+    var CHUNK = 400;
+    function writeChunk(i) {
+      if (i >= assets.length) return;
+      var batch = fbDb.batch();
+      assets.slice(i, i + CHUNK).forEach(function(a) {
+        batch.set(fbDb.collection(Fb.ASSETS_COLL).doc(String(a.id)), a);
+      });
+      batch.commit().then(function() {
+        writeChunk(i + CHUNK);
+      }).catch(function(err) {
+        console.warn('[Fb] asset migration chunk failed:', err);
+        Fb._assetsMigrated = false; // allow retry on next load
+      });
+    }
+    writeChunk(0);
   },
 
   // One-time migration: explicitly write current localStorage STATE up to Firestore.
@@ -7297,7 +7395,12 @@ function executeSheetImport() {
   render();
   // Force an immediate Firestore write instead of waiting for the 600ms debounce.
   // This ensures the new campaign is committed before any incoming snapshot can overwrite it.
-  if (typeof Fb !== 'undefined' && Fb.uploadNow) Fb.uploadNow();
+  if (typeof Fb !== 'undefined' && Fb.uploadNow) {
+    Fb.uploadNow().catch(function() {
+      // uploadNow already showed a toast; schedule a retry so the data isn't permanently lost
+      if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload();
+    });
+  }
 }
 
 function renderConfigView() {
@@ -11257,6 +11360,9 @@ bootApp = function() {
       Fb.subscribeAllUsers();
     }
   });
+
+  // Subscribe to the assets subcollection (separate from the main state doc).
+  Fb.subscribeAssets();
 
   // Subscribe to the canonical state doc. The first snapshot drives initial load.
   Fb.subscribe(function(hadData) {
