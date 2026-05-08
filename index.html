@@ -1451,6 +1451,8 @@ var Fb = {
   // survive YOUR reloads but don't override Sharm's view when she's looking at a different
   // campaign than you. See the parallel ignore-list in applySnapshot below.
   buildSnapshot: function() {
+    // sentNotifications and activityLog are sliced to keep the Firestore
+    // document under the 1MB hard limit. Full history stays in localStorage.
     return {
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       webhookUrl: STATE.webhookUrl,
@@ -1472,8 +1474,8 @@ var Fb = {
       campaigns: STATE.campaigns,
       assets: STATE.assets,
       pendingBatches: STATE.pendingBatches,
-      sentNotifications: STATE.sentNotifications,
-      activityLog: STATE.activityLog,
+      sentNotifications: STATE.sentNotifications.slice(0, 10),
+      activityLog: STATE.activityLog.slice(0, 100),
       nextAssetId: STATE.nextAssetId,
       nextCampaignId: STATE.nextCampaignId,
       nextBatchItemId: STATE.nextBatchItemId,
