@@ -219,72 +219,6 @@
   .video-name-cell > .inline-edit-input { flex: 1; min-width: 0; }
   .video-name-text { font-size: 13px; color: var(--text1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', monospace; }
   .version-tag { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; background: var(--accent-dim); color: var(--accent2); flex-shrink: 0; }
-  /* Version history clock icon next to the version tag. Always rendered (even with no
-     prior snapshots) so users can always enter the version history panel. Count badge
-     shows how many prior snapshots exist; zero shows a dash instead.
-     Clicking opens the history modal (App.showVersionHistory). */
-  .version-history-btn { background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text3); cursor: pointer; font-size: 11px; padding: 1px 4px; font-family: inherit; transition: all 0.12s; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px; }
-  .version-history-btn:hover { color: var(--accent2); border-color: var(--border2); background: var(--accent-dim); }
-  .version-history-btn.is-empty { color: var(--text3); opacity: 0.7; }
-  .version-history-btn .vh-count { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 700; }
-  .version-history-btn .vh-count.is-zero { opacity: 0.5; }
-
-  /* --- Google-Sheets-style version history panel ---
-     Wide modal with a two-column layout: a chronological timeline on the left grouped
-     by Today / Yesterday / date, and a detailed snapshot preview on the right. Entries
-     can be named (bookmarked) and restored (rolled-back). Modal is scrolling-internal
-     so the outer modal stays fixed-size. */
-  .modal.modal-vh { width: 960px; max-width: 96vw; padding: 0; overflow: hidden; display: flex; flex-direction: column; max-height: 88vh; }
-  .vh-modal-header { padding: 16px 22px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .vh-modal-title { font-size: 15px; font-weight: 700; color: var(--text1); letter-spacing: -0.2px; display: flex; align-items: center; gap: 8px; }
-  .vh-modal-title .vh-icon { font-size: 16px; }
-  .vh-modal-sub { font-size: 12px; color: var(--text3); margin-top: 4px; line-height: 1.5; }
-  .vh-body { display: grid; grid-template-columns: 280px 1fr; gap: 0; flex: 1; min-height: 0; overflow: hidden; }
-  .vh-timeline { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px 0 12px; background: var(--bg1); }
-  .vh-preview { overflow-y: auto; padding: 16px 22px 20px; background: var(--bg2); }
-  .vh-empty-timeline { padding: 24px 18px; color: var(--text3); font-size: 12px; text-align: center; font-style: italic; line-height: 1.6; }
-  .vh-group-header { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); padding: 10px 14px 4px; }
-  .vh-group-header:first-child { padding-top: 6px; }
-  .vh-entry-row { padding: 8px 12px; cursor: pointer; border-radius: 6px; margin: 2px 8px; border: 1px solid transparent; transition: background 0.12s, border-color 0.12s; display: flex; flex-direction: column; gap: 3px; }
-  .vh-entry-row:hover { background: var(--bg3); }
-  .vh-entry-row.selected { background: var(--accent-dim); border-color: var(--accent); }
-  .vh-entry-row-top { display: flex; align-items: center; gap: 6px; }
-  .vh-entry-row-time { font-size: 12px; color: var(--text1); font-weight: 600; font-family: 'JetBrains Mono', monospace; }
-  .vh-entry-row.selected .vh-entry-row-time { color: var(--accent2); }
-  .vh-entry-row-star { color: var(--amber-text); font-size: 11px; line-height: 1; }
-  .vh-entry-row-label { font-size: 12px; color: var(--accent2); font-weight: 600; }
-  .vh-entry-row-meta { font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .vh-entry-row-current { margin-left: auto; font-size: 9px; color: var(--green-text); background: var(--green-bg); padding: 1px 6px; border-radius: 3px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; }
-
-  .vh-preview-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .vh-preview-title { font-size: 13.5px; font-weight: 700; color: var(--text1); display: flex; align-items: center; gap: 6px; }
-  .vh-preview-title .vh-preview-star { color: var(--amber-text); font-size: 13px; }
-  .vh-preview-when { font-size: 11.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
-  .vh-preview-actions { display: flex; gap: 6px; margin-left: auto; }
-  .vh-action-btn { background: var(--bg3); border: 1px solid var(--border2); border-radius: 5px; color: var(--text1); cursor: pointer; font-size: 11.5px; padding: 5px 10px; font-family: inherit; transition: all 0.12s; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
-  .vh-action-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
-  .vh-action-btn-primary { background: var(--accent); color: var(--bg1); border-color: var(--accent); }
-  .vh-action-btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: var(--bg1); }
-  .vh-action-btn-danger:hover { border-color: var(--red); color: var(--red-text); background: var(--red-bg); }
-  .vh-action-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-  .vh-action-btn[disabled]:hover { background: var(--bg3); color: var(--text1); border-color: var(--border2); }
-
-  .vh-preview-changed { font-size: 11px; color: var(--text3); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .vh-changed-chip { display: inline-block; background: var(--amber-bg); color: var(--amber-text); padding: 2px 7px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.03em; }
-
-  .vh-snapshot-grid { display: flex; flex-direction: column; gap: 4px; }
-  .vh-snap-row { display: grid; grid-template-columns: 140px 1fr; column-gap: 16px; align-items: start; padding: 6px 8px; border-radius: 4px; border-left: 2px solid transparent; }
-  .vh-snap-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); padding-top: 3px; }
-  .vh-snap-value { font-size: 12.5px; color: var(--text1); word-break: break-word; line-height: 1.5; }
-  .vh-snap-value.is-empty { color: var(--text3); font-style: italic; }
-  .vh-snap-link { color: var(--blue-text); text-decoration: none; font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-all; }
-  .vh-snap-link:hover { color: var(--accent2); }
-  .vh-snap-row.is-changed { background: var(--amber-bg); border-left-color: var(--amber); padding-left: 10px; }
-  .vh-snap-row.is-changed .vh-snap-label { color: var(--amber-text); }
-
-  .vh-footer { padding: 10px 22px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-shrink: 0; }
-  .vh-footer-info { font-size: 11px; color: var(--text3); }
-  .vh-preview-empty { padding: 48px 24px; text-align: center; color: var(--text3); font-size: 13px; font-style: italic; }
   .cat-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 3px; background: var(--amber-bg); color: var(--amber-text); }
   .link-cell a { font-size: 12px; color: var(--blue-text); text-decoration: none; font-family: 'JetBrains Mono', monospace; display: inline-flex; align-items: center; gap: 3px; }
   .link-cell a:hover { color: var(--accent2); }
@@ -1605,6 +1539,7 @@ var Fb = {
       Object.keys(data).forEach(function(k) {
         if (k === '_lastEditedAt' || k === '_lastEditedBy' || k === '_lastEditedByName') return;
         if (PER_USER_UI_FIELDS[k]) return;
+
         STATE[k] = data[k];
       });
       // Backfill categories missing the color sub-object (created before this field existed).
@@ -2560,12 +2495,6 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     // ISO date stamped when categoryHeadQc transitions to 'Approved'. Cleared when
     // categoryHeadQc moves away from 'Approved'.
     chDateApproved: '',
-    // Version history: Google-Sheets-style full-asset snapshots captured before any
-    // field mutation (see VERSION HISTORY HELPERS block). Entries have the shape
-    // {id, snappedAt, label, named, changedFields, snapshot:{...VH_SNAPSHOT_FIELDS}}.
-    // Capped at VH_MAX_ENTRIES (50); unnamed entries are evicted first so user-
-    // labeled versions survive.
-    versionHistory: [],
     // ISO date (YYYY-MM-DD) of when this asset was most recently set to 'Assigned' status.
     // Powers the "To Do Today" column on the Today board. Updated whenever:
     //   - an editor is first assigned (status goes from Draft to Assigned)
@@ -2990,451 +2919,6 @@ function renderEditableCell(asset, field) {
   // default: text input
   return '<input type="text" class="inline-edit-input" autofocus value="' + escapeHtml(currentValue) + '" ' +
     commonHandlers + '>';
-}
-
-// ===================== VERSION HISTORY HELPERS =====================
-// Google-Sheets-style version history. Every meaningful asset change pushes a
-// snapshot of the pre-change state onto asset.versionHistory, so the timeline
-// always represents "what the asset looked like BEFORE the change that
-// produced this entry". Combined with the live asset state (shown as the
-// synthetic "Current" entry in the UI), this gives a full history.
-//
-// Entry shape:
-//   {
-//     id: string,
-//     snappedAt: number (Date.now),
-//     label: string,        // user-assigned name, empty if unnamed
-//     named: boolean,       // convenience flag (label != '')
-//     changedFields: string[],  // which fields were about to change
-//     snapshot: { ...VH_SNAPSHOT_FIELDS }  // pre-change field values
-//   }
-//
-// Legacy entries (pre-rewrite) had shape {url, version, dateApproved, editor,
-// status, snappedAt}. loadState() migrates them on read \u2014 see migration
-// block in loadState().
-var VH_MAX_ENTRIES = 50;
-var VH_SNAPSHOT_FIELDS = [
-  'name', 'version', 'category', 'difficulty',
-  'editor', 'status', 'qc', 'categoryHeadQc',
-  'rawVideo', 'editingBrief', 'finalVideo',
-  'estDelivery', 'dateApproved', 'assignedAt', 'chDateApproved'
-];
-var VH_FIELD_LABELS = {
-  name: 'Name', version: 'Version', category: 'Category', difficulty: 'Difficulty',
-  editor: 'Editor', status: 'Status', qc: 'Footage QC', categoryHeadQc: 'CH QC',
-  rawVideo: 'Drive', editingBrief: 'Brief', finalVideo: 'Video',
-  estDelivery: 'ETA', dateApproved: 'Approved', assignedAt: 'Assigned', chDateApproved: 'CH Approved'
-};
-// Fields the preview renders as clickable URLs instead of plain text.
-var VH_URL_FIELDS = { rawVideo: 1, editingBrief: 1, finalVideo: 1 };
-// Fields the preview renders as human-readable dates.
-var VH_DATE_FIELDS = { estDelivery: 1, dateApproved: 1, assignedAt: 1, chDateApproved: 1 };
-
-// Transient state for the open version-history modal. Rebuilt each time
-// App.showVersionHistory is called; updated in-place as the user clicks entries.
-var VhState = { assetId: null, selectedId: null };
-
-function vhNewEntryId() {
-  return 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-}
-
-// Take a snapshot of an asset's fields as they are RIGHT NOW. Called before
-// mutating the asset so the resulting entry represents the state being left.
-function snapshotAsset(a) {
-  var snap = {};
-  if (!a) return snap;
-  for (var i = 0; i < VH_SNAPSHOT_FIELDS.length; i++) {
-    var k = VH_SNAPSHOT_FIELDS[i];
-    snap[k] = (a[k] === undefined || a[k] === null) ? '' : a[k];
-  }
-  return snap;
-}
-
-// Compare two snapshots; return array of field names whose values differ.
-function diffSnapshots(before, after) {
-  var changed = [];
-  if (!before || !after) return changed;
-  for (var i = 0; i < VH_SNAPSHOT_FIELDS.length; i++) {
-    var k = VH_SNAPSHOT_FIELDS[i];
-    var b = before[k] === undefined || before[k] === null ? '' : before[k];
-    var af = after[k] === undefined || after[k] === null ? '' : after[k];
-    if (b !== af) changed.push(k);
-  }
-  return changed;
-}
-
-// Push a snapshot into asset.versionHistory. Call this BEFORE mutating
-// the asset; the entry represents "what the asset looked like before this
-// change". changedFields is optional \u2014 it's the hint of which fields the
-// caller is about to change (used as the default when diff can't be computed).
-// Enforces VH_MAX_ENTRIES by evicting oldest UNNAMED entries first, so
-// user-labeled versions survive indefinitely.
-function pushVersion(a, preSnapshot, changedFields) {
-  if (!a) return;
-  if (!Array.isArray(a.versionHistory)) a.versionHistory = [];
-  var snap = preSnapshot || snapshotAsset(a);
-  a.versionHistory.unshift({
-    id: vhNewEntryId(),
-    snappedAt: Date.now(),
-    label: '',
-    named: false,
-    changedFields: Array.isArray(changedFields) ? changedFields.slice() : [],
-    snapshot: snap
-  });
-  while (a.versionHistory.length > VH_MAX_ENTRIES) {
-    // Prefer evicting oldest unnamed entry to preserve user-labeled versions.
-    var evictIdx = -1;
-    for (var i = a.versionHistory.length - 1; i >= 0; i--) {
-      if (!a.versionHistory[i].named) { evictIdx = i; break; }
-    }
-    if (evictIdx < 0) { a.versionHistory.length = VH_MAX_ENTRIES; break; }
-    a.versionHistory.splice(evictIdx, 1);
-  }
-}
-
-// Migrate a legacy version-history entry (url-only) to the new full-snapshot
-// shape. Legacy shape: {url, version, dateApproved, editor, status, snappedAt}.
-// Returns the migrated entry.
-function vhMigrateLegacyEntry(h) {
-  var snap = {};
-  for (var i = 0; i < VH_SNAPSHOT_FIELDS.length; i++) snap[VH_SNAPSHOT_FIELDS[i]] = '';
-  snap.finalVideo = h.url || '';
-  snap.version = h.version || '';
-  snap.dateApproved = h.dateApproved || '';
-  snap.editor = h.editor || '';
-  snap.status = h.status || '';
-  return {
-    id: vhNewEntryId(),
-    snappedAt: h.snappedAt || Date.now(),
-    label: '',
-    named: false,
-    changedFields: ['finalVideo'],
-    snapshot: snap
-  };
-}
-
-// Look up a version-history entry by its id. Returns null if not found.
-function findVhEntry(a, entryId) {
-  if (!a || !Array.isArray(a.versionHistory)) return null;
-  for (var i = 0; i < a.versionHistory.length; i++) {
-    if (a.versionHistory[i].id === entryId) return a.versionHistory[i];
-  }
-  return null;
-}
-
-// Format a snappedAt timestamp for UI display. Uses "HH:MM" for same-day,
-// "Yesterday HH:MM" for yesterday, full date + time otherwise.
-function formatVhWhen(snappedAt) {
-  if (!snappedAt) return '\u2014';
-  var d = new Date(snappedAt);
-  var now = new Date();
-  var hh = String(d.getHours()).padStart(2, '0');
-  var mm = String(d.getMinutes()).padStart(2, '0');
-  var sameDay = d.getFullYear() === now.getFullYear() &&
-                d.getMonth() === now.getMonth() &&
-                d.getDate() === now.getDate();
-  if (sameDay) return hh + ':' + mm;
-  var y = new Date(now); y.setDate(y.getDate() - 1);
-  var isYesterday = d.getFullYear() === y.getFullYear() &&
-                    d.getMonth() === y.getMonth() &&
-                    d.getDate() === y.getDate();
-  if (isYesterday) return 'Yesterday ' + hh + ':' + mm;
-  return formatDate(d.toISOString().slice(0, 10)) + ' ' + hh + ':' + mm;
-}
-
-// Group timeline entries by day bucket: Today / Yesterday / MMM DD / etc.
-function vhGroupKey(snappedAt) {
-  if (!snappedAt) return 'Unknown';
-  var d = new Date(snappedAt);
-  var now = new Date();
-  var sameDay = d.getFullYear() === now.getFullYear() &&
-                d.getMonth() === now.getMonth() &&
-                d.getDate() === now.getDate();
-  if (sameDay) return 'Today';
-  var y = new Date(now); y.setDate(y.getDate() - 1);
-  var isYesterday = d.getFullYear() === y.getFullYear() &&
-                    d.getMonth() === y.getMonth() &&
-                    d.getDate() === y.getDate();
-  if (isYesterday) return 'Yesterday';
-  return formatDate(d.toISOString().slice(0, 10));
-}
-
-// Render a single field value for the preview pane. Returns HTML string.
-// - URL fields render as clickable links
-// - date fields render as human-readable dates
-// - empty values render with an "(empty)" italic placeholder
-function vhRenderFieldValue(field, value) {
-  if (value === undefined || value === null || value === '') {
-    return '<span class="vh-snap-value is-empty">(empty)</span>';
-  }
-  if (VH_URL_FIELDS[field]) {
-    return '<a class="vh-snap-link" href="' + escapeHtml(value) + '" target="_blank" ' +
-           'rel="noopener" title="' + escapeHtml(value) + '">' + escapeHtml(value) + ' \u2197</a>';
-  }
-  if (VH_DATE_FIELDS[field]) {
-    return '<span class="vh-snap-value">' + escapeHtml(formatDate(value) || value) + '</span>';
-  }
-  return '<span class="vh-snap-value">' + escapeHtml(String(value)) + '</span>';
-}
-
-// Re-render the version-history modal body in place. Builds the timeline on
-// the left (grouped by day) and the snapshot preview on the right. Called on
-// initial open, on entry selection change, and after name/restore/delete.
-function renderVersionHistoryModal(a) {
-  if (!a) return;
-  var hist = Array.isArray(a.versionHistory) ? a.versionHistory : [];
-  // Synthetic "Current" entry always shown at the top of the timeline.
-  var currentEntry = {
-    id: '__current__',
-    snappedAt: Date.now(),
-    label: '',
-    named: false,
-    changedFields: [],
-    snapshot: snapshotAsset(a),
-    isCurrent: true
-  };
-  var allEntries = [currentEntry].concat(hist);
-
-  // Group by day. Current row is always in its own "Current" group at top.
-  var groups = []; // [{key, entries: []}]
-  var groupByKey = {};
-  // Current sits in its own pseudo-group so it's visually separate.
-  allEntries.forEach(function(e) {
-    var key = e.isCurrent ? 'Current' : vhGroupKey(e.snappedAt);
-    if (!groupByKey[key]) {
-      groupByKey[key] = { key: key, entries: [] };
-      groups.push(groupByKey[key]);
-    }
-    groupByKey[key].entries.push(e);
-  });
-
-  var selectedId = VhState.selectedId || '__current__';
-  var selectedEntry = null;
-  for (var i = 0; i < allEntries.length; i++) {
-    if (allEntries[i].id === selectedId) { selectedEntry = allEntries[i]; break; }
-  }
-  if (!selectedEntry) {
-    selectedEntry = currentEntry;
-    selectedId = '__current__';
-    VhState.selectedId = '__current__';
-  }
-
-  // --- Build timeline HTML ---
-  var timelineHtml;
-  if (allEntries.length === 1 && hist.length === 0) {
-    // Only the current entry exists \u2014 still show it selectable, plus empty-state hint.
-    timelineHtml =
-      '<div class="vh-group-header">Current</div>' +
-      vhRenderEntryRow(a, currentEntry, selectedId) +
-      '<div class="vh-empty-timeline">' +
-        'No prior versions yet. Every field change will appear here automatically.' +
-      '</div>';
-  } else {
-    timelineHtml = groups.map(function(g) {
-      var rows = g.entries.map(function(e) {
-        return vhRenderEntryRow(a, e, selectedId);
-      }).join('');
-      return '<div class="vh-group-header">' + escapeHtml(g.key) + '</div>' + rows;
-    }).join('');
-  }
-
-  // --- Build preview HTML ---
-  var previewHtml = vhRenderPreview(a, selectedEntry);
-
-  // --- Compose full modal HTML ---
-  var titleStar = selectedEntry && selectedEntry.named ? '<span class="vh-preview-star">\u2605</span>' : '';
-  var headerDesc = hist.length === 0
-    ? 'No prior versions saved yet. As you edit fields on this asset, snapshots will appear in the timeline below.'
-    : 'Click any version in the timeline to preview. You can name important versions, restore to any past state, or remove entries. Up to ' + VH_MAX_ENTRIES + ' versions are kept (named ones never expire).';
-
-  var html =
-    '<div class="vh-modal-header">' +
-      '<div class="vh-modal-title">' +
-        '<span class="vh-icon">\u{1F552}</span> Version history \u2014 ' + escapeHtml(a.name) +
-      '</div>' +
-      '<div class="vh-modal-sub">' + headerDesc + '</div>' +
-    '</div>' +
-    '<div class="vh-body">' +
-      '<div class="vh-timeline">' + timelineHtml + '</div>' +
-      '<div class="vh-preview">' + previewHtml + '</div>' +
-    '</div>' +
-    '<div class="vh-footer">' +
-      '<div class="vh-footer-info">' +
-        hist.length + ' saved version' + (hist.length === 1 ? '' : 's') +
-        (hist.length > 0
-          ? ' \u00B7 ' + hist.filter(function(e) { return e.named; }).length + ' named'
-          : '') +
-      '</div>' +
-      '<button class="cancel-btn" id="modal-cancel">Close</button>' +
-    '</div>';
-
-  // Open the modal, then apply the wide-layout class on the modal element.
-  openModal(html, null);
-  var modalEl = document.getElementById('modal');
-  if (modalEl) modalEl.classList.add('modal-vh');
-  // Clear the vh class when the modal closes (next openModal will use default).
-  var overlay = document.getElementById('modal-overlay');
-  if (overlay && !overlay.__vhCloseHookInstalled) {
-    overlay.__vhCloseHookInstalled = true;
-    overlay.addEventListener('click', function(e) {
-      if (e.target.id === 'modal-overlay') {
-        var m = document.getElementById('modal');
-        if (m) m.classList.remove('modal-vh');
-        VhState.assetId = null;
-        VhState.selectedId = null;
-      }
-    });
-  }
-  // Also clear state when explicitly closing via the Close button (which closeModal() toggles).
-  var cancelBtn = document.getElementById('modal-cancel');
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', function() {
-      var m = document.getElementById('modal');
-      if (m) m.classList.remove('modal-vh');
-      VhState.assetId = null;
-      VhState.selectedId = null;
-    });
-  }
-}
-
-// Render one entry row in the timeline. Highlights the selected row. Named
-// entries show a star. Current entry shows a "Current" badge.
-function vhRenderEntryRow(a, entry, selectedId) {
-  var isSelected = entry.id === selectedId;
-  var cls = 'vh-entry-row' + (isSelected ? ' selected' : '');
-  var label = entry.named && entry.label ? escapeHtml(entry.label) : '';
-  var star = entry.named ? '<span class="vh-entry-row-star">\u2605</span>' : '';
-  var currentBadge = entry.isCurrent ? '<span class="vh-entry-row-current">Current</span>' : '';
-  // Primary line: either the version label (if named) or the formatted time.
-  var primary = label
-    ? '<span class="vh-entry-row-label">' + label + '</span>'
-    : '<span class="vh-entry-row-time">' + escapeHtml(formatVhWhen(entry.snappedAt)) + '</span>';
-  // Secondary meta: changed fields summary, or "\u2014" for empty
-  var metaText;
-  if (entry.isCurrent) {
-    metaText = 'Live state \u00B7 ' + escapeHtml(entry.snapshot.status || '\u2014');
-  } else if (entry.changedFields && entry.changedFields.length > 0) {
-    var labels = entry.changedFields.map(function(f) { return VH_FIELD_LABELS[f] || f; });
-    if (labels.length > 2) {
-      metaText = labels.slice(0, 2).join(', ') + ' +' + (labels.length - 2);
-    } else {
-      metaText = labels.join(', ');
-    }
-    if (label) metaText = escapeHtml(formatVhWhen(entry.snappedAt)) + ' \u00B7 ' + metaText;
-  } else {
-    metaText = escapeHtml(formatVhWhen(entry.snappedAt));
-  }
-  // entry.id is always a safe alphanumeric token (see vhNewEntryId). Wrap
-  // it in single-quotes inside the double-quoted onclick attribute.
-  var idStr = "'" + entry.id + "'";
-  return '<div class="' + cls + '" ' +
-    'onclick="App.vhSelectEntry(\'' + a.id + '\', ' + idStr + ')">' +
-    '<div class="vh-entry-row-top">' + star + primary + currentBadge + '</div>' +
-    '<div class="vh-entry-row-meta">' + metaText + '</div>' +
-  '</div>';
-}
-
-// Render the snapshot preview pane for the given entry. Shows every
-// VH_SNAPSHOT_FIELDS field as a label + value row, with changed fields
-// highlighted. Header has name/restore/delete action buttons (disabled
-// appropriately when viewing the Current entry).
-function vhRenderPreview(a, entry) {
-  if (!entry) {
-    return '<div class="vh-preview-empty">Select a version from the timeline to preview.</div>';
-  }
-  var snapshot = entry.snapshot || {};
-  // For highlighting: compare this entry's snapshot to the CURRENT live state
-  // so the user can see what's different from "now".
-  var currentSnap = snapshotAsset(a);
-  var changedVsCurrent = diffSnapshots(currentSnap, snapshot);
-  var changedMap = {};
-  for (var i = 0; i < changedVsCurrent.length; i++) changedMap[changedVsCurrent[i]] = 1;
-
-  var rowsHtml = VH_SNAPSHOT_FIELDS.map(function(field) {
-    var isChanged = !!changedMap[field] && !entry.isCurrent;
-    var rowCls = 'vh-snap-row' + (isChanged ? ' is-changed' : '');
-    return '<div class="' + rowCls + '">' +
-      '<div class="vh-snap-label">' + escapeHtml(VH_FIELD_LABELS[field] || field) + '</div>' +
-      '<div>' + vhRenderFieldValue(field, snapshot[field]) + '</div>' +
-    '</div>';
-  }).join('');
-
-  // Header
-  var title;
-  if (entry.isCurrent) {
-    title = '<span class="vh-preview-title">Current version (live)</span>';
-  } else if (entry.named && entry.label) {
-    title = '<span class="vh-preview-title"><span class="vh-preview-star">\u2605</span>' + escapeHtml(entry.label) + '</span>';
-  } else {
-    title = '<span class="vh-preview-title">Version snapshot</span>';
-  }
-  var whenStr = entry.isCurrent
-    ? 'Reflects the current live state of this asset'
-    : 'Captured ' + escapeHtml(formatVhWhen(entry.snappedAt));
-
-  // Action buttons
-  var nameBtnLabel = entry.named ? '\u2605 Rename' : '\u2606 Name this version';
-  var idStr = "'" + entry.id + "'";
-  var restoreBtn = entry.isCurrent
-    ? '<button class="vh-action-btn" disabled title="This IS the current version">Restore</button>'
-    : '<button class="vh-action-btn vh-action-btn-primary" ' +
-      'onclick="App.restoreVersion(\'' + a.id + '\', ' + idStr + ')" ' +
-      'title="Copy this version\'s fields back onto the asset (current state will be saved first)">\u21BA Restore</button>';
-  var deleteBtn = entry.isCurrent
-    ? ''
-    : '<button class="vh-action-btn vh-action-btn-danger" ' +
-      'onclick="App.deleteVersionHistoryEntry(\'' + a.id + '\', ' + idStr + ')" ' +
-      'title="Permanently remove this history entry">\u2715 Delete</button>';
-  var nameBtn = '<button class="vh-action-btn" ' +
-    'onclick="App.nameVersion(\'' + a.id + '\', ' + idStr + ')" ' +
-    'title="Give this version a label so it survives auto-eviction">' + nameBtnLabel + '</button>';
-
-  // "What changed" summary row \u2014 only for non-current entries with changedFields.
-  var changedSummary = '';
-  if (!entry.isCurrent && entry.changedFields && entry.changedFields.length > 0) {
-    changedSummary = '<div class="vh-preview-changed">' +
-      '<span>Changed in this snapshot:</span>' +
-      entry.changedFields.map(function(f) {
-        return '<span class="vh-changed-chip">' + escapeHtml(VH_FIELD_LABELS[f] || f) + '</span>';
-      }).join('') +
-    '</div>';
-  } else if (!entry.isCurrent && changedVsCurrent.length > 0) {
-    changedSummary = '<div class="vh-preview-changed">' +
-      '<span>Differs from current:</span>' +
-      changedVsCurrent.map(function(f) {
-        return '<span class="vh-changed-chip">' + escapeHtml(VH_FIELD_LABELS[f] || f) + '</span>';
-      }).join('') +
-    '</div>';
-  }
-
-  return '<div class="vh-preview-head">' +
-    title +
-    '<span class="vh-preview-when">' + whenStr + '</span>' +
-    '<div class="vh-preview-actions">' + nameBtn + restoreBtn + deleteBtn + '</div>' +
-  '</div>' +
-  changedSummary +
-  '<div class="vh-snapshot-grid">' + rowsHtml + '</div>';
-}
-
-// Render the clock icon next to the version tag. Always rendered so the user
-// can always enter the history panel, even with zero snapshots (empty panel
-// explains how snapshots are captured). The icon is a sibling of the version
-// cell's editable wrapper \u2014 deliberately OUTSIDE .editable-cell so clicking
-// it doesn't trigger the version inline-edit.
-function renderVersionHistoryBtn(asset) {
-  var hist = Array.isArray(asset.versionHistory) ? asset.versionHistory : [];
-  var n = hist.length;
-  var title = n === 0
-    ? 'No prior versions yet \u2014 click to open history panel'
-    : 'View version history (' + n + ' prior version' + (n === 1 ? '' : 's') + ')';
-  var emptyCls = n === 0 ? ' is-empty' : '';
-  var countCls = n === 0 ? ' is-zero' : '';
-  var countTxt = n === 0 ? '\u2013' : String(n);
-  return '<button type="button" class="version-history-btn' + emptyCls + '" ' +
-    'title="' + title + '" ' +
-    'onclick="App.showVersionHistory(\'' + asset.id + '\')">' +
-    '\u{1F552}<span class="vh-count' + countCls + '">' + countTxt + '</span>' +
-  '</button>';
 }
 
 // Build an inline <select> that matches the status badge colors and calls App.setAssetStatus on change.
@@ -4424,11 +3908,6 @@ function showEditCampaignModal() {
 function toggleCampaignDone() {
   var c = getActiveCampaign(); if (!c) return;
   c.done = !c.done;
-  if (c.done) {
-    STATE.assets.forEach(function(a) {
-      if (String(a.campaignId) === String(c.id)) a.versionHistory = [];
-    });
-  }
   logAction('updated', 'Campaign "' + c.name + '" marked ' + (c.done ? 'done' : 'active'));
   toast(c.done ? 'Campaign marked done' : 'Campaign reopened', 'success');
   render();
@@ -4624,14 +4103,7 @@ function showAssetModal(existing) {
       version: document.getElementById('f-vver').value || 'V1'
     };
     if (isEdit) {
-      // Version-history snapshot: capture the full pre-edit state so the user can
-      // see exactly what the asset looked like before the bulk modal save. The
-      // diff against the post-edit state tells us which fields actually changed.
-      var preSnap = snapshotAsset(a);
       Object.keys(payload).forEach(function(k) { a[k] = payload[k]; });
-      var postSnap = snapshotAsset(a);
-      var changed = diffSnapshots(preSnap, postSnap);
-      if (changed.length > 0) pushVersion(a, preSnap, changed);
       // Stamp assignedAt whenever the modal results in Assigned (and it wasn't already).
       if (a.status === 'Assigned' && (oldStatus !== 'Assigned' || oldEditor !== a.editor)) {
         a.assignedAt = todayISO();
@@ -4645,7 +4117,6 @@ function showAssetModal(existing) {
       payload.scheduledFor = '';
       payload.released = false;
       payload.qc = 'Draft';
-      payload.versionHistory = [];
       // New assets land as Assigned when they get an editor \u2014 stamp today so they show
       // up in "To Do Today" on the board.
       payload.assignedAt = (payload.status === 'Assigned') ? todayISO() : '';
@@ -4713,7 +4184,6 @@ function duplicateAsset(id) {
     qc: 'Draft',               // QC resets to Draft for the new copy
     categoryHeadQc: 'Draft',   // Category head review state also resets
     chDateApproved: '',        // cleared
-    versionHistory: [],        // History starts clean \u2014 copy is a fresh asset
     assignedAt: ''             // Stamped below if the editor is kept (auto-Assigned path)
   };
   // If editor is kept, auto-flip status just like the modal would.
@@ -5063,7 +4533,7 @@ function renderCampaignsView() {
       rows +=
         '<tr data-asset-id="' + a.id + '">' +
           '<td><span class="pn">' + a.pn + '</span></td>' +
-          '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + renderVersionHistoryBtn(a) + '</div></td>' +
+          '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + '</div></td>' +
           '<td>' + renderEditableCell(a, 'category') + '</td>' +
           '<td>' + renderEditableCell(a, 'difficulty') + '</td>' +
           (hideLinkCols ? '' :
@@ -5464,7 +4934,6 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   var oldStatus = a.status;
   var oldEditor = a.editor;
   var statusChanging = oldStatus !== targetStatus;
-  var vhPre = statusChanging ? snapshotAsset(a) : null;
   if (statusChanging) {
     recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'dragLocked'], 'status: ' + oldStatus + ' → ' + targetStatus);
   }
@@ -5489,7 +4958,6 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
     }
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + targetStatus);
     emitAssetChangeNotifications(a, { oldEditor: oldEditor, oldStatus: oldStatus });
-    pushVersion(a, vhPre, diffSnapshots(vhPre, snapshotAsset(a)));
   }
   // Reposition in STATE.assets. Splice the dragged item out first (may be a no-op
   // if it's somehow missing, but we recomputed idx above).
@@ -5850,7 +5318,7 @@ function renderTodayView() {
 // ===================== DAILY LOG =====================
 // Per-editor x per-day status grid over the last 7 workdays (Mon-Fri).
 // For each of the editor's videos, reconstructs what status the video had at
-// end-of-day of each prior day by walking versionHistory. Cell colouring
+// end-of-day of each prior day. Cell colouring
 // flags editors who approved < DAILY_APPROVAL_TARGET videos on a given day
 // so under-performers stand out at a glance.
 //
@@ -5930,28 +5398,9 @@ function getWorkdaysForOffset(offset) {
   return days;
 }
 
-// Reconstruct the asset's state at end-of-day on dateISO using versionHistory.
-// Returns a snapshot object (same shape as snapshotAsset). Strategy:
-//   - versionHistory is most-recent-first; each entry's .snapshot is the
-//     PRE-change state, captured right before the mutation at .snappedAt.
-//   - So state at end-of-day X = state right before the FIRST mutation that
-//     happened after X (if any).
-//   - If no mutations happened after X, current state is the end-of-X state.
+// Returns the asset's current state (version history removed).
 function getAssetStateOnDay(a, dateISO) {
-  var endOfDay = new Date(dateISO + 'T23:59:59.999').getTime();
-  var hist = Array.isArray(a.versionHistory) ? a.versionHistory : [];
-  // Walk back through history (oldest first) to find the earliest entry
-  // whose snappedAt is AFTER end-of-day X. That entry's snapshot is
-  // "what the asset looked like before this (first-after-X) mutation"
-  // \u2014 which equals "what the asset looked like at end of day X".
-  for (var i = hist.length - 1; i >= 0; i--) {
-    var h = hist[i];
-    if (h.snappedAt > endOfDay && h.snapshot) {
-      return h.snapshot;
-    }
-  }
-  // No post-X mutations \u2014 current state is the end-of-X state.
-  return snapshotAsset(a);
+  return a;
 }
 
 // Was the asset "active" on this day (meaning the asset existed and was
@@ -5960,9 +5409,6 @@ function getAssetStateOnDay(a, dateISO) {
 // working on this", falling back to the earliest known version-history
 // timestamp, else assumes the asset existed.
 function assetExistedOnDay(a, dateISO) {
-  // If versionHistory has entries, the earliest snappedAt gives us a lower
-  // bound on when this asset started being tracked. Entries older than that
-  // aren't in history; they existed at snapshot time.
   var endOfDay = new Date(dateISO + 'T23:59:59.999').getTime();
   // assignedAt is an ISO date; compare to our target ISO date.
   if (a.assignedAt && a.assignedAt > dateISO) {
@@ -8388,32 +7834,9 @@ function loadState() {
       // chDateApproved added later \u2014 default to empty string
       if (a.chDateApproved === undefined || a.chDateApproved === null) a.chDateApproved = '';
       if (a.chDateApproved) a.chDateApproved = toISODate(a.chDateApproved) || a.chDateApproved;
-      // versionHistory added in this version \u2014 migrate any asset missing it.
-      // Also migrate legacy entries (url-only shape pre-Google-Sheets-rewrite)
-      // to the new full-snapshot shape.
-      if (!Array.isArray(a.versionHistory)) a.versionHistory = [];
-      for (var vhI = 0; vhI < a.versionHistory.length; vhI++) {
-        var vhEntry = a.versionHistory[vhI];
-        if (vhEntry && !vhEntry.snapshot) {
-          a.versionHistory[vhI] = vhMigrateLegacyEntry(vhEntry);
-        } else if (vhEntry) {
-          // Normalize newer entries that may be missing fields.
-          if (!vhEntry.id) vhEntry.id = vhNewEntryId();
-          if (typeof vhEntry.label !== 'string') vhEntry.label = '';
-          vhEntry.named = !!(vhEntry.label && vhEntry.label.trim());
-          if (!Array.isArray(vhEntry.changedFields)) vhEntry.changedFields = [];
-        }
-      }
       // assignedAt added in this version \u2014 legacy rows get an empty string so they only
       // show in "To Do Today" via the ETA filter (not the assignment-date filter).
       if (a.assignedAt === undefined) a.assignedAt = '';
-    });
-    // Trim versionHistory on assets belonging to done campaigns \u2014 keeps the
-    // Firestore document under the 1MB hard limit as history accumulates.
-    var _doneCampIds = {};
-    STATE.campaigns.forEach(function(c) { if (c.done) _doneCampIds[String(c.id)] = true; });
-    STATE.assets.forEach(function(a) {
-      if (_doneCampIds[String(a.campaignId)]) a.versionHistory = [];
     });
     return true;
   } catch (e) {
@@ -9737,10 +9160,6 @@ var App = {
     }
     var oldStatus = a.status;
     recordUndo(a, ['status', 'assignedAt', 'dateApproved'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
-    // Capture pre-change snapshot BEFORE mutating, then determine what the
-    // full change-set ended up being (status can also cascade into assignedAt
-    // and dateApproved). Push the version after the mutation is complete.
-    var vhPre = snapshotAsset(a);
     a.status = newStatus;
     // Stamp assignedAt whenever the transition is INTO Assigned (from any other state).
     // This powers the "To Do Today" column on the Today board.
@@ -9757,7 +9176,6 @@ var App = {
     if ((oldStatus === 'Assigned' && newStatus !== 'Assigned') || (newStatus === 'Assigned' && oldStatus !== 'Assigned')) {
       a.dragLocked = false;
     }
-    pushVersion(a, vhPre, diffSnapshots(vhPre, snapshotAsset(a)));
     logAction('updated', 'Asset "' + a.name + '" status: ' + oldStatus + ' \u2192 ' + newStatus);
     emitAssetChangeNotifications(a, { oldEditor: a.editor, oldStatus: oldStatus });
     render();
@@ -9974,9 +9392,7 @@ var App = {
     if (a.name === trimmed) { render(); return; }
     var old = a.name;
     recordUndo(a, ['name'], 'name: "' + old + '" \u2192 "' + trimmed + '"');
-    var vhPre = snapshotAsset(a);
     a.name = trimmed;
-    pushVersion(a, vhPre, ['name']);
     logAction('updated', 'Asset "' + old + '" renamed to "' + trimmed + '"');
     render();
   },
@@ -9987,9 +9403,7 @@ var App = {
     if (!a) return;
     var trimmed = String(newVersion || '').trim() || 'V1';
     if (a.version === trimmed) { render(); return; }
-    var vhPre = snapshotAsset(a);
     a.version = trimmed;
-    pushVersion(a, vhPre, ['version']);
     logAction('updated', 'Asset "' + a.name + '" version \u2192 ' + trimmed);
     render();
   },
@@ -10002,9 +9416,7 @@ var App = {
     if (a.difficulty === newDiff) { render(); return; }
     var old = a.difficulty;
     recordUndo(a, ['difficulty'], 'difficulty: ' + old + ' \u2192 ' + newDiff);
-    var vhPre = snapshotAsset(a);
     a.difficulty = newDiff;
-    pushVersion(a, vhPre, ['difficulty']);
     logAction('updated', 'Asset "' + a.name + '" difficulty: ' + old + ' \u2192 ' + newDiff);
     render();
   },
@@ -10022,9 +9434,7 @@ var App = {
     if (a.category === newCat) { render(); return; }
     var old = a.category;
     recordUndo(a, ['category'], 'category: ' + old + ' \u2192 ' + newCat);
-    var vhPre = snapshotAsset(a);
     a.category = newCat;
-    pushVersion(a, vhPre, ['category']);
     logAction('updated', 'Asset "' + a.name + '" category: ' + old + ' \u2192 ' + newCat);
     render();
   },
@@ -10046,7 +9456,6 @@ var App = {
     // Note: applyEditorAutoStatus expects (oldEditor, newEditor, oldStatus, chosenStatus).
     // In inline-edit context, "chosenStatus" is the current status (user isn't changing it here).
     var newStatus = applyEditorAutoStatus(oldEditor, cleanEditor, oldStatus, oldStatus);
-    var vhPre = snapshotAsset(a);
     a.editor = cleanEditor;
     a.status = newStatus;
     // Stamp assignedAt on any editor change that results in Assigned \u2014 covers both
@@ -10054,7 +9463,6 @@ var App = {
     if (newStatus === 'Assigned' && (oldStatus !== 'Assigned' || oldEditor !== cleanEditor)) {
       a.assignedAt = todayISO();
     }
-    pushVersion(a, vhPre, diffSnapshots(vhPre, snapshotAsset(a)));
     logAction('updated',
       'Asset "' + a.name + '" editor: ' + (oldEditor || 'unassigned') + ' \u2192 ' + (cleanEditor || 'unassigned') +
       (newStatus !== oldStatus ? ' (status auto-flipped ' + oldStatus + ' \u2192 ' + newStatus + ')' : ''));
@@ -10070,9 +9478,7 @@ var App = {
     var iso = toISODate(newDate);
     if (a.estDelivery === iso) { render(); return; }
     recordUndo(a, ['estDelivery'], 'ETA: ' + (a.estDelivery ? formatDate(a.estDelivery) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
-    var vhPre = snapshotAsset(a);
     a.estDelivery = iso;
-    pushVersion(a, vhPre, ['estDelivery']);
     logAction('updated', 'Asset "' + a.name + '" ETA \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     render();
   },
@@ -10084,9 +9490,7 @@ var App = {
     var iso = toISODate(newDate);
     if (a.dateApproved === iso) { render(); return; }
     recordUndo(a, ['dateApproved'], 'date approved: ' + (a.dateApproved ? formatDate(a.dateApproved) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
-    var vhPre = snapshotAsset(a);
     a.dateApproved = iso;
-    pushVersion(a, vhPre, ['dateApproved']);
     logAction('updated', 'Asset "' + a.name + '" date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     render();
   },
@@ -10096,9 +9500,7 @@ var App = {
     if (!a) return;
     var iso = toISODate(newDate);
     if (a.chDateApproved === iso) { render(); return; }
-    var vhPre = snapshotAsset(a);
     a.chDateApproved = iso;
-    pushVersion(a, vhPre, ['chDateApproved']);
     logAction('updated', 'Asset "' + a.name + '" CH date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     render();
   },
@@ -10120,9 +9522,7 @@ var App = {
       return;
     }
     recordUndo(a, ['rawVideo'], 'raw video link');
-    var vhPre = snapshotAsset(a);
     a.rawVideo = trimmed;
-    pushVersion(a, vhPre, ['rawVideo']);
     logAction('updated', 'Asset "' + a.name + '" raw video \u2192 ' + (trimmed ? 'updated' : 'cleared'));
     render();
   },
@@ -10140,9 +9540,7 @@ var App = {
       return;
     }
     recordUndo(a, ['editingBrief'], 'editing brief link');
-    var vhPre = snapshotAsset(a);
     a.editingBrief = trimmed;
-    pushVersion(a, vhPre, ['editingBrief']);
     logAction('updated', 'Asset "' + a.name + '" editing brief \u2192 ' + (trimmed ? 'updated' : 'cleared'));
     render();
   },
@@ -10160,11 +9558,7 @@ var App = {
       return;
     }
     recordUndo(a, ['finalVideo'], 'final video link');
-    // Auto-snapshot: capture the full pre-change state so the user can restore
-    // any prior delivery. See VERSION HISTORY HELPERS comment block above.
-    var vhPre = snapshotAsset(a);
     a.finalVideo = trimmed;
-    pushVersion(a, vhPre, ['finalVideo']);
     logAction('updated', 'Asset "' + a.name + '" final video \u2192 ' + (trimmed ? 'updated' : 'cleared'));
     render();
   },
@@ -10175,9 +9569,7 @@ var App = {
     var trimmed = String(val || '').trim();
     if (a.sparksCode === trimmed) { render(); return; }
     recordUndo(a, ['sparksCode'], 'sparks code');
-    var vhPre = snapshotAsset(a);
     a.sparksCode = trimmed;
-    pushVersion(a, vhPre, ['sparksCode']);
     logAction('updated', 'Asset "' + a.name + '" sparks code → ' + (trimmed || 'cleared'));
     render();
   },
@@ -10192,9 +9584,7 @@ var App = {
     var old = a.qc || 'Draft';
     if (old === newQc) { render(); return; }
     recordUndo(a, ['qc'], 'QC: ' + old + ' \u2192 ' + newQc);
-    var vhPre = snapshotAsset(a);
     a.qc = newQc;
-    pushVersion(a, vhPre, ['qc']);
     // If this sub-campaign's QC card was previously dismissed (after a send), un-dismiss
     // it so the new change resurfaces a card.
     if (STATE.qcDismissed && STATE.qcDismissed[a.campaignId]) {
@@ -10215,14 +9605,12 @@ var App = {
     if (CATEGORY_HEAD_QC_VALUES.indexOf(newVal) < 0) { render(); return; }
     var old = a.categoryHeadQc || 'Draft';
     if (old === newVal) { render(); return; }
-    var vhPre = snapshotAsset(a);
     a.categoryHeadQc = newVal;
     if (newVal === 'Approved') {
       a.chDateApproved = todayISO();
     } else {
       a.chDateApproved = '';
     }
-    pushVersion(a, vhPre, ['categoryHeadQc', 'chDateApproved']);
     var head = getCategoryHead(a.category) || 'no head';
     logAction('updated', 'Asset "' + a.name + '" category-head QC (' + head + '): ' + old + ' \u2192 ' + newVal);
     // Notification trigger: when transitioning INTO 'For Review', queue the
@@ -10725,133 +10113,6 @@ var App = {
 
   // --- Version history panel (Google-Sheets-style) ---
   // Opens the full-width 2-column version-history modal for an asset. Timeline
-  // on the left groups entries by Today / Yesterday / date; preview on the right
-  // shows every snapshot field with changed fields highlighted. User can name a
-  // version (pins it, survives max-entry eviction), restore a version (copies
-  // snapshot fields back onto the live asset), or delete a version.
-  showVersionHistory: function(assetId) {
-    var a = null;
-    a = findAssetById(assetId);
-    if (!a) return;
-    VhState.assetId = assetId;
-    var hist = Array.isArray(a.versionHistory) ? a.versionHistory : [];
-    // Default selection: most-recent prior entry, or synthetic "Current" if none.
-    if (!VhState.selectedId ||
-        (VhState.selectedId !== '__current__' && !findVhEntry(a, VhState.selectedId))) {
-      VhState.selectedId = hist.length > 0 ? hist[0].id : '__current__';
-    }
-    renderVersionHistoryModal(a);
-  },
-
-  // Select a timeline entry \u2014 updates preview without closing the modal.
-  // Called from onclick handlers on each .vh-entry-row.
-  vhSelectEntry: function(assetId, entryId) {
-    var a = null;
-    a = findAssetById(assetId);
-    if (!a) return;
-    VhState.assetId = assetId;
-    VhState.selectedId = entryId;
-    renderVersionHistoryModal(a);
-  },
-
-  // Prompt the user for a label for a version. Empty label un-names it.
-  // Named versions are protected from auto-eviction when the cap is reached.
-  nameVersion: function(assetId, entryId) {
-    var a = null;
-    a = findAssetById(assetId);
-    if (!a) return;
-    if (entryId === '__current__') {
-      // Name the CURRENT state \u2014 push a brand-new labeled snapshot then prompt.
-      var label = prompt('Name this version:', '');
-      if (label === null) return;
-      var trimmedNew = String(label).trim();
-      if (!trimmedNew) { toast('Empty name \u2014 not saved', 'error'); return; }
-      if (!Array.isArray(a.versionHistory)) a.versionHistory = [];
-      a.versionHistory.unshift({
-        id: vhNewEntryId(),
-        snappedAt: Date.now(),
-        label: trimmedNew,
-        named: true,
-        changedFields: [],
-        snapshot: snapshotAsset(a)
-      });
-      // Eviction logic still runs for unnamed entries only.
-      while (a.versionHistory.length > VH_MAX_ENTRIES) {
-        var evictIdx = -1;
-        for (var i2 = a.versionHistory.length - 1; i2 >= 0; i2--) {
-          if (!a.versionHistory[i2].named) { evictIdx = i2; break; }
-        }
-        if (evictIdx < 0) { a.versionHistory.length = VH_MAX_ENTRIES; break; }
-        a.versionHistory.splice(evictIdx, 1);
-      }
-      logAction('updated', 'Asset "' + a.name + '" version history: named current state "' + trimmedNew + '"');
-      toast('Version named: ' + trimmedNew, 'success');
-      VhState.selectedId = a.versionHistory[0].id;
-      App.showVersionHistory(assetId);
-      render();
-      return;
-    }
-    var entry = findVhEntry(a, entryId);
-    if (!entry) return;
-    var proposed = entry.label || '';
-    var res = prompt('Name this version (leave empty to clear name):', proposed);
-    if (res === null) return; // cancelled
-    var trimmed = String(res).trim();
-    entry.label = trimmed;
-    entry.named = !!trimmed;
-    logAction('updated',
-      'Asset "' + a.name + '" version history: ' +
-      (trimmed ? 'named entry "' + trimmed + '"' : 'cleared name'));
-    toast(trimmed ? 'Version named: ' + trimmed : 'Name cleared', 'success');
-    App.showVersionHistory(assetId);
-    render();
-  },
-
-  // Copy all fields from the selected snapshot back onto the live asset. Pushes a
-  // new history entry first so the pre-restore state is recoverable too. Confirms
-  // with the user since this overwrites every tracked field.
-  restoreVersion: function(assetId, entryId) {
-    var a = null;
-    a = findAssetById(assetId);
-    if (!a) return;
-    if (entryId === '__current__') {
-      toast('Already viewing the current version', 'error');
-      return;
-    }
-    var entry = findVhEntry(a, entryId);
-    if (!entry || !entry.snapshot) return;
-    var preSnap = snapshotAsset(a);
-    var postSnap = entry.snapshot;
-    var changed = diffSnapshots(preSnap, postSnap);
-    if (changed.length === 0) {
-      toast('This version matches the current state \u2014 nothing to restore', 'error');
-      return;
-    }
-    var msg = 'Restore version from ' + formatVhWhen(entry.snappedAt) + '?\n\n' +
-      'This will overwrite the current ' +
-      changed.map(function(k) { return VH_FIELD_LABELS[k] || k; }).join(', ') +
-      ' value' + (changed.length === 1 ? '' : 's') +
-      '.\n\nA snapshot of the CURRENT state will be saved first so you can undo.';
-    if (!confirm(msg)) return;
-    // Push pre-restore snapshot as a history entry so restore is reversible.
-    pushVersion(a, preSnap, changed);
-    // Apply snapshot to asset.
-    for (var i2 = 0; i2 < VH_SNAPSHOT_FIELDS.length; i2++) {
-      var k = VH_SNAPSHOT_FIELDS[i2];
-      a[k] = postSnap[k] !== undefined ? postSnap[k] : '';
-    }
-    logAction('updated',
-      'Asset "' + a.name + '" restored to version from ' + formatVhWhen(entry.snappedAt) +
-      ' (' + changed.length + ' field' + (changed.length === 1 ? '' : 's') + ' changed)');
-    toast('Version restored', 'success');
-    // Select the newly-pushed "pre-restore" entry so the user can see / undo.
-    if (Array.isArray(a.versionHistory) && a.versionHistory[0]) {
-      VhState.selectedId = a.versionHistory[0].id;
-    }
-    App.showVersionHistory(assetId);
-    render();
-  },
-
   // --- Daily tally actions ---
   // Fire tallies for every country now (manual). Same path as the midnight auto-fire
   // but does not update the TALLY_STORAGE_KEY flag \u2014 a manual send shouldn't suppress
@@ -10878,35 +10139,6 @@ var App = {
       catch (e) { toast('Copy failed', 'error'); }
       document.body.removeChild(ta);
     }
-  },
-
-  deleteVersionHistoryEntry: function(assetId, entryId) {
-    var a = null;
-    a = findAssetById(assetId);
-    if (!a || !Array.isArray(a.versionHistory)) return;
-    if (entryId === '__current__') return;
-    var idx = -1;
-    for (var j = 0; j < a.versionHistory.length; j++) {
-      if (a.versionHistory[j].id === entryId) { idx = j; break; }
-    }
-    if (idx < 0) return;
-    var removed = a.versionHistory.splice(idx, 1)[0];
-    var removedLabel = removed && removed.label ? '"' + removed.label + '"' :
-      (removed && removed.snapshot && removed.snapshot.version ? removed.snapshot.version : '?');
-    logAction('deleted', 'Asset "' + a.name + '" version history entry (' + removedLabel + ') removed');
-    toast('History entry removed', 'success');
-    // If the selected entry was the one we just deleted, fall back to the next
-    // most-recent entry (or the synthetic "Current" when nothing else remains).
-    if (VhState.selectedId === entryId) {
-      VhState.selectedId = a.versionHistory.length > 0 ? a.versionHistory[0].id : '__current__';
-    }
-    // If the modal is still open, keep it open by re-rendering in place.
-    var modalEl = document.getElementById('modal');
-    var overlay = document.getElementById('modal-overlay');
-    if (modalEl && overlay && overlay.classList.contains('open')) {
-      App.showVersionHistory(assetId);
-    }
-    render();
   },
 
   // --- Drag-and-drop sub-campaign reordering ---
@@ -11515,10 +10747,8 @@ var App = {
     a = findAssetById(id);
     if (!a) return;
     var clean = toISODate(iso);
-    var vhPre = snapshotAsset(a);
     a.estDelivery = clean;
     if (clean) a.scheduledFor = STATE.schedulerDate;
-    pushVersion(a, vhPre, ['estDelivery', 'scheduledFor']);
     logAction('updated', 'Asset "' + a.name + '" ETA → ' + (clean ? formatDate(clean) : 'cleared') + (clean ? ' · scheduled for ' + STATE.schedulerDate : ''));
     render();
   },
