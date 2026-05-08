@@ -1714,9 +1714,6 @@ var Fb = {
       Fb._uploadTimer = null; return Promise.resolve();
     }
 
-    // Mark as dirty before the async write so applySnapshot knows not to clobber STATE.
-    Fb._pendingLocalJson = json;
-
     // Only show the indicator once we know something actually changed.
     if (Fb._syncSavedTimer) { clearTimeout(Fb._syncSavedTimer); Fb._syncSavedTimer = null; }
     Fb._syncStatus = 'saving';
