@@ -4706,7 +4706,7 @@ function renderSidebar() {
   var sidebarSearch = STATE.sidebarSearch || '';
   var searchBarHtml = '<div class="sidebar-search-wrap">' +
     '<span class="sidebar-search-icon">\u2315</span>' +
-    '<input class="sidebar-search-input" type="text" placeholder="' + (compact ? 'Search' : 'Search all videos\u2026') + '" value="' + escapeHtml(sidebarSearch) + '" oninput="App.onSidebarSearch(this.value)">' +
+    '<input id="sidebar-search-input" class="sidebar-search-input" type="text" placeholder="' + (compact ? 'Search' : 'Search all videos\u2026') + '" value="' + escapeHtml(sidebarSearch) + '" oninput="App.onSidebarSearch(this.value)">' +
     (sidebarSearch ? '<button class="sidebar-search-clear" onclick="App.clearSidebarSearch()" title="Clear">\u00D7</button>' : '') +
     '</div>';
 
@@ -4875,13 +4875,7 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    (function() {
-      var assignedCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && a.status === 'Assigned'; }).length;
-      var bulkBtn = assignedCount > 0
-        ? '<button class="edit-btn ml-auto" onclick="App.bulkApproveAssigned()" title="Approve all ' + assignedCount + ' assigned video' + (assignedCount === 1 ? '' : 's') + '" style="color:#22c55e;border-color:#22c55e;">✓ Approve All Assigned (' + assignedCount + ')</button>'
-        : '';
-      return '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + bulkBtn + '<button class="edit-btn' + (assignedCount > 0 ? '' : ' ml-auto') + '" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>';
-    })() +
+    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>' +
       '<button class="edit-btn" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(\'' + camp.id + '\')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(\'' + camp.id + '\')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(\'' + camp.id + '\')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
@@ -4900,6 +4894,12 @@ function renderCampaignsView() {
       '</select>' +
       '<select class="filter-select" onchange="App.onEditorFilter(this.value)">' + editorFilterOpts + '</select>' +
       '<span class="count-chip">' + filtered.length + ' / ' + totalForCamp + ' rows</span>' +
+      (function() {
+        var assignedCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && a.status === 'Assigned'; }).length;
+        return assignedCount > 0
+          ? '<button class="edit-btn" onclick="App.bulkApproveAssigned()" title="Approve all ' + assignedCount + ' assigned video' + (assignedCount === 1 ? '' : 's') + '" style="color:#22c55e;border-color:#22c55e;">✓ Approve All Assigned (' + assignedCount + ')</button>'
+          : '';
+      })() +
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
@@ -9441,7 +9441,7 @@ var App = {
       logAction('updated', 'Asset "' + a.name + '" bulk approved (Assigned → Approved)');
       emitAssetChangeNotifications(a, { oldEditor: a.editor, oldStatus: oldStatus });
     });
-    save();
+    saveState();
     render();
     toast(targets.length + ' video' + (targets.length === 1 ? '' : 's') + ' approved', 'success');
   },
