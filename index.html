@@ -1343,6 +1343,7 @@ firebase.initializeApp(firebaseConfig);
 var fbAuth = firebase.auth();
 var fbDb = firebase.firestore();
 fbAuth.useDeviceLanguage();
+fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
 
 function showSigninOverlay(errorMsg) {
   var overlay = document.getElementById('signin-overlay');
@@ -1690,9 +1691,15 @@ var Fb = {
 
   scheduleUpload: function() {
     if (Fb._suppressUpload) return;
-    if (!Auth.user) return;
-    if (!Fb._ready) return; // don't write until we've seen the first snapshot
+    if (!Auth.user) {
+      Fb._syncStatus = 'error';
+      Fb._updateSyncDom();
+      return;
+    }
+    if (!Fb._ready) return;
     if (Fb._uploadTimer) clearTimeout(Fb._uploadTimer);
+    Fb._syncStatus = 'saving';
+    Fb._updateSyncDom();
     Fb._uploadTimer = setTimeout(Fb.uploadNow, 600);
   },
 
@@ -7667,6 +7674,10 @@ function renderConfigView() {
         '<div style="font-size:12.5px; color:var(--text2); line-height:1.6;">' +
           'Fix: open the Firebase console \u2192 Firestore Database \u2192 Rules tab, paste the rules Claude shared, click Publish. Then refresh this page.' +
         '</div>' +
+        '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">' +
+          '<button class="edit-btn" onclick="App.exportLocalBackup()">\u2b07 Export backup</button>' +
+          '<button class="edit-btn" onclick="App.importLocalBackup()">\u2b06 Restore from backup</button>' +
+        '</div>' +
       '</div>';
   } else if (window._needsFirestoreMigration) {
     migrationSection =
@@ -7677,9 +7688,23 @@ function renderConfigView() {
         '</div>' +
         '<div style="display:flex; gap:10px; flex-wrap:wrap;">' +
           '<button class="btn-primary" onclick="App.exportLocalBackup()">\u2B07 Export backup first</button>' +
+          '<button class="edit-btn" onclick="App.importLocalBackup()">\u2B06 Restore from backup</button>' +
           '<button class="btn-primary" style="background:var(--accent); color:#fff;" onclick="App.runFirestoreMigration()">\u26A1 Migrate now</button>' +
         '</div>' +
         '<div style="font-size:11.5px; color:var(--text3); margin-top:12px;">Tip: Click \u201CExport backup\u201D first \u2014 it downloads a JSON snapshot you can keep as insurance before flipping the switch.</div>' +
+      '</div>';
+  } else if (!Auth.user) {
+    migrationSection =
+      '<div class="section-title">Data storage</div>' +
+      '<div class="auto-card" style="border-color:var(--amber-text); background:rgba(250,199,117,0.06);">' +
+        '<div class="auto-desc" style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">' +
+          '<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--amber-text);"></span>' +
+          '<span><strong style="color:var(--amber-text);">Local storage only.</strong> You\'re not signed in, so data is saved in this browser only. It will be lost if you clear browser data or use a different browser. Export a backup regularly.</span>' +
+        '</div>' +
+        '<div style="display:flex; gap:10px; flex-wrap:wrap;">' +
+          '<button class="edit-btn" onclick="App.exportLocalBackup()">\u2B07 Export backup</button>' +
+          '<button class="edit-btn" onclick="App.importLocalBackup()">\u2B06 Restore from backup</button>' +
+        '</div>' +
       '</div>';
   } else {
     var lastByName = (STATE && STATE.activityLog && STATE.activityLog[0] && STATE.activityLog[0].userName) || '';
@@ -7694,6 +7719,7 @@ function renderConfigView() {
         '</div>' +
         '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">' +
           '<button class="edit-btn" onclick="App.exportLocalBackup()">\u2B07 Export backup snapshot</button>' +
+          '<button class="edit-btn" onclick="App.importLocalBackup()">\u2B06 Restore from backup</button>' +
         '</div>' +
       '</div>';
   }
@@ -9313,6 +9339,32 @@ var App = {
     } catch (e) {
       toast('Could not export backup: ' + e.message, 'error');
     }
+  },
+  importLocalBackup: function() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = function(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        try {
+          var parsed = JSON.parse(ev.target.result);
+          if (!parsed || typeof parsed !== 'object') throw new Error('Invalid backup file');
+          if (!window.confirm('Restore this backup? Your current data will be replaced.')) return;
+          localStorage.setItem(STORAGE_KEY, ev.target.result);
+          toast('Backup restored — reloading…', 'success');
+          setTimeout(function() { location.reload(); }, 800);
+        } catch (err) {
+          toast('Could not restore backup: ' + err.message, 'error');
+        }
+      };
+      reader.readAsText(file);
+    };
+    document.body.appendChild(input);
+    input.click();
+    document.body.removeChild(input);
   },
   runFirestoreMigration: function() {
     if (!Auth.user) { toast('Not signed in', 'error'); return; }
