@@ -240,6 +240,8 @@
   .link-cell-inline { display: inline-flex; align-items: center; gap: 6px; }
   .url-edit-pencil { background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text3); cursor: pointer; font-size: 11px; padding: 1px 4px; font-family: inherit; transition: all 0.12s; line-height: 1; }
   .url-edit-pencil:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+  .url-copy-btn { background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text3); cursor: pointer; font-size: 11px; padding: 1px 4px; font-family: inherit; transition: all 0.12s; line-height: 1; }
+  .url-copy-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
   .no-link { font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
   .editor-cell { display: flex; align-items: center; gap: 7px; }
   .editor-avatar { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
@@ -3014,10 +3016,14 @@ function renderEditableCell(asset, field) {
     var link = url
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" title="' + escapeHtml(url) + '">' + label + ' \u2197</a>'
       : '<span class="no-link">\u2014</span>';
+    var copyBtn = (field === 'finalVideo' && url)
+      ? ' <button type="button" class="url-copy-btn" onclick="App.copyVideoMessage(\'' + asset.id + '\')" title="Copy video name and link">\u29C9</button>'
+      : '';
     return '<span class="link-cell-inline">' + link +
       ' <button type="button" class="url-edit-pencil" ' +
         'onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" ' +
         'title="Edit ' + field + ' URL">\u270E</button>' +
+      copyBtn +
     '</span>';
   }
 
@@ -11089,6 +11095,12 @@ var App = {
     render();
   },
   copyMessage: function(text, label) { copyToClipboard(text, label || 'Copied'); },
+  copyVideoMessage: function(assetId) {
+    var a = findAssetById(assetId);
+    if (!a || !a.finalVideo) return;
+    var url = extractSingleUrl(a.finalVideo) || a.finalVideo;
+    copyToClipboard(a.name + ': ' + url, 'Copied');
+  },
   openSlack: function(editor) { openSlackChannel(editor); },
   showExport: function() { showExportModal(); },
   updateExportPreview: function() {
