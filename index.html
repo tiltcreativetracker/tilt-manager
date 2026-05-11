@@ -65,6 +65,21 @@
   .sidebar-toggle { background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text3); cursor: pointer; font-size: 12px; padding: 2px 7px; font-family: 'JetBrains Mono', monospace; transition: all 0.12s; line-height: 1; }
   .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
 
+  /* Sidebar global search bar */
+  .sidebar-search-wrap { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border); position: relative; }
+  .sidebar-search-icon { color: var(--text3); font-size: 15px; flex-shrink: 0; }
+  .sidebar-search-input { flex: 1; background: var(--bg3); color: var(--text1); border: 1px solid var(--border); border-radius: 4px; padding: 5px 6px; font-family: inherit; font-size: 12px; min-width: 0; }
+  .sidebar-search-input:focus { outline: none; border-color: var(--accent); }
+  .sidebar-search-clear { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0 2px; line-height: 1; flex-shrink: 0; }
+  .sidebar-search-clear:hover { color: var(--text1); }
+  .sidebar-search-results { padding: 4px 0; }
+  .sidebar-search-result { display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; border-radius: 4px; margin: 1px 4px; }
+  .sidebar-search-result:hover { background: var(--bg3); }
+  .sidebar-search-result-text { min-width: 0; flex: 1; }
+  .sidebar-search-result-asset { font-size: 12px; color: var(--text1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sidebar-search-result-camp { font-size: 10px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .sidebar-search-empty { padding: 16px 14px; font-size: 12px; color: var(--text3); text-align: center; }
+  .sidebar-search-more { padding: 6px 14px; font-size: 10px; color: var(--text3); text-align: center; }
   /* Sidebar month filter \u2014 sits at the top of .sidebar-scroll, hidden in compact mode */
   .sidebar-month-filter { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 5px; border-bottom: 1px solid var(--border); margin-bottom: 8px; position: relative; }
   .sidebar-month-label { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text3); }
@@ -2235,6 +2250,8 @@ var STATE = {
   // whose estDelivery falls in that month; 'none' shows campaigns whose videos have
   // no delivery date set yet. Persisted so it survives reloads.
   sidebarMonthFilter: 'all',
+  // Transient global search across all campaign assets. Not persisted.
+  sidebarSearch: '',
   // Remembered feedback sender name \u2014 optional, persists across sessions for convenience.
   feedbackName: '',
   search: '',
@@ -4107,6 +4124,47 @@ function clearDragOverClasses() {
   }
 }
 
+// Move a campaign from one country to another, placing it at the drop target position.
+function moveCampaignAcrossCountry(srcId, targetId, placeBefore) {
+  var src = findCampaignById(srcId);
+  var target = findCampaignById(targetId);
+  if (!src || !target) return false;
+  var oldCountry = src.country;
+  var newCountry = target.country;
+  if (oldCountry === newCountry) return moveCampaignWithinCountry(srcId, targetId, placeBefore);
+
+  // Change the campaign's country
+  src.country = newCountry;
+
+  // Remove src from STATE.campaigns, then splice in at the target position
+  STATE.campaigns = STATE.campaigns.filter(function(c) { return String(c.id) !== String(srcId); });
+  var siblings = getSubCampaignsForCountry(newCountry); // already excludes src
+  var targetIdx = -1;
+  for (var i = 0; i < siblings.length; i++) {
+    if (String(siblings[i].id) === String(targetId)) { targetIdx = i; break; }
+  }
+  var insertIdx = placeBefore ? targetIdx : targetIdx + 1;
+  var globalInsertIdx;
+  if (targetIdx < 0 || insertIdx >= siblings.length) {
+    if (siblings.length > 0) {
+      var lastSibling = siblings[siblings.length - 1];
+      for (var k = 0; k < STATE.campaigns.length; k++) {
+        if (String(STATE.campaigns[k].id) === String(lastSibling.id)) { globalInsertIdx = k + 1; break; }
+      }
+    }
+  } else {
+    var pivot = siblings[insertIdx];
+    for (var m = 0; m < STATE.campaigns.length; m++) {
+      if (String(STATE.campaigns[m].id) === String(pivot.id)) { globalInsertIdx = m; break; }
+    }
+  }
+  if (globalInsertIdx === undefined) globalInsertIdx = STATE.campaigns.length;
+  STATE.campaigns.splice(globalInsertIdx, 0, src);
+  reorderCampaigns(true);
+  logAction('updated', 'Moved "' + src.name + '" from ' + oldCountry + ' to ' + newCountry);
+  return true;
+}
+
 // Move a campaign to a new position within its own country.
 // `targetId` is the campaign we hovered over; `placeBefore` is true if the
 // drop was in the upper half of the target, false for the lower half.
@@ -4643,9 +4701,52 @@ function renderSidebar() {
     ? '<button class="sidebar-toggle" onclick="App.toggleSidebarCompact()" title="' + toggleTitle + '">' + toggleIcon + '</button>'
     : '<div class="sidebar-title">Countries \u00B7 ' + STATE.countries.length + '</div>' +
       '<button class="sidebar-toggle" onclick="App.toggleSidebarCompact()" title="' + toggleTitle + '">' + toggleIcon + '</button>';
+
+  // Global asset search bar
+  var sidebarSearch = STATE.sidebarSearch || '';
+  var searchBarHtml = '<div class="sidebar-search-wrap">' +
+    '<span class="sidebar-search-icon">\u2315</span>' +
+    '<input class="sidebar-search-input" type="text" placeholder="' + (compact ? 'Search' : 'Search all videos\u2026') + '" value="' + escapeHtml(sidebarSearch) + '" oninput="App.onSidebarSearch(this.value)">' +
+    (sidebarSearch ? '<button class="sidebar-search-clear" onclick="App.clearSidebarSearch()" title="Clear">\u00D7</button>' : '') +
+    '</div>';
+
+  // When there is a search query, replace the country/campaign tree with results
+  var bodyHtml;
+  if (sidebarSearch) {
+    var q = sidebarSearch.toLowerCase();
+    var results = [];
+    STATE.assets.forEach(function(a) {
+      if (a.name.toLowerCase().indexOf(q) >= 0) {
+        var camp = findCampaignById(a.campaignId);
+        if (camp) results.push({ asset: a, camp: camp });
+      }
+    });
+    results = results.slice(0, 20);
+    if (results.length === 0) {
+      bodyHtml = '<div class="sidebar-search-empty">No videos found</div>';
+    } else {
+      bodyHtml = '<div class="sidebar-search-results">' +
+        results.map(function(r) {
+          var flag = '<span class="country-flag flag-' + r.camp.country + '" style="width:16px;height:12px;font-size:8px;display:inline-block;vertical-align:middle;margin-right:4px;">' + r.camp.country + '</span>';
+          return '<div class="sidebar-search-result" onclick="App.jumpToAsset(\'' + r.camp.id + '\', \'' + r.asset.id + '\')" title="' + escapeHtml(r.camp.name) + '">' +
+            flag +
+            '<div class="sidebar-search-result-text">' +
+              '<div class="sidebar-search-result-asset">' + escapeHtml(r.asset.name) + '</div>' +
+              (compact ? '' : '<div class="sidebar-search-result-camp">' + escapeHtml(r.camp.name) + '</div>') +
+            '</div>' +
+          '</div>';
+        }).join('') +
+        (results.length === 20 ? '<div class="sidebar-search-more">Showing first 20 results</div>' : '') +
+      '</div>';
+    }
+  } else {
+    bodyHtml = monthFilterHtml + html;
+  }
+
   return '<div class="sidebar ' + (compact ? 'sidebar-compact' : '') + '">' +
     '<div class="sidebar-header">' + headerInner + '</div>' +
-    '<div class="sidebar-scroll">' + monthFilterHtml + html + '</div></div>';
+    searchBarHtml +
+    '<div class="sidebar-scroll">' + bodyHtml + '</div></div>';
 }
 
 function renderCampaignsView() {
@@ -4774,7 +4875,13 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>' +
+    (function() {
+      var assignedCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && a.status === 'Assigned'; }).length;
+      var bulkBtn = assignedCount > 0
+        ? '<button class="edit-btn ml-auto" onclick="App.bulkApproveAssigned()" title="Approve all ' + assignedCount + ' assigned video' + (assignedCount === 1 ? '' : 's') + '" style="color:#22c55e;border-color:#22c55e;">✓ Approve All Assigned (' + assignedCount + ')</button>'
+        : '';
+      return '<div class="camp-title-row"><div class="camp-title">' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + bulkBtn + '<button class="edit-btn' + (assignedCount > 0 ? '' : ' ml-auto') + '" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>';
+    })() +
       '<button class="edit-btn" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(\'' + camp.id + '\')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(\'' + camp.id + '\')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(\'' + camp.id + '\')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
@@ -9267,6 +9374,32 @@ var App = {
     STATE.sidebarMonthFilter = value || 'all';
     render();
   },
+  onSidebarSearch: function(v) {
+    STATE.sidebarSearch = v;
+    render();
+  },
+  clearSidebarSearch: function() {
+    STATE.sidebarSearch = '';
+    render();
+  },
+  jumpToAsset: function(campId, assetId) {
+    var camp = findCampaignById(campId);
+    if (!camp) return;
+    STATE.sidebarSearch = '';
+    STATE.activeSubCampaignId = camp.id;
+    STATE.expandedCountries[camp.country] = true;
+    STATE.tab = 'campaigns';
+    saveState();
+    render();
+    setTimeout(function() {
+      var row = document.querySelector('tr[data-asset-id="' + assetId + '"]');
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('row-highlight-flash');
+        setTimeout(function() { row.classList.remove('row-highlight-flash'); }, 2500);
+      }
+    }, 300);
+  },
   addSub: function(code) { showAddSubCampaignModal(code); },
   editAssetById: function(id) {
     var a = findAssetById(id);
@@ -9292,6 +9425,27 @@ var App = {
   showDailyLogSlack: function(offset, editor) {
     showDailyLogSlackModal(parseInt(offset, 10) || 0, editor);
   },
+  bulkApproveAssigned: function() {
+    var camp = getActiveCampaign();
+    if (!camp) return;
+    var today = todayISO();
+    var targets = STATE.assets.filter(function(a) {
+      return String(a.campaignId) === String(camp.id) && a.status === 'Assigned';
+    });
+    if (!targets.length) { toast('No assigned videos to approve', 'info'); return; }
+    targets.forEach(function(a) {
+      var oldStatus = a.status;
+      a.status = 'Approved';
+      if (!a.dateApproved) a.dateApproved = today;
+      a.dragLocked = false;
+      logAction('updated', 'Asset "' + a.name + '" bulk approved (Assigned → Approved)');
+      emitAssetChangeNotifications(a, { oldEditor: a.editor, oldStatus: oldStatus });
+    });
+    save();
+    render();
+    toast(targets.length + ' video' + (targets.length === 1 ? '' : 's') + ' approved', 'success');
+  },
+
   setAssetStatus: function(id, newStatus) {
     var a = findAssetById(id);
     if (!a) return;
@@ -10302,12 +10456,7 @@ var App = {
     var targetId = el.getAttribute('data-camp-id');
     var targetCountry = el.getAttribute('data-country');
 
-    // Different country \u2014 not a valid drop target; show a blocked cursor.
-    if (targetCountry !== DragState.srcCountry) {
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
-      el.classList.add('drag-blocked');
-      return;
-    }
+    // Accept drops from any country \u2014 cross-country moves are supported.
     // Same country \u2014 accept drop and show insertion line.
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
@@ -10327,11 +10476,6 @@ var App = {
     event.stopPropagation(); // don't trigger the row's click -> selectCampaign
     clearDragOverClasses();
     if (DragState.srcId === null) return;
-    if (targetCountry !== DragState.srcCountry) {
-      DragState.srcId = null;
-      DragState.srcCountry = null;
-      return; // cross-country drop is a no-op
-    }
     if (String(targetId) === String(DragState.srcId)) {
       DragState.srcId = null;
       DragState.srcCountry = null;
@@ -10340,7 +10484,9 @@ var App = {
     // Decide before/after based on where within the target row the drop happened
     var rect = event.currentTarget.getBoundingClientRect();
     var placeBefore = event.clientY < rect.top + rect.height / 2;
-    var moved = moveCampaignWithinCountry(DragState.srcId, targetId, placeBefore);
+    var moved = targetCountry !== DragState.srcCountry
+      ? moveCampaignAcrossCountry(DragState.srcId, targetId, placeBefore)
+      : moveCampaignWithinCountry(DragState.srcId, targetId, placeBefore);
     DragState.srcId = null;
     DragState.srcCountry = null;
     if (moved) render();
