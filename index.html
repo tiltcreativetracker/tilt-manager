@@ -1504,6 +1504,9 @@ var Fb = {
       nextAssetId: STATE.nextAssetId,
       nextCampaignId: STATE.nextCampaignId,
       nextBatchItemId: STATE.nextBatchItemId,
+      briefs: STATE.briefs || [],
+      nextBriefId: STATE.nextBriefId || 1,
+      briefsWebhookUrl: STATE.briefsWebhookUrl || '',
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedAt: Date.now()
@@ -1628,6 +1631,7 @@ var Fb = {
     Fb._firstSnapshot = true;
     Fb._unsub = fbDb.doc(Fb.STATE_DOC).onSnapshot(function(snap) {
       if (Fb._firstSnapshot) {
+        if (snap.metadata && snap.metadata.fromCache) return; // ignore stale IndexedDB cache, wait for server
         Fb._firstSnapshot = false;
         Fb._ready = true;
         if (snap.exists) {
@@ -1641,6 +1645,7 @@ var Fb = {
         // hasPendingWrites is true when this snapshot reflects a local pending write.
         var meta = snap.metadata || {};
         if (meta.hasPendingWrites) return;
+        if (meta.fromCache) return; // ignore stale IndexedDB cache
         if (snap.exists) Fb.applySnapshot(snap.data());
       }
     }, function(err) {
@@ -1654,7 +1659,6 @@ var Fb = {
         Fb._ready = false; // do NOT enable uploads while Firestore is broken
         var localRaw = null;
         try { localRaw = localStorage.getItem(STORAGE_KEY); } catch (_) {}
-        if (localRaw) loadState();
         window._firestoreUnreachable = true;
         window._firestoreError = (err && err.code) ? err.code : (err && err.message) || 'unknown';
         if (typeof render === 'function' && Auth._booted) render();
@@ -1735,7 +1739,10 @@ var Fb = {
 
     var mainDocChanged = (json !== Fb._lastUploadJson);
     if (!mainDocChanged && assetsToWrite.length === 0 && assetIdsToDelete.length === 0) {
-      Fb._uploadTimer = null; return Promise.resolve();
+      Fb._uploadTimer = null;
+      Fb._syncStatus = 'idle';
+      Fb._updateSyncDom();
+      return Promise.resolve();
     }
 
     // Only show the indicator once we know something actually changed.
@@ -2364,7 +2371,14 @@ var STATE = {
   ],
   nextAssetId: 21,
   nextCampaignId: 6,
-  nextBatchItemId: 1
+  nextBatchItemId: 1,
+
+  // Brief intake submissions. Each entry: { id, subcampId, notionUrl, rawFileUrl,
+  // notes, submittedBy, submittedAt, acknowledged }. Persisted to Firestore.
+  briefs: [],
+  nextBriefId: 1,
+  // Slack webhook for brief-ready alerts. Falls back to global webhookUrl if blank.
+  briefsWebhookUrl: ''
 };
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -4423,9 +4437,10 @@ var TAB_DEFS = {
   log:              { label: 'Daily Log' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
+  briefs:           { label: 'Briefs', badge: true },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'briefs', 'config'];
 
 // Role-based tab visibility. Editors see the day-to-day tabs; PMs add Notifications
 // and Scheduler so they can drive comms; Admins see everything including Automations
@@ -4434,8 +4449,8 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingC
 // the documents these tabs touch (config/app and the users collection).
 var ROLE_TAB_VISIBILITY = {
   editor: ['campaigns', 'today', 'editingCalendar', 'log'],
-  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications'],
-  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'config']
+  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'briefs'],
+  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'briefs', 'config']
 };
 
 // Returns the list of tab IDs the given role is allowed to see. Unknown roles
@@ -4496,7 +4511,10 @@ function renderTopbar() {
   // guarded by pdragCheckClick so a dragging-then-releasing doesn't also switch tabs.
   var tabsHtml = order.map(function(tabId) {
     var def = TAB_DEFS[tabId];
-    var badge = (def.badge && tabId === 'notifications') ? pendingBadge : '';
+    var briefsPending = STATE.briefs.filter(function(b) { return !b.acknowledged; }).length;
+    var briefsBadge = briefsPending > 0 ? '<span class="tab-badge">' + briefsPending + '</span>' : '';
+    var badge = (def.badge && tabId === 'notifications') ? pendingBadge
+              : (def.badge && tabId === 'briefs') ? briefsBadge : '';
     return '<div class="tab-btn ' + (STATE.tab === tabId ? 'active' : '') +
       '" role="button" tabindex="0" data-tab-id="' + tabId + '"' +
       ' onmousedown="pdragStart(event, \'tab\', \'' + tabId + '\')"' +
@@ -6693,6 +6711,26 @@ function renderAutomationsView() {
     '</div>' +
 
     (function() {
+      var bwh = STATE.briefsWebhookUrl || '';
+      var bwhEsc = escapeHtml(bwh);
+      var bwhValid = webhookValid(bwh);
+      var bwhEmpty = !bwh;
+      var bwhDotClass = bwhValid ? 'ok' : (bwhEmpty ? '' : 'bad');
+      var bwhDotTitle = bwhValid
+        ? 'Valid webhook saved for brief alerts'
+        : (bwhEmpty ? 'No webhook — falls back to the global webhook above' : 'Saved value isn\'t a valid webhook URL');
+      return '<div class="auto-card">' +
+        '<div class="auto-header"><div class="auto-icon">✦</div><div><div class="auto-title">Slack Webhook — Brief Alerts</div><div class="auto-sub">pings this channel when a content lead submits a brief</div></div></div>' +
+        '<div class="auto-desc">When a brief is submitted via the <strong style="color:var(--text1);">Briefs</strong> tab, the tracker posts a Slack message to this webhook. Leave blank to fall back to the global webhook above.</div>' +
+        '<div class="webhook-row">' +
+          '<span class="webhook-status-dot ' + bwhDotClass + '" title="' + bwhDotTitle + '"></span>' +
+          '<input type="text" id="briefs-webhook-input" value="' + bwhEsc + '" placeholder="https://hooks.slack.com/services/...">' +
+          '<button class="save-btn" onclick="App.saveBriefsWebhook()">Save</button>' +
+        '</div>' +
+      '</div>';
+    })() +
+
+    (function() {
       // Category Head QC webhook \u2014 single URL for ALL category-head batches (Sneakers,
       // Bags, Apparel, etc.). When set, every CHQ batch routes here regardless of
       // category. When blank, falls back to the global webhook (04).
@@ -7562,6 +7600,89 @@ function executeSheetImport() {
   }
 }
 
+function renderBriefsView() {
+  var isAdmin = roleAtLeast('admin');
+  var isPm = roleAtLeast('pm');
+
+  // Submission form (visible to pm + admin)
+  var campOptions = STATE.campaigns.map(function(c) {
+    return '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</option>';
+  }).join('');
+
+  var formHtml =
+    '<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:22px 24px;max-width:580px;margin-bottom:28px;">' +
+      '<div style="font-size:15px;font-weight:700;color:var(--text1);margin-bottom:4px;letter-spacing:-0.2px;">Submit a Brief</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:18px;">Paste the Notion brief URL and raw file link so the team is notified.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:12px;">' +
+        '<div>' +
+          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Sub-Campaign</label>' +
+          '<select id="brief-subcamp" style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;appearance:none;-webkit-appearance:none;outline:none;">' +
+            '<option value="">— Select sub-campaign —</option>' + campOptions +
+          '</select>' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Notion Brief URL</label>' +
+          '<input id="brief-notion" type="url" placeholder="https://notion.so/..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;" />' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Raw File Link <span style="font-weight:400;color:var(--text3)">(Drive, Dropbox, etc.)</span></label>' +
+          '<input id="brief-rawfile" type="url" placeholder="https://drive.google.com/..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;" />' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Notes <span style="font-weight:400;color:var(--text3)">(optional)</span></label>' +
+          '<textarea id="brief-notes" rows="3" placeholder="Any extra context for the team..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;resize:vertical;"></textarea>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:flex-end;">' +
+          '<button onclick="App.submitBrief()" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity 0.12s;" onmouseover="this.style.opacity=\'0.85\'" onmouseout="this.style.opacity=\'1\'">Submit brief</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  // Submissions list (pm + admin can see; admin can acknowledge)
+  var listHtml = '';
+  if (isPm) {
+    var allBriefs = STATE.briefs.slice().sort(function(a, b) { return (b.submittedAt || 0) - (a.submittedAt || 0); });
+    if (allBriefs.length === 0) {
+      listHtml = '<div style="font-size:13px;color:var(--text3);padding:12px 0;">No briefs submitted yet.</div>';
+    } else {
+      listHtml = allBriefs.map(function(b) {
+        var camp = STATE.campaigns.find(function(c) { return String(c.id) === String(b.subcampId); });
+        var campName = camp ? escapeHtml(camp.name) : '(unknown campaign)';
+        var ts = b.submittedAt ? new Date(b.submittedAt).toLocaleString() : '';
+        var ackBtn = isAdmin && !b.acknowledged
+          ? '<button onclick="App.acknowledgeBrief(\'' + b.id + '\')" style="padding:4px 12px;background:var(--green-bg);color:var(--green-text);border:1px solid rgba(29,158,117,0.3);border-radius:5px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Mark seen</button>'
+          : '';
+        var seenChip = b.acknowledged
+          ? '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">seen</span>'
+          : '<span style="font-size:11px;font-weight:700;color:var(--amber-text);font-family:\'JetBrains Mono\',monospace;">new</span>';
+        return '<div style="background:var(--bg2);border:1px solid ' + (b.acknowledged ? 'var(--border)' : 'var(--border2)') + ';border-radius:8px;padding:14px 16px;margin-bottom:10px;">' +
+          '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
+                seenChip +
+                '<span style="font-size:13px;font-weight:600;color:var(--text1);">' + campName + '</span>' +
+                '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + escapeHtml(b.submittedBy || '') + ' · ' + ts + '</span>' +
+              '</div>' +
+              '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (b.notes ? '8' : '0') + 'px;">' +
+                (b.notionUrl ? '<a href="' + escapeHtml(b.notionUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--blue-bg);color:var(--blue-text);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Brief ↗</a>' : '') +
+                (b.rawFileUrl ? '<a href="' + escapeHtml(b.rawFileUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--bg4);color:var(--text2);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Raw files ↗</a>' : '') +
+              '</div>' +
+              (b.notes ? '<div style="font-size:12px;color:var(--text2);line-height:1.5;">' + escapeHtml(b.notes) + '</div>' : '') +
+            '</div>' +
+            (ackBtn ? '<div style="flex-shrink:0;">' + ackBtn + '</div>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+  }
+
+  return '<div class="content-area" style="padding:24px 28px;overflow-y:auto;">' +
+    '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);margin-bottom:18px;">Briefs</div>' +
+    formHtml +
+    (isPm ? '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);margin-bottom:12px;">Submitted briefs</div>' + listHtml : '') +
+  '</div>';
+}
+
 function renderConfigView() {
   var counts = {};
   EDITORS.forEach(function(e) { counts[e] = STATE.assets.filter(function(a) { return a.editor === e; }).length; });
@@ -7945,7 +8066,7 @@ function loadState() {
     });
     // Migrate tabOrder (added in this version). Start from stored value or default,
     // top up any new tab ids, and drop any stale ids.
-    var defaultOrder = ['campaigns', 'today', 'notifications', 'log', 'automations', 'config'];
+    var defaultOrder = ['campaigns', 'today', 'notifications', 'log', 'automations', 'briefs', 'config'];
     if (!Array.isArray(STATE.tabOrder) || STATE.tabOrder.length === 0) {
       STATE.tabOrder = defaultOrder.slice();
     } else {
@@ -9182,6 +9303,7 @@ function render() {
   else if (STATE.tab === 'log') body = renderDailyLogView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
+  else if (STATE.tab === 'briefs') body = renderBriefsView();
   else body = renderConfigView();
   document.getElementById('app').innerHTML = renderTopbar() + '<div class="main">' + body + '</div>';
   // Context menu layer \u2014 empty if nothing is open; a positioned popup if ContextMenuState is set
@@ -9538,6 +9660,50 @@ var App = {
   },
   deleteAsset: deleteAsset,
   duplicateAsset: duplicateAsset,
+
+  submitBrief: function() {
+    var subcampId = (document.getElementById('brief-subcamp') || {}).value || '';
+    var notionUrl = ((document.getElementById('brief-notion') || {}).value || '').trim();
+    var rawFileUrl = ((document.getElementById('brief-rawfile') || {}).value || '').trim();
+    var notes = ((document.getElementById('brief-notes') || {}).value || '').trim();
+    if (!subcampId) { toast('Please select a sub-campaign.', 'error'); return; }
+    if (!notionUrl) { toast('Please paste the Notion brief URL.', 'error'); return; }
+    var submittedBy = (Auth && Auth.user && Auth.user.displayName) ? Auth.user.displayName : (Auth && Auth.user && Auth.user.email) ? Auth.user.email : 'Unknown';
+    var entry = {
+      id: 'b' + (STATE.nextBriefId || 1),
+      subcampId: subcampId,
+      notionUrl: notionUrl,
+      rawFileUrl: rawFileUrl,
+      notes: notes,
+      submittedBy: submittedBy,
+      submittedAt: Date.now(),
+      acknowledged: false
+    };
+    STATE.briefs = (STATE.briefs || []).concat([entry]);
+    STATE.nextBriefId = (STATE.nextBriefId || 1) + 1;
+    var camp = STATE.campaigns.find(function(c) { return String(c.id) === String(subcampId); });
+    var campName = camp ? camp.name : subcampId;
+    var webhookUrl = STATE.briefsWebhookUrl || STATE.webhookUrl;
+    if (webhookUrl && webhookUrl.indexOf('hooks.slack.com') !== -1) {
+      var msg = ':memo: *Brief ready — ' + campName + '*\n' +
+        'Submitted by ' + submittedBy + '\n' +
+        (notionUrl ? 'Brief: <' + notionUrl + '|Open in Notion>' : '') +
+        (rawFileUrl ? '  ·  Raw files: <' + rawFileUrl + '|Open files>' : '') +
+        (notes ? '\n' + notes : '');
+      postToSlack(webhookUrl, msg);
+    }
+    saveState();
+    render();
+    toast('Brief submitted!', 'success');
+  },
+
+  acknowledgeBrief: function(id) {
+    STATE.briefs = (STATE.briefs || []).map(function(b) {
+      return b.id === id ? Object.assign({}, b, { acknowledged: true }) : b;
+    });
+    saveState();
+    render();
+  },
 
   // --- Topbar tab drag-to-reorder ---
   // Users can grab any tab in the topbar and drag it to a new position. The new
@@ -10775,6 +10941,14 @@ var App = {
       toast('Webhook URL saved locally (not sent)', 'success');
     }
   },
+  saveBriefsWebhook: function() {
+    var input = document.getElementById('briefs-webhook-input');
+    if (input) {
+      STATE.briefsWebhookUrl = input.value.trim();
+      saveState();
+      toast('Briefs webhook saved', 'success');
+    }
+  },
   testWebhook: testWebhookPing,
 
   // Daily-thread + bot token handlers.
@@ -11655,27 +11829,12 @@ bootApp = function() {
       // applySnapshot already calls render(), so we don't double-render here.
       return;
     }
-    // Firestore is empty. Decide: migrate from localStorage or initialize fresh.
-    var localRaw = null;
-    try { localRaw = localStorage.getItem(STORAGE_KEY); } catch (_) {}
-    if (localRaw) {
-      // Local data exists. Load it into STATE and offer migration.
-      var hadSaved = loadState();
-      if (hadSaved) logAction('updated', 'Loaded local data \u2014 click "Migrate to Firestore" in Config to sync');
-      Fb._ready = true; // allow uploads now
-      window._needsFirestoreMigration = true;
-      render();
-      // Toast prompt so user notices the migration banner.
-      setTimeout(function() {
-        if (typeof toast === 'function') toast('Local data found \u2014 visit Config to migrate it to Firestore', 'info');
-      }, 800);
-    } else {
-      // Genuinely fresh install. Initialize empty STATE and seed Firestore.
-      Fb._ready = true;
-      logAction('updated', 'Initialized fresh database');
-      Fb.uploadNow();
-      render();
-    }
+    // Firestore is empty \u2014 initialize fresh. localStorage is never used as a
+    // fallback because stale local data caused unpredictable resets.
+    Fb._ready = true;
+    logAction('updated', 'Initialized fresh database');
+    Fb.uploadNow();
+    render();
   });
 };
 
