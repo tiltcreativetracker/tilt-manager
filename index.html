@@ -7594,7 +7594,7 @@ function renderBriefsView() {
         '</div>' +
         '<div>' +
           '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Notes <span style="font-weight:400;color:var(--text3)">(optional)</span></label>' +
-          '<textarea id="brief-notes" rows="3" placeholder="Any extra context for the team..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;resize:vertical;"></textarea>' +
+          '<textarea id="brief-notes" rows="3" placeholder="Seller Name - Categories" style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;resize:vertical;"></textarea>' +
         '</div>' +
         '<div style="display:flex;justify-content:flex-end;">' +
           '<button onclick="App.submitBrief()" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity 0.12s;" onmouseover="this.style.opacity=\'0.85\'" onmouseout="this.style.opacity=\'1\'">Submit brief</button>' +
@@ -7614,6 +7614,9 @@ function renderBriefsView() {
         var ackBtn = isAdmin && !b.acknowledged
           ? '<button onclick="App.acknowledgeBrief(\'' + b.id + '\')" style="padding:4px 12px;background:var(--green-bg);color:var(--green-text);border:1px solid rgba(29,158,117,0.3);border-radius:5px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Mark seen</button>'
           : '';
+        var clearBtn = isAdmin
+          ? '<button onclick="App.clearBrief(\'' + b.id + '\')" style="padding:4px 12px;background:transparent;color:var(--text3);border:1px solid var(--border2);border-radius:5px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;" onmouseover="this.style.color=\'var(--red-text)\';this.style.borderColor=\'var(--red-text)\'" onmouseout="this.style.color=\'var(--text3)\';this.style.borderColor=\'var(--border2)\'">Clear</button>'
+          : '';
         var seenChip = b.acknowledged
           ? '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">seen</span>'
           : '<span style="font-size:11px;font-weight:700;color:var(--amber-text);font-family:\'JetBrains Mono\',monospace;">new</span>';
@@ -7625,12 +7628,12 @@ function renderBriefsView() {
                 '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + escapeHtml(b.submittedBy || '') + ' · ' + ts + '</span>' +
               '</div>' +
               '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (b.notes ? '8' : '0') + 'px;">' +
-                (b.notionUrl ? '<a href="' + escapeHtml(b.notionUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--blue-bg);color:var(--blue-text);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Brief ↗</a>' : '') +
-                (b.rawFileUrl ? '<a href="' + escapeHtml(b.rawFileUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--bg4);color:var(--text2);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Raw files ↗</a>' : '') +
+                (b.notionUrl ? '<a href="' + escapeHtml(b.notionUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--blue-bg);color:var(--blue-text);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Brief ↗</a><button onclick="copyToClipboard(\'' + escapeHtml(b.notionUrl).replace(/'/g,'\\x27') + '\',\'Brief URL copied\')" title="Copy Brief URL" style="display:inline-flex;align-items:center;justify-content:center;padding:3px 7px;background:var(--blue-bg);color:var(--blue-text);border:none;border-radius:5px;font-size:12px;cursor:pointer;opacity:0.75;" onmouseover="this.style.opacity=\'1\'" onmouseout="this.style.opacity=\'0.75\'">⎘</button>' : '') +
+                (b.rawFileUrl ? '<a href="' + escapeHtml(b.rawFileUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--bg4);color:var(--text2);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Raw files ↗</a><button onclick="copyToClipboard(\'' + escapeHtml(b.rawFileUrl).replace(/'/g,'\\x27') + '\',\'Raw files URL copied\')" title="Copy Raw files URL" style="display:inline-flex;align-items:center;justify-content:center;padding:3px 7px;background:var(--bg4);color:var(--text2);border:none;border-radius:5px;font-size:12px;cursor:pointer;opacity:0.75;" onmouseover="this.style.opacity=\'1\'" onmouseout="this.style.opacity=\'0.75\'">⎘</button>' : '') +
               '</div>' +
               (b.notes ? '<div style="font-size:12px;color:var(--text2);line-height:1.5;">' + escapeHtml(b.notes) + '</div>' : '') +
             '</div>' +
-            (ackBtn ? '<div style="flex-shrink:0;">' + ackBtn + '</div>' : '') +
+            ((ackBtn || clearBtn) ? '<div style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' + ackBtn + clearBtn + '</div>' : '') +
           '</div>' +
         '</div>';
       }).join('');
@@ -7638,7 +7641,10 @@ function renderBriefsView() {
   }
 
   return '<div class="content-area" style="padding:24px 28px;overflow-y:auto;">' +
-    '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);margin-bottom:18px;">Briefs</div>' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">' +
+      '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);">Briefs</div>' +
+      '<button onclick="App.copyBriefTabLink()" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:5px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;" onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\'var(--bg3)\'" title="Copy a direct link to this tab">🔗 Copy link</button>' +
+    '</div>' +
     formHtml +
     (isPm ? '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);margin-bottom:12px;">Submitted briefs</div>' + listHtml : '') +
   '</div>';
@@ -9411,17 +9417,26 @@ var App = {
     STATE.briefs = (STATE.briefs || []).concat([entry]);
     STATE.nextBriefId = (STATE.nextBriefId || 1) + 1;
     var webhookUrl = STATE.briefsWebhookUrl || STATE.webhookUrl;
-    if (webhookUrl && webhookUrl.indexOf('hooks.slack.com') !== -1) {
-      var msg = ':memo: *Brief ready*\n' +
+    saveState();
+    render();
+    if (webhookValid(webhookUrl)) {
+      var msg = ':memo: *Campaign ready*\n' +
         'Submitted by ' + submittedBy + '\n' +
         (notionUrl ? 'Brief: <' + notionUrl + '|Open in Notion>' : '') +
         (rawFileUrl ? '  ·  Raw files: <' + rawFileUrl + '|Open files>' : '') +
         (notes ? '\n' + notes : '');
-      postToSlack(webhookUrl, msg);
+      postToSlack(webhookUrl, msg).then(function(r) {
+        if (r.ok) {
+          toast('Brief submitted — Slack notified!', 'success');
+        } else {
+          toast('Brief saved, but Slack notification failed (' + r.status + '). Check your webhook in Automations.', 'error');
+        }
+      }).catch(function() {
+        toast('Brief saved, but could not reach Slack. Check your webhook in Automations.', 'error');
+      });
+    } else {
+      toast('Brief submitted!', 'success');
     }
-    saveState();
-    render();
-    toast('Brief submitted!', 'success');
   },
 
   acknowledgeBrief: function(id) {
@@ -9430,6 +9445,13 @@ var App = {
     });
     saveState();
     render();
+  },
+
+  clearBrief: function(id) {
+    STATE.briefs = (STATE.briefs || []).filter(function(b) { return b.id !== id; });
+    saveState();
+    render();
+    toast('Brief cleared', 'success');
   },
 
   // --- Topbar tab drag-to-reorder ---
@@ -10230,6 +10252,11 @@ var App = {
   // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
   // hash (#campaign=N) so it doesn't collide with Firebase auth's query-string redirects.
   // Boot logic in attachAuthListener parses this and selects the campaign on load.
+  copyBriefTabLink: function() {
+    var url = location.origin + location.pathname + '#tab=briefs';
+    copyToClipboard(url, 'Briefs link copied');
+  },
+
   copyCampaignLink: function(campaignId) {
     var camp = findCampaignById(campaignId);
     if (!camp) return;
@@ -11520,6 +11547,12 @@ bootApp = function() {
     // and expands its country). Guard ensures this runs only once per session.
     if (!window.__deepLinkApplied) {
       window.__deepLinkApplied = true;
+      if ((location.hash || '') === '#tab=briefs') {
+        STATE.tab = 'briefs';
+        if (typeof saveState === 'function') saveState();
+        render();
+        setTimeout(function() { if (typeof toast === 'function') toast('Opened Briefs tab from link', 'success'); }, 400);
+      }
       var match = (location.hash || '').match(/^#campaign=([^&]+)(?:&asset=([^&]+))?/);
       if (match) {
         var targetId = parseInt(match[1], 10);
