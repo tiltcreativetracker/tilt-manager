@@ -1752,6 +1752,14 @@ var Fb = {
       Fb._pendingLocalJson = null;  // confirmed — no longer dirty
       Fb._retryDelay = 3000;        // reset backoff for next failure
       if (Fb._retryTimer) { clearTimeout(Fb._retryTimer); Fb._retryTimer = null; }
+      // Discard any snapshot that was deferred during this upload. It was captured
+      // before our write committed, so it's older than what's now in Firestore.
+      // Replaying it would restore stale batch items and trigger duplicate sends.
+      if (Fb._pendingSnapshotData) {
+        clearTimeout(Fb._snapshotRetryTimer);
+        Fb._pendingSnapshotData = null;
+        Fb._snapshotRetries = 0;
+      }
       Fb._syncStatus = 'saved';
       Fb._updateSyncDom();
       Fb._syncSavedTimer = setTimeout(function() {
