@@ -49,6 +49,11 @@
   .sync-indicator.visible { opacity: 1; }
   .sync-indicator.saved { color: var(--green-text); }
   .sync-indicator.error { color: var(--red-text); }
+  .offline-chip { display: none; align-items: center; gap: 5px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--amber-text); background: rgba(250,199,117,0.12); border: 1px solid rgba(250,199,117,0.35); border-radius: 5px; padding: 2px 8px; white-space: nowrap; cursor: default; }
+  .offline-chip.visible { display: flex; }
+  .backonline-chip { display: none; align-items: center; gap: 5px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--green-text); background: rgba(29,158,117,0.1); border: 1px solid rgba(29,158,117,0.3); border-radius: 5px; padding: 2px 8px; white-space: nowrap; cursor: default; transition: opacity 0.5s ease; opacity: 1; }
+  .backonline-chip.visible { display: flex; }
+  .backonline-chip.fading { opacity: 0; }
   .sync-spinner { width: 10px; height: 10px; border: 1.5px solid var(--text3); border-top-color: var(--accent2); border-radius: 50%; animation: sync-spin 0.7s linear infinite; flex-shrink: 0; }
   @keyframes sync-spin { to { transform: rotate(360deg); } }
   .presence-stack { display: flex; align-items: center; margin-right: 2px; }
@@ -1599,23 +1604,6 @@ var Fb = {
           cat.color = { bg: cat.bg || 'var(--bg4)', fg: cat.fg || 'var(--text2)' };
         }
       });
-      // Mirror to localStorage as a cache so offline reloads still work. Strip per-user
-      // UI fields from the incoming snapshot, then MERGE into the existing localStorage
-      // copy so we don't clobber the user's locally-saved sidebar/tab state. Without
-      // this merge, an immediate reload after the first snapshot would lose per-user
-      // UI prefs because saveState() hadn't yet had a chance to re-write them.
-      try {
-        var existing = {};
-        try {
-          var raw = localStorage.getItem(STORAGE_KEY);
-          if (raw) existing = JSON.parse(raw) || {};
-        } catch (_) {}
-        Object.keys(data).forEach(function(k) {
-          if (PER_USER_UI_FIELDS[k]) return;
-          existing[k] = data[k];
-        });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
-      } catch (_) {}
       if (typeof render === 'function' && Auth._booted) render();
     } finally {
       // Defer un-suppressing past the synchronous render so any saveState calls fired
@@ -1657,8 +1645,6 @@ var Fb = {
       if (Fb._firstSnapshot) {
         Fb._firstSnapshot = false;
         Fb._ready = false; // do NOT enable uploads while Firestore is broken
-        var localRaw = null;
-        try { localRaw = localStorage.getItem(STORAGE_KEY); } catch (_) {}
         window._firestoreUnreachable = true;
         window._firestoreError = (err && err.code) ? err.code : (err && err.message) || 'unknown';
         if (typeof render === 'function' && Auth._booted) render();
@@ -1683,7 +1669,7 @@ var Fb = {
       el.innerHTML = '✓ All changes saved';
     } else if (s === 'retrying') {
       el.className = 'sync-indicator visible error';
-      el.innerHTML = '⚠ Saved locally — retrying…';
+      el.innerHTML = '⚠ Save failed — retrying…';
     } else if (s === 'error') {
       el.className = 'sync-indicator visible error';
       el.innerHTML = '⚠ Save failed';
@@ -1784,7 +1770,7 @@ var Fb = {
         Fb._syncStatus = 'error';
         Fb._updateSyncDom();
         if (typeof toast === 'function') {
-          toast('Firebase quota exceeded — your data is saved locally and will sync after midnight when the quota resets.', 'error');
+          toast('Firebase quota exceeded — changes could not be saved and will retry after midnight when the quota resets.', 'error');
         }
         return;
       }
@@ -1794,7 +1780,11 @@ var Fb = {
       Fb._updateSyncDom();
       Fb.scheduleRetry(Fb._retryDelay);
       if (typeof toast === 'function') {
-        toast('Firebase save failed — data saved locally, retrying…', 'error');
+        if (window._isOffline) {
+          toast('Upload failed: Offline', 'error');
+        } else {
+          toast('Firebase save failed — retrying…', 'error');
+        }
       }
     });
   },
@@ -1805,6 +1795,7 @@ var Fb = {
   subscribeAssets: function() {
     fbDb.collection(Fb.ASSETS_COLL).onSnapshot(function(snapshot) {
       if (snapshot.metadata.hasPendingWrites) return; // our own write, ignore echo
+      if (snapshot.metadata.fromCache) return; // ignore stale IndexedDB cache, wait for server
       var assets = [];
       snapshot.forEach(function(doc) { assets.push(doc.data()); });
 
@@ -3464,22 +3455,12 @@ function attachTallyListener() {
   }
 }
 
-// Initialize the stored date on first load if blank so we don't fire immediately on
-// first run (we only want to fire on a genuine midnight crossover). Stamps localStorage
-// only \u2014 the Firestore doc gets stamped on the first real send via transaction.
 function initTallyDate() {
-  try {
-    if (!localStorage.getItem(TALLY_STORAGE_KEY)) {
-      localStorage.setItem(TALLY_STORAGE_KEY, todayISO());
-    }
-  } catch (e) { /* localStorage may be blocked */ }
+  // No-op: tally date coordination uses Firestore only.
 }
 
-// Read the most authoritative "last sent date" we have. Prefers the live Firestore value;
-// falls back to localStorage when Firestore isn't ready (first-load grace period or offline).
 function readLastTallyDate() {
-  if (_tallySharedReady) return _tallySharedLastSent; // even null is authoritative once Firestore has spoken
-  try { return localStorage.getItem(TALLY_STORAGE_KEY); } catch (e) { return null; }
+  return _tallySharedReady ? _tallySharedLastSent : null;
 }
 
 // Atomically claim today's tally slot in Firestore. Returns a promise resolving to true
@@ -3504,12 +3485,9 @@ function claimTallySlot(today) {
         return true;
       });
     }).then(function(won) {
-      // Mirror to localStorage so this tab also short-circuits without waiting for the
-      // onSnapshot echo.
-      if (won) { try { localStorage.setItem(TALLY_STORAGE_KEY, today); } catch (e) {} }
       return won;
     }).catch(function(err) {
-      console.warn('Tally transaction failed, falling back to localStorage', err);
+      console.warn('Tally transaction failed', err);
       return claimTallyLocalOnly(today);
     });
   }
@@ -3517,15 +3495,8 @@ function claimTallySlot(today) {
   return Promise.resolve(claimTallyLocalOnly(today));
 }
 
-// Local-only fallback when Firestore can't help. Best-effort; may double-send across
-// disconnected browsers (which is the existing pre-Firestore behavior).
 function claimTallyLocalOnly(today) {
-  try {
-    var current = localStorage.getItem(TALLY_STORAGE_KEY);
-    if (current === today) return false;
-    localStorage.setItem(TALLY_STORAGE_KEY, today);
-    return true;
-  } catch (e) { return false; }
+  return false; // Firestore unavailable — skip tally to avoid double-send across browsers.
 }
 
 // =============================================================================
@@ -3632,10 +3603,8 @@ function checkDailyTallyCrossover() {
   try {
     var today = todayISO();
     var last = readLastTallyDate();
-    // First-ever load (Firestore says nothing AND localStorage empty): stamp localStorage
-    // so we don't immediately fire. Firestore stamps on first real send.
+    // Firestore not ready yet — skip to avoid firing before we know last-sent date.
     if (!last) {
-      try { localStorage.setItem(TALLY_STORAGE_KEY, today); } catch (e) {}
       _tallyFireAt = null;
       return;
     }
@@ -4554,6 +4523,8 @@ function renderTopbar() {
       '<div class="topbar-tabs">' + tabsHtml + '</div>' +
       '<div class="topbar-right">' +
         '<div class="presence-stack">' + (typeof _presenceUsers !== 'undefined' ? Presence._avatarsHtml() : '') + '</div>' +
+        '<div class="offline-chip' + (window._isOffline ? ' visible' : '') + '" title="No internet connection \u2014 changes will save when you\'re back online">\u26A1 Offline</div>' +
+        '<div class="backonline-chip' + (window._isBackOnline ? ' visible' : '') + '" title="Reconnected \u2014 syncing changes">\u2713 Back Online</div>' +
         (function() {
           var s = (typeof Fb !== 'undefined') ? Fb._syncStatus : 'idle';
           if (s === 'saving') return '<div class="sync-indicator visible"><div class="sync-spinner"></div>Saving\u2026</div>';
@@ -6524,8 +6495,7 @@ function renderNotificationsView() {
       // Daily tally \u2014 one card per editor (Zidni, Sharm, Patty) summarising the
       // videos that editor approved today, with each video's CH QC status. Routes
       // into the editor's daily Slack thread when set; otherwise webhook fallback.
-      var lastSent = '';
-      try { lastSent = localStorage.getItem(TALLY_STORAGE_KEY) || ''; } catch (e) { lastSent = ''; }
+      var lastSent = readLastTallyDate() || '';
       var lastSentLabel = lastSent ? formatDate(lastSent) : 'never';
       var TALLY_EDS = ['Zidni', 'Sharm', 'Patty'];
       var tallyCards = TALLY_EDS.map(function(ed) {
@@ -7640,8 +7610,6 @@ function renderBriefsView() {
       listHtml = '<div style="font-size:13px;color:var(--text3);padding:12px 0;">No briefs submitted yet.</div>';
     } else {
       listHtml = allBriefs.map(function(b) {
-        var camp = STATE.campaigns.find(function(c) { return String(c.id) === String(b.subcampId); });
-        var campName = camp ? escapeHtml(camp.name) : '(unknown campaign)';
         var ts = b.submittedAt ? new Date(b.submittedAt).toLocaleString() : '';
         var ackBtn = isAdmin && !b.acknowledged
           ? '<button onclick="App.acknowledgeBrief(\'' + b.id + '\')" style="padding:4px 12px;background:var(--green-bg);color:var(--green-text);border:1px solid rgba(29,158,117,0.3);border-radius:5px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Mark seen</button>'
@@ -7654,7 +7622,6 @@ function renderBriefsView() {
             '<div style="flex:1;min-width:0;">' +
               '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
                 seenChip +
-                '<span style="font-size:13px;font-weight:600;color:var(--text1);">' + campName + '</span>' +
                 '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + escapeHtml(b.submittedBy || '') + ' · ' + ts + '</span>' +
               '</div>' +
               '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (b.notes ? '8' : '0') + 'px;">' +
@@ -7783,7 +7750,7 @@ function renderConfigView() {
       '<div class="section-title">Firebase sync \u2014 unreachable</div>' +
       '<div class="auto-card" style="border-color:var(--red-text); background:rgba(226,75,74,0.06);">' +
         '<div class="auto-desc" style="margin-bottom:14px; color:var(--text1);">' +
-          '<strong>Firestore is unreachable.</strong> The most common cause: security rules haven\'t been updated yet, so your sign-in can authenticate but can\'t actually read/write data. The app is running in offline mode using your browser\'s local storage.' +
+          '<strong>Firestore is unreachable.</strong> The most common cause: security rules haven\'t been updated yet, so your sign-in can authenticate but can\'t actually read/write data. No data will be saved until this is resolved.' +
         '</div>' +
         '<div style="font-size:12px; color:var(--text3); font-family:monospace; padding:10px; background:var(--bg3); border-radius:6px; margin-bottom:12px;">Error code: ' + escapeHtml(window._firestoreError || 'unknown') + '</div>' +
         '<div style="font-size:12.5px; color:var(--text2); line-height:1.6;">' +
@@ -7799,7 +7766,7 @@ function renderConfigView() {
       '<div class="section-title">Firebase migration \u2014 action required</div>' +
       '<div class="auto-card" style="border-color:var(--amber-text); background:rgba(250,199,117,0.06);">' +
         '<div class="auto-desc" style="margin-bottom:14px; color:var(--text1);">' +
-          '<strong>Your local data hasn\'t been synced to Firestore yet.</strong> Right now you\'re still reading and writing to your browser\'s local storage. Click <strong>Migrate now</strong> to push everything (campaigns, assets, version history, activity log, settings) up to Firestore in one batch. After this, every device that signs in with an @tilt.app account will see the same data in real time.' +
+          '<strong>Your data hasn\'t been synced to Firestore yet.</strong> Click <strong>Migrate now</strong> to push everything (campaigns, assets, activity log, settings) up to Firestore in one batch. After this, every device that signs in with an @tilt.app account will see the same data in real time.' +
         '</div>' +
         '<div style="display:flex; gap:10px; flex-wrap:wrap;">' +
           '<button class="btn-primary" onclick="App.exportLocalBackup()">\u2B07 Export backup first</button>' +
@@ -7814,7 +7781,7 @@ function renderConfigView() {
       '<div class="auto-card" style="border-color:var(--amber-text); background:rgba(250,199,117,0.06);">' +
         '<div class="auto-desc" style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">' +
           '<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--amber-text);"></span>' +
-          '<span><strong style="color:var(--amber-text);">Local storage only.</strong> You\'re not signed in, so data is saved in this browser only. It will be lost if you clear browser data or use a different browser. Export a backup regularly.</span>' +
+          '<span><strong style="color:var(--amber-text);">Not signed in.</strong> Changes are not being saved. Sign in with your @tilt.app account to sync data to Firestore.</span>' +
         '</div>' +
         '<div style="display:flex; gap:10px; flex-wrap:wrap;">' +
           '<button class="edit-btn" onclick="App.exportLocalBackup()">\u2B07 Export backup</button>' +
@@ -7994,7 +7961,7 @@ function renderConfigView() {
       '<div class="auto-header">' +
         '<div class="auto-icon" style="background:var(--red-bg); color:var(--red-text);">\u26A0</div>' +
         '<div><div class="auto-title" style="color:var(--red-text);">Reset all data</div>' +
-        '<div class="auto-sub">wipes localStorage and reloads the page with seeded defaults</div></div>' +
+        '<div class="auto-sub">wipes all data and reloads the page with seeded defaults</div></div>' +
       '</div>' +
       '<div class="auto-desc">Erases every campaign, video asset, pending batch, sent notification, and activity log entry. Editor Slack channel URLs and workspace settings are also cleared. There is no undo.</div>' +
       '<button class="run-btn" style="margin-top:10px; background:var(--red-bg); color:var(--red-text); border-color:var(--red);" onclick="App.resetAllData()">\u267B Reset all data</button>' +
@@ -8008,245 +7975,15 @@ var persistenceEnabled = true;
 
 function saveState() {
   if (!persistenceEnabled) return;
-  try {
-    var snapshot = {
-      tabOrder: STATE.tabOrder,
-      activeSubCampaignId: STATE.activeSubCampaignId,
-      expandedCountries: STATE.expandedCountries,
-      sidebarCompact: STATE.sidebarCompact,
-      sidebarMonthFilter: STATE.sidebarMonthFilter,
-      feedbackName: STATE.feedbackName,
-      webhookUrl: STATE.webhookUrl,
-      countryWebhooks: STATE.countryWebhooks,
-      categoryHeadWebhook: STATE.categoryHeadWebhook,
-      qcWebhooks: STATE.qcWebhooks,
-      slackWorkspace: STATE.slackWorkspace,
-      editorSlackChannels: STATE.editorSlackChannels,
-      editorSlackIds: STATE.editorSlackIds,
-      categoryHeadSlackIds: STATE.categoryHeadSlackIds,
-      pmSlackIds: STATE.pmSlackIds,
-      slackBotToken: STATE.slackBotToken,
-      dailyThreads: STATE.dailyThreads,
-      dailyThreadHistory: STATE.dailyThreadHistory,
-      catHeadDailyThreads: STATE.catHeadDailyThreads,
-      catHeadDailyThreadHistory: STATE.catHeadDailyThreadHistory,
-      schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
-      countries: STATE.countries,
-      categories: STATE.categories,
-      campaigns: STATE.campaigns,
-      assets: STATE.assets,
-      pendingBatches: STATE.pendingBatches,
-      sentNotifications: STATE.sentNotifications,
-      activityLog: STATE.activityLog,
-      nextAssetId: STATE.nextAssetId,
-      nextCampaignId: STATE.nextCampaignId,
-      nextBatchItemId: STATE.nextBatchItemId
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-  } catch (e) {
-    console.warn('Failed to save state', e);
-  }
   // Sync to Firestore (debounced, suppressed during snapshot apply).
   if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload();
 }
 
-function loadState() {
-  try {
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
-    var snapshot = JSON.parse(raw);
-    Object.keys(snapshot).forEach(function(key) {
-      STATE[key] = snapshot[key];
-    });
-    // Migrate tabOrder (added in this version). Start from stored value or default,
-    // top up any new tab ids, and drop any stale ids.
-    var defaultOrder = ['campaigns', 'today', 'notifications', 'log', 'automations', 'briefs', 'config'];
-    if (!Array.isArray(STATE.tabOrder) || STATE.tabOrder.length === 0) {
-      STATE.tabOrder = defaultOrder.slice();
-    } else {
-      // Add any defaults not present in the stored order.
-      defaultOrder.forEach(function(k) {
-        if (STATE.tabOrder.indexOf(k) < 0) STATE.tabOrder.push(k);
-      });
-      // Drop ids that aren't in defaultOrder (stale from prior versions).
-      STATE.tabOrder = STATE.tabOrder.filter(function(k) { return defaultOrder.indexOf(k) >= 0; });
-      // One-time swap: the prior default had scheduler before notifications. Flip any
-      // saved state that still reflects that old order so existing installs pick up the
-      // new default without wiping user customizations (only swaps when scheduler sits
-      // directly before notifications \u2014 custom orderings are left alone).
-      var schedIdx = STATE.tabOrder.indexOf('scheduler');
-      var notifIdx = STATE.tabOrder.indexOf('notifications');
-      if (!STATE._tabOrderMigratedV2 && schedIdx >= 0 && notifIdx >= 0 && schedIdx + 1 === notifIdx) {
-        STATE.tabOrder[schedIdx] = 'notifications';
-        STATE.tabOrder[notifIdx] = 'scheduler';
-      }
-      STATE._tabOrderMigratedV2 = true;
-      // V3: Daily Log tab launched in an earlier slot; move it to sit right
-      // after Scheduler (its canonical home). Runs once per install.
-      if (!STATE._tabOrderMigratedV3) {
-        var logIdxV3 = STATE.tabOrder.indexOf('log');
-        var schedIdxV3 = STATE.tabOrder.indexOf('scheduler');
-        if (logIdxV3 >= 0 && schedIdxV3 >= 0) {
-          // Remove log, then insert it right after scheduler.
-          STATE.tabOrder.splice(logIdxV3, 1);
-          // After the splice the scheduler index may have shifted if log was before it.
-          var newSchedIdx = STATE.tabOrder.indexOf('scheduler');
-          STATE.tabOrder.splice(newSchedIdx + 1, 0, 'log');
-        }
-        STATE._tabOrderMigratedV3 = true;
-      }
-      // V4: Scheduler tab removed — purge any saved 'scheduler' entry from tabOrder.
-      if (!STATE._tabOrderMigratedV4) {
-        STATE.tabOrder = STATE.tabOrder.filter(function(k) { return k !== 'scheduler'; });
-        STATE._tabOrderMigratedV4 = true;
-      }
-    }
-    // Ensure editor batches, Slack channels, and Slack member IDs exist for all editors
-    EDITORS.forEach(function(e) {
-      if (!STATE.pendingBatches[e]) STATE.pendingBatches[e] = { items: [], firstQueuedAt: null };
-      if (!STATE.editorSlackChannels) STATE.editorSlackChannels = {};
-      if (STATE.editorSlackChannels[e] === undefined) STATE.editorSlackChannels[e] = '';
-      if (!STATE.editorSlackIds) STATE.editorSlackIds = {};
-      if (STATE.editorSlackIds[e] === undefined) STATE.editorSlackIds[e] = '';
-    });
-    // Backfill categories created before the color sub-object was added.
-    (STATE.categories || []).forEach(function(cat) {
-      if (!cat.color && (cat.bg || cat.fg)) {
-        cat.color = { bg: cat.bg || 'var(--bg4)', fg: cat.fg || 'var(--text2)' };
-      }
-    });
-    // Auto-seed category-head Slack IDs (one per unique head listed in CATEGORY_HEADS).
-    if (!STATE.categoryHeadSlackIds) STATE.categoryHeadSlackIds = {};
-    Object.keys(CATEGORY_HEADS).forEach(function(cat) {
-      var head = CATEGORY_HEADS[cat];
-      if (head && STATE.categoryHeadSlackIds[head] === undefined) {
-        STATE.categoryHeadSlackIds[head] = '';
-      }
-    });
-    // Auto-seed PM Slack IDs (one per country). Empty default = no @mention until
-    // the user pastes the member ID in Config.
-    if (!STATE.pmSlackIds) STATE.pmSlackIds = {};
-    STATE.countries.forEach(function(c) {
-      if (STATE.pmSlackIds[c.code] === undefined) STATE.pmSlackIds[c.code] = '';
-    });
-    // Reconcile saved countries with the canonical list: add any missing countries
-    // (e.g. US added in this version) and re-order to canonical order.
-    if (!Array.isArray(STATE.countries)) STATE.countries = [];
-    var savedByCode = {};
-    STATE.countries.forEach(function(c) { savedByCode[c.code] = c; });
-    STATE.countries = CANONICAL_COUNTRIES.map(function(cc) {
-      return savedByCode[cc.code] || { code: cc.code, name: cc.name };
-    });
-    // Ensure expandedCountries has an entry for every canonical country
-    if (!STATE.expandedCountries) STATE.expandedCountries = {};
-    STATE.countries.forEach(function(c) {
-      if (STATE.expandedCountries[c.code] === undefined) STATE.expandedCountries[c.code] = false;
-    });
-    // Ensure PM country batches exist (added in this version, plus any newly-canonical country)
-    STATE.countries.forEach(function(c) {
-      var key = 'PM:' + c.code;
-      if (!STATE.pendingBatches[key]) STATE.pendingBatches[key] = { items: [], firstQueuedAt: null };
-    });
-    // Ensure countryWebhooks exists with an entry for every canonical country
-    if (!STATE.countryWebhooks) STATE.countryWebhooks = {};
-    STATE.countries.forEach(function(c) {
-      if (STATE.countryWebhooks[c.code] === undefined) STATE.countryWebhooks[c.code] = '';
-    });
-    // Ensure qcWebhooks exists with an entry for every canonical country (added in this
-    // version). Separate from countryWebhooks so QC reports can route to a different
-    // Slack channel than For-Review pings do.
-    if (!STATE.qcWebhooks) STATE.qcWebhooks = {};
-    STATE.countries.forEach(function(c) {
-      if (STATE.qcWebhooks[c.code] === undefined) STATE.qcWebhooks[c.code] = '';
-    });
-    // Category-head webhook (added in this version). Single URL covering all categories.
-    // Empty string by default \u2014 falls back to global webhook until the user sets one.
-    if (typeof STATE.categoryHeadWebhook !== 'string') STATE.categoryHeadWebhook = '';
-    // Reconcile categories (added in this version). Seed defaults if missing; coerce
-    // any legacy string-array representations into {name, color} objects; ensure every
-    // campaign's current category name still has an entry (auto-create if a campaign
-    // references a category that no longer exists).
-    if (!Array.isArray(STATE.categories) || STATE.categories.length === 0) {
-      STATE.categories = DEFAULT_CATEGORIES.map(function(c) { return { name: c.name, color: c.color }; });
-    } else {
-      STATE.categories = STATE.categories.map(function(c, i) {
-        if (typeof c === 'string') {
-          return { name: c, color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] };
-        }
-        if (!c.color || typeof c.color !== 'object') {
-          return { name: c.name, color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] };
-        }
-        return c;
-      });
-    }
-    // For every campaign using a category name not present in STATE.categories, auto-add it
-    STATE.campaigns.forEach(function(camp) {
-      if (camp.category && !findCategory(camp.category)) {
-        STATE.categories.push({ name: camp.category, color: pickNextCategoryColor() });
-      }
-    });
-    // Auto-add any DEFAULT_CATEGORIES that aren't yet in STATE.categories. This lets us
-    // ship new built-in categories (e.g. Sneakers, TCG, etc.) and have them appear for
-    // installs that already had the original Luxury/Essentials/BTS trio seeded.
-    DEFAULT_CATEGORIES.forEach(function(def) {
-      if (!findCategory(def.name)) {
-        STATE.categories.push({ name: def.name, color: def.color });
-      }
-    });
-    // Normalize legacy uppercase / mismatched-case categories on assets and campaigns
-    // back to their canonical titlecase form. Without this, CATEGORY_HEADS lookups
-    // (which use titlecase keys) miss against legacy rows that stored "LUXURY". The
-    // data heals on first load after this code ships; subsequent writes from the
-    // editable dropdown already use the canonical name.
-    var canonicalByLower = {};
-    STATE.categories.forEach(function(c) { if (c && c.name) canonicalByLower[c.name.toLowerCase()] = c.name; });
-    function canonicalizeCategory(value) {
-      if (!value) return value;
-      var canon = canonicalByLower[String(value).toLowerCase()];
-      return canon || value; // unknown categories pass through unchanged
-    }
-    STATE.assets.forEach(function(a) {
-      if (a && a.category) a.category = canonicalizeCategory(a.category);
-    });
-    STATE.campaigns.forEach(function(c) {
-      if (c && c.category) c.category = canonicalizeCategory(c.category);
-    });
-    // Migrate campaign.type (added in this version). Default to 'Paid Ads' since that's
-    // the historical use case \u2014 existing installs will see everything as Paid Ads until
-    // they manually flip campaigns to Organic.
-    STATE.campaigns.forEach(function(camp) {
-      if (!camp.type || CAMPAIGN_TYPES.indexOf(camp.type) < 0) camp.type = DEFAULT_CAMPAIGN_TYPE;
-    });
-    // Migrate old status names on assets (In Review -> For Review, Needs Revision -> Needs Revisions)
-    // Also normalize date fields to ISO 'YYYY-MM-DD' so the <input type="date"> picker and
-    // the formatDate() display helper both work on current + legacy data.
-    STATE.assets.forEach(function(a) {
-      if (STATUS_MIGRATION[a.status]) a.status = STATUS_MIGRATION[a.status];
-      if (a.editor === undefined || a.editor === null) a.editor = '';
-      if (a.estDelivery)  a.estDelivery  = toISODate(a.estDelivery)  || a.estDelivery;
-      if (a.dateApproved) a.dateApproved = toISODate(a.dateApproved) || a.dateApproved;
-      // QC field added in this version \u2014 default to 'Draft' if missing or unknown
-      if (QC_VALUES.indexOf(a.qc) < 0) a.qc = 'Draft';
-      // Category Head QC added later \u2014 same default behavior
-      if (CATEGORY_HEAD_QC_VALUES.indexOf(a.categoryHeadQc) < 0) a.categoryHeadQc = 'Draft';
-      // chDateApproved added later \u2014 default to empty string
-      if (a.chDateApproved === undefined || a.chDateApproved === null) a.chDateApproved = '';
-      if (a.chDateApproved) a.chDateApproved = toISODate(a.chDateApproved) || a.chDateApproved;
-      // assignedAt added in this version \u2014 legacy rows get an empty string so they only
-      // show in "To Do Today" via the ETA filter (not the assignment-date filter).
-      if (a.assignedAt === undefined) a.assignedAt = '';
-    });
-    return true;
-  } catch (e) {
-    console.warn('Failed to load state', e);
-    return false;
-  }
-}
+function loadState() { return false; }
 
 function resetAllData() {
   if (!confirm('Wipe ALL data and reset to seeded defaults? This cannot be undone.')) return;
   persistenceEnabled = false;
-  localStorage.removeItem(STORAGE_KEY);
   location.reload();
 }
 
@@ -9440,7 +9177,7 @@ var App = {
   // ===== Firebase migration helpers =====
   exportLocalBackup: function() {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY) || JSON.stringify({});
+      var raw = JSON.stringify(STATE);
       var blob = new Blob([raw], { type: 'application/json' });
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
@@ -9451,7 +9188,7 @@ var App = {
       a.click();
       document.body.removeChild(a);
       setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
-      toast('Backup downloaded \u2014 keep it safe before migrating', 'success');
+      toast('Backup downloaded', 'success');
     } catch (e) {
       toast('Could not export backup: ' + e.message, 'error');
     }
@@ -9469,9 +9206,10 @@ var App = {
           var parsed = JSON.parse(ev.target.result);
           if (!parsed || typeof parsed !== 'object') throw new Error('Invalid backup file');
           if (!window.confirm('Restore this backup? Your current data will be replaced.')) return;
-          localStorage.setItem(STORAGE_KEY, ev.target.result);
-          toast('Backup restored — reloading…', 'success');
-          setTimeout(function() { location.reload(); }, 800);
+          Object.keys(parsed).forEach(function(k) { STATE[k] = parsed[k]; });
+          Fb.uploadNow();
+          render();
+          toast('Backup restored and saved to Firestore', 'success');
         } catch (err) {
           toast('Could not restore backup: ' + err.message, 'error');
         }
@@ -9656,16 +9394,13 @@ var App = {
   duplicateAsset: duplicateAsset,
 
   submitBrief: function() {
-    var subcampId = (document.getElementById('brief-subcamp') || {}).value || '';
     var notionUrl = ((document.getElementById('brief-notion') || {}).value || '').trim();
     var rawFileUrl = ((document.getElementById('brief-rawfile') || {}).value || '').trim();
     var notes = ((document.getElementById('brief-notes') || {}).value || '').trim();
-    if (!subcampId) { toast('Please select a sub-campaign.', 'error'); return; }
     if (!notionUrl) { toast('Please paste the Notion brief URL.', 'error'); return; }
     var submittedBy = (Auth && Auth.user && Auth.user.displayName) ? Auth.user.displayName : (Auth && Auth.user && Auth.user.email) ? Auth.user.email : 'Unknown';
     var entry = {
       id: 'b' + (STATE.nextBriefId || 1),
-      subcampId: subcampId,
       notionUrl: notionUrl,
       rawFileUrl: rawFileUrl,
       notes: notes,
@@ -9675,11 +9410,9 @@ var App = {
     };
     STATE.briefs = (STATE.briefs || []).concat([entry]);
     STATE.nextBriefId = (STATE.nextBriefId || 1) + 1;
-    var camp = STATE.campaigns.find(function(c) { return String(c.id) === String(subcampId); });
-    var campName = camp ? camp.name : subcampId;
     var webhookUrl = STATE.briefsWebhookUrl || STATE.webhookUrl;
     if (webhookUrl && webhookUrl.indexOf('hooks.slack.com') !== -1) {
-      var msg = ':memo: *Brief ready — ' + campName + '*\n' +
+      var msg = ':memo: *Brief ready*\n' +
         'Submitted by ' + submittedBy + '\n' +
         (notionUrl ? 'Brief: <' + notionUrl + '|Open in Notion>' : '') +
         (rawFileUrl ? '  ·  Raw files: <' + rawFileUrl + '|Open files>' : '') +
@@ -10932,7 +10665,7 @@ var App = {
         saveState();
         logAction('updated', 'Global Slack webhook updated');
       }
-      toast('Webhook URL saved locally (not sent)', 'success');
+      toast('Webhook URL saved', 'success');
     }
   },
   saveBriefsWebhook: function() {
@@ -11831,6 +11564,56 @@ bootApp = function() {
     render();
   });
 };
+
+// ===================== OFFLINE DETECTION =====================
+window._isOffline = !navigator.onLine;
+window._isBackOnline = false;
+var _backOnlineTimer = null;
+
+function _updateOfflineDom() {
+  var offlineChip = document.querySelector('.offline-chip');
+  var backOnlineChip = document.querySelector('.backonline-chip');
+  if (offlineChip) {
+    if (window._isOffline) offlineChip.classList.add('visible');
+    else offlineChip.classList.remove('visible');
+  }
+  if (backOnlineChip) {
+    if (window._isBackOnline) {
+      backOnlineChip.classList.add('visible');
+      backOnlineChip.classList.remove('fading');
+    } else {
+      backOnlineChip.classList.remove('visible');
+      backOnlineChip.classList.remove('fading');
+    }
+  }
+}
+
+window.addEventListener('offline', function() {
+  window._isOffline = true;
+  window._isBackOnline = false;
+  if (_backOnlineTimer) { clearTimeout(_backOnlineTimer); _backOnlineTimer = null; }
+  _updateOfflineDom();
+  if (typeof toast === 'function') toast('You\'re offline — changes will not save until reconnected', 'error');
+});
+
+window.addEventListener('online', function() {
+  window._isOffline = false;
+  window._isBackOnline = true;
+  _updateOfflineDom();
+  // Fade out then hide after 3s
+  if (_backOnlineTimer) clearTimeout(_backOnlineTimer);
+  _backOnlineTimer = setTimeout(function() {
+    var chip = document.querySelector('.backonline-chip');
+    if (chip) chip.classList.add('fading');
+    _backOnlineTimer = setTimeout(function() {
+      window._isBackOnline = false;
+      _updateOfflineDom();
+      _backOnlineTimer = null;
+    }, 500); // matches the CSS transition duration
+  }, 3000);
+  // Flush any pending local changes now that Firestore is reachable again.
+  if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload();
+});
 
 // Kick off the auth listener. If a session is already cached in IndexedDB
 // (Firebase persists sign-in by default), bootApp() runs immediately. Otherwise
