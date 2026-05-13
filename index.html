@@ -6679,7 +6679,7 @@ function renderAutomationsView() {
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">02</div><div><div class="auto-title">Daily Scheduler \u2014 3 PM, Mon\u2013Fri</div><div class="auto-sub">picks per editor based on difficulty mix + country priority</div></div></div>' +
-      '<div class="auto-desc">For Zidni, Sharm, Patty: picks the next batch of videos fitting their ideal mix. Zidni absorbs overflow when others can\'t handle a difficulty. Elsa is excluded from this automation but still receives reactive notifications. Open the <strong>Scheduler</strong> tab to preview and run.</div>' +
+      '<div class="auto-desc">For Zidni, Sharm, Patty: picks the next batch of videos fitting their ideal mix. Zidni absorbs overflow when others can\'t handle a difficulty. Elsa is excluded from this automation but still receives reactive notifications. Editor and ETA assignment is done inline in the <strong>Campaigns</strong> table or via the <strong>Board</strong> Kanban.</div>' +
     '</div>' +
 
     '<div class="auto-card">' +
@@ -6694,8 +6694,8 @@ function renderAutomationsView() {
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">04</div><div><div class="auto-title">Slack Webhook \u2014 Global Fallback</div><div class="auto-sub">used when a country webhook isn\u2019t set</div></div></div>' +
-      '<div class="auto-desc">Stores a catch-all <strong style="color:var(--text1);">Incoming Webhook URL</strong> (https://hooks.slack.com/services/...). This is used as a fallback for editor batches whose items span multiple countries, or when a country-specific webhook isn\u2019t set below. <em>Save</em> stores the URL locally; <em>Send test ping</em> actually POSTs a short message so you can verify Slack accepts it.</div>' +
-      '<div class="webhook-row"><input type="text" id="webhook-input" value="' + escapeHtml(STATE.webhookUrl) + '" placeholder="https://hooks.slack.com/services/..."><button class="save-btn" onclick="App.saveWebhook()">Save locally</button><button class="edit-btn" onclick="App.testWebhook()" style="margin-left:4px;">\u{1F4E1} Send test ping</button></div>' +
+      '<div class="auto-desc">Stores a catch-all <strong style="color:var(--text1);">Incoming Webhook URL</strong> (https://hooks.slack.com/services/...). This is used as a fallback for editor batches whose items span multiple countries, or when a country-specific webhook isn\u2019t set below. <em>Save</em> stores the URL to Firestore; <em>Send test ping</em> actually POSTs a short message so you can verify Slack accepts it.</div>' +
+      '<div class="webhook-row"><input type="text" id="webhook-input" value="' + escapeHtml(STATE.webhookUrl) + '" placeholder="https://hooks.slack.com/services/..."><button class="save-btn" onclick="App.saveWebhook()">Save</button><button class="edit-btn" onclick="App.testWebhook()" style="margin-left:4px;">\u{1F4E1} Send test ping</button></div>' +
     '</div>' +
 
     (function() {
@@ -6816,7 +6816,7 @@ function renderAutomationsView() {
     '</div>' +
 
     '<div class="section-title">Live Activity Log</div>' +
-    '<div class="auto-card"><div class="auto-desc" style="margin-bottom:12px">Every action in the creative tracker fires through the notification system. Open the browser console to see the raw payloads.</div><div class="log-list">' + logHtml + '</div></div>' +
+    '<div class="auto-card"><div class="auto-desc" style="margin-bottom:12px">Every mutation, status change, and notification send is logged here in real time. Capped at 200 entries in memory; 50 are synced to Firestore.</div><div class="log-list">' + logHtml + '</div></div>' +
   '</div></div>';
 }
 
