@@ -362,7 +362,7 @@
      for the ghost-animation effect; click routes to the campaign. */
   .week-camp-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 12px;
+    gap: 12px; width: 100%; min-width: 0; box-sizing: border-box;
   }
   .week-camp-card {
     background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
@@ -2441,26 +2441,35 @@ function getMonthRange(year, month) {
   return { start: fmt(first), end: fmt(last), year: year, month: month, label: MONTH_LONG[month] + ' ' + year };
 }
 
-// Returns months from the oldest approved asset to the current month, newest first.
+// Returns months that appear in any campaign's monthYear field, plus the current month.
+// Newest first.
 function getAvailableTallyMonths() {
   var now = new Date();
   var cy = now.getFullYear(), cm = now.getMonth();
-  var earliest = null;
-  STATE.assets.forEach(function(a) {
-    if (a.status === 'Approved' && a.dateApproved && (!earliest || a.dateApproved < earliest)) earliest = a.dateApproved;
+  var currentKey = cy + '-' + (cm < 9 ? '0' : '') + (cm + 1);
+  var seen = {};
+  seen[currentKey] = 1;
+  STATE.campaigns.forEach(function(c) {
+    var my = (c.monthYear || '').trim();
+    if (/^\d{4}-\d{2}$/.test(my)) seen[my] = 1;
   });
-  var sy, sm;
-  if (earliest) {
-    var d = new Date(earliest + 'T12:00:00');
-    sy = d.getFullYear(); sm = d.getMonth();
-  } else { sy = cy; sm = cm; }
-  var months = [];
-  var y = sy, m = sm;
-  while (y < cy || (y === cy && m <= cm)) {
-    months.push(getMonthRange(y, m));
-    m++; if (m > 11) { m = 0; y++; }
-  }
-  return months.reverse();
+  return Object.keys(seen).sort().reverse().map(function(k) {
+    return getMonthRange(parseInt(k.slice(0, 4)), parseInt(k.slice(5, 7)) - 1);
+  });
+}
+
+// Count all videos (any status) in campaigns whose monthYear matches monthKey ('YYYY-MM').
+// Optional filterFn(asset, campaign) scopes the count (e.g. UK Paid Ads only).
+function countVideosByMonthYear(monthKey, filterFn) {
+  var n = 0;
+  STATE.assets.forEach(function(a) {
+    var camp = findCampaignById(a.campaignId);
+    if (!camp) return;
+    if ((camp.monthYear || '') !== monthKey) return;
+    if (filterFn && !filterFn(a, camp)) return;
+    n++;
+  });
+  return n;
 }
 
 // Count approvals whose dateApproved lies inside a [startISO, endISO] range (inclusive).
@@ -5287,8 +5296,8 @@ function renderMonthPanel() {
   var mr = getMonthRange(parseInt(parts[0]), parseInt(parts[1]) - 1);
 
   var today = todayISO();
-  var approved = countApprovedInRange(mr.start, mr.end, isPaidAdsUKApproval);
-  var organicApproved = countApprovedInRange(mr.start, mr.end, isOrganicApproval);
+  var approved = countVideosByMonthYear(selectedKey, isPaidAdsUKApproval);
+  var organicApproved = countVideosByMonthYear(selectedKey, isOrganicApproval);
   var target = MONTHLY_APPROVAL_TARGET;
   var pct = Math.min(100, Math.round((approved / target) * 100));
   var totalWorkdays = countWorkdays(mr.start, mr.end);
@@ -5320,10 +5329,11 @@ function renderMonthPanel() {
     remainingSuffix = approved >= target ? 'Goal reached' : (target - approved) + ' short of goal';
   }
 
+
   var weeks = getMonthlyWeeklyBreakdown(isPaidAdsUKApproval, mr);
   var weekChipsHtml = weeks.map(function(w) {
     var cls = 'month-week-chip' + (w.isCurrent ? ' is-current' : '') + (w.isFuture ? ' is-future' : '');
-    return '<div class="' + cls + '" title="' + escapeHtml(w.start + ' \u2192 ' + w.end) + '">' +
+    return '<div class="' + cls + '" title="' + escapeHtml(w.start + ' → ' + w.end) + '">' +
       '<span class="month-week-chip-label">' + escapeHtml(w.label) + '</span>' +
       '<span class="month-week-chip-num">' + w.approvals + '</span>' +
     '</div>';
@@ -8489,6 +8499,39 @@ function testWebhookPing() {
 // per-country groups. Each group uses that country's webhook. Partial failures (Option A):
 // successful groups are moved to the sent log; failed groups stay in the pending batch so
 // the user can retry just those.
+
+// After a CHQ or editor-CHQ batch sends successfully, silently fire a secondary
+// post to the "other" thread so both parties see the update:
+//   CHQ:<category> batch → also post to each unique editor's daily thread
+//   Editor batch (CHQ-type items only) → also post to each unique category's CH thread
+function dualPostToSecondaryThreads(recipient, items, msg) {
+  var isChq = typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0;
+  if (isChq) {
+    var posted = {};
+    items.forEach(function(item) {
+      if (!item.editor || posted[item.editor]) return;
+      var edThread = resolveDailyThreadForEditor(item.editor);
+      if (!edThread) return;
+      posted[item.editor] = true;
+      var edUrl = resolveWebhookForEditor(item.editor, [item]);
+      if (webhookValid(edUrl)) postToSlack(edUrl, msg, edThread.threadTs);
+    });
+  } else if (EDITORS.indexOf(recipient) >= 0) {
+    var chqItems = items.filter(function(it) {
+      return it.change === 'category-approved' || it.change === 'category-needs-revisions';
+    });
+    var postedCat = {};
+    chqItems.forEach(function(item) {
+      if (!item.category || postedCat[item.category]) return;
+      var catThread = resolveDailyThreadForCategory(item.category);
+      if (!catThread) return;
+      postedCat[item.category] = true;
+      var chUrl = STATE.categoryHeadWebhook || STATE.webhookUrl;
+      if (webhookValid(chUrl)) postToSlack(chUrl, msg, catThread.threadTs);
+    });
+  }
+}
+
 function sendPendingBatch(editor, opts) {
   // opts.silent \u2014 when true, suppress user-facing toast + tab redirect on webhook
   // errors. The 5s ticker passes silent=true so auto-fires don't nag the user in a
@@ -8602,6 +8645,7 @@ function sendPendingBatch(editor, opts) {
               return;
             }
             markSent('sent-fallback');
+            dualPostToSecondaryThreads(editor, windowItems, msg);
             clearInFlight();
             logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) via webhook fallback');
             toast('\u2713 Sent to Slack (webhook fallback)', 'success');
@@ -8614,6 +8658,7 @@ function sendPendingBatch(editor, opts) {
         return;
       }
       markSent(useThread ? 'sent-thread' : 'sent-live');
+      dualPostToSecondaryThreads(editor, windowItems, msg);
       clearInFlight();
       logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) ' + (useThread ? 'in daily thread' : 'live to Slack') + ' (confirmed)');
       toast('\u2713 Sent to Slack' + (useThread ? ' (thread)' : ''), 'success');
@@ -8626,6 +8671,7 @@ function sendPendingBatch(editor, opts) {
         body: JSON.stringify({ text: msg })
       }).then(function() {
         markSent('sent-blind');
+        dualPostToSecondaryThreads(editor, windowItems, msg);
         clearInFlight();
         logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
         toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
