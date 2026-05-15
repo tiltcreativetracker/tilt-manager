@@ -1682,6 +1682,21 @@ var Fb = {
           cat.color = { bg: cat.bg || 'var(--bg4)', fg: cat.fg || 'var(--text2)' };
         }
       });
+      // Ensure Streetwear exists and reorder categories to the canonical display order.
+      if (STATE.categories && STATE.categories.length) {
+        var hasStreetwear = STATE.categories.some(function(c) { return c.name === 'Streetwear'; });
+        if (!hasStreetwear) {
+          STATE.categories.push({ name: 'Streetwear', color: CATEGORY_PALETTE[5] });
+        }
+        var CANONICAL_ORDER = ['Sneakers','TCG','Stone Island','Luxury','Vintage','Bags and Accessories','Y2K','Streetwear','Health and Beauty','Jewellery','Essentials','BTS'];
+        STATE.categories.sort(function(a, b) {
+          var ai = CANONICAL_ORDER.indexOf(a.name);
+          var bi = CANONICAL_ORDER.indexOf(b.name);
+          if (ai === -1) ai = CANONICAL_ORDER.length;
+          if (bi === -1) bi = CANONICAL_ORDER.length;
+          return ai - bi;
+        });
+      }
       if (typeof render === 'function' && Auth._booted) render();
     } finally {
       // Defer un-suppressing past the synchronous render so any saveState calls fired
@@ -2233,22 +2248,21 @@ var CATEGORY_PALETTE = [
   { bg: '#26453a', fg: '#a8d8c4', bgLight: '#dceee5', fgLight: '#1a4a3a' }  // sage
 ];
 
-// Default seed categories. The first three are the original Luxury/Essentials/BTS
-// trio; the remainder were added when the team brought on category-head reviewers
-// (see CATEGORY_HEADS below). Colors cycle through CATEGORY_PALETTE — we have 8
-// palette slots and 11 categories, so the last 3 reuse early colors.
+// Default seed categories ordered by team priority.
+// Essentials and BTS are kept at the end for backward compatibility with existing data.
 var DEFAULT_CATEGORIES = [
-  { name: 'Luxury',                color: CATEGORY_PALETTE[0] }, // purple
-  { name: 'Essentials',            color: CATEGORY_PALETTE[1] }, // teal
-  { name: 'BTS',                   color: CATEGORY_PALETTE[2] }, // amber
   { name: 'Sneakers',              color: CATEGORY_PALETTE[3] }, // pink
   { name: 'TCG',                   color: CATEGORY_PALETTE[4] }, // blue
   { name: 'Stone Island',          color: CATEGORY_PALETTE[5] }, // red
+  { name: 'Luxury',                color: CATEGORY_PALETTE[0] }, // purple
   { name: 'Vintage',               color: CATEGORY_PALETTE[6] }, // gray
   { name: 'Bags and Accessories',  color: CATEGORY_PALETTE[7] }, // sage
   { name: 'Y2K',                   color: CATEGORY_PALETTE[3] }, // pink (reuse)
+  { name: 'Streetwear',            color: CATEGORY_PALETTE[5] }, // red (reuse)
+  { name: 'Health and Beauty',     color: CATEGORY_PALETTE[1] }, // teal (reuse)
   { name: 'Jewellery',             color: CATEGORY_PALETTE[7] }, // sage (reuse)
-  { name: 'Health and Beauty',     color: CATEGORY_PALETTE[1] }  // teal (reuse)
+  { name: 'Essentials',            color: CATEGORY_PALETTE[1] }, // teal
+  { name: 'BTS',                   color: CATEGORY_PALETTE[2] }  // amber
 ];
 
 // Each country has an assigned PM — gets @mentioned in PM Review queue messages
@@ -4356,7 +4370,7 @@ function showAssetModal(existing) {
       '<div class="form-row full"><label class="form-label">Video Name *</label><input id="f-vname" class="form-input" value="' + escapeHtml(a.name) + '"></div>' +
       '<div class="form-row"><label class="form-label">NO.</label><input id="f-vpn" type="number" min="1" class="form-input" value="' + a.pn + '"></div>' +
       '<div class="form-row"><label class="form-label">Version</label><input id="f-vver" class="form-input" value="' + escapeHtml(a.version) + '"></div>' +
-      '<div class="form-row"><label class="form-label">Category</label><input id="f-vcat" class="form-input" value="' + escapeHtml(a.category) + '"></div>' +
+      '<div class="form-row"><label class="form-label">Category</label><select id="f-vcat" class="form-select">' + (STATE.categories || DEFAULT_CATEGORIES).map(function(c) { var n = c.name || c; return '<option value="' + escapeHtml(n) + '"' + (n === a.category ? ' selected' : '') + '>' + escapeHtml(n) + '</option>'; }).join('') + '</select></div>' +
       '<div class="form-row"><label class="form-label">Difficulty</label><select id="f-vdiff" class="form-select">' + diffOpts + '</select></div>' +
       '<div class="form-row full"><label class="form-label">Editor</label><select id="f-veditor" class="form-select">' + editorOpts + '</select></div>' +
       mismatchWarning +
