@@ -7975,22 +7975,24 @@ function renderReportingView() {
            (dCh   && dCh   >= range.start && dCh   <= range.end);
   }
 
-  // ── build campaign rows — totals reflect the full campaign (not date-filtered).
-  //    The period filter controls which campaigns appear; once visible, stats show
-  //    the whole campaign completion so in-progress videos with no dates yet and
-  //    approvals from a prior period are all counted correctly.
+  // ── build campaign rows ──
+  //    approvedInPeriod = CH-approved within the selected date range (drives the column + pace bar)
+  //    total            = all assets for the campaign (no date filter — for overall progress %)
+  //    isFull           = every asset is CH-approved all-time (drives Done chip)
   function campRow(c) {
     var allAssets = campAssets(c.id);
-    // Apply category filter at asset level
     if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category || '') === category; });
-    var total     = allAssets.length;
-    var approved  = allAssets.filter(function(a) { return a.categoryHeadQc === 'Approved'; }).length;
-    var revisions = allAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
-    var pct = total > 0 ? Math.round(approved / total * 100) : 0;
-    var isFull = total > 0 && approved === total;
+    var total            = allAssets.length;
+    var approvedInPeriod = allAssets.filter(function(a) {
+      return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
+    }).length;
+    var approvedAllTime  = allAssets.filter(function(a) { return a.categoryHeadQc === 'Approved'; }).length;
+    var revisions        = allAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
+    var pct    = total > 0 ? Math.round(approvedAllTime / total * 100) : 0;
+    var isFull = total > 0 && approvedAllTime === total;
     var editors = [];
     allAssets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
-    return { c: c, total: total, approved: approved, revisions: revisions, pct: pct, isFull: isFull, editors: editors };
+    return { c: c, total: total, approved: approvedInPeriod, revisions: revisions, pct: pct, isFull: isFull, editors: editors };
   }
 
   // Only show campaigns that have at least one asset in the selected range (and matching category)
@@ -8012,17 +8014,17 @@ function renderReportingView() {
   }
 
   // ── TABLE VIEW — grouped by category ──
+  var approvedColLabel = period === 'weekly' ? 'Approved This Week' : period === 'quarterly' ? 'Approved This Quarter' : 'Approved This Month';
   function tableHtml() {
-    var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>Category</th><th>Total</th><th>Approved</th><th>Progress</th><th>Revisions</th><th>Editors</th><th>Status</th></tr></thead>';
+    var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>' + approvedColLabel + '</th><th>Total</th><th>Progress</th><th>Revisions</th><th>Editors</th><th>Status</th></tr></thead>';
 
     function campTr(r) {
-      var statusChip = r.c.done ? '<span class="report-done-chip">Done</span>' : '<span class="report-active-chip">Active</span>';
+      var statusChip = (r.c.done || r.isFull) ? '<span class="report-done-chip">Done</span>' : '<span class="report-active-chip">Active</span>';
       return '<tr onclick="App.selectCampaign(\'' + r.c.id + '\'); App.setTab(\'campaigns\')">' +
         '<td class="td-name">' + escapeHtml(r.c.name) + '</td>' +
         '<td>' + flagHtml(r.c.country) + '</td>' +
-        '<td style="font-size:11px;color:var(--text2)">' + escapeHtml(r.c.category || '—') + '</td>' +
-        '<td class="td-mono">' + r.total + '</td>' +
         '<td class="td-green">' + r.approved + '</td>' +
+        '<td class="td-mono">' + r.total + '</td>' +
         '<td><div class="report-prog-cell"><div class="report-mini-track"><div class="report-mini-fill' + (r.isFull ? ' full' : '') + '" style="width:' + r.pct + '%"></div></div><span class="report-pct">' + r.pct + '%</span></div></td>' +
         '<td class="' + (r.revisions > 0 ? 'td-amber' : 'td-mono') + '">' + r.revisions + '</td>' +
         '<td style="color:var(--text2);font-size:11px">' + escapeHtml(r.editors.join(', ') || '—') + '</td>' +
