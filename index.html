@@ -7992,10 +7992,6 @@ function renderReportingView() {
     return '<button class="report-seg-btn' + (cur === val ? ' active' : '') + '" onclick="' + fn + '(\'' + val + '\')">' + label + '</button>';
   }
 
-  var monthOptsHtml = monthOpts.map(function(o) {
-    return '<option value="' + o.key + '"' + (o.key === selMonth ? ' selected' : '') + '>' + o.label + '</option>';
-  }).join('');
-
   var countryOptsHtml = '<option value="all"' + (country === 'all' ? ' selected' : '') + '>All markets</option>' +
     ['UK','IT','ES','US','PL'].map(function(c) {
       return '<option value="' + c + '"' + (country === c ? ' selected' : '') + '>' + c + '</option>';
