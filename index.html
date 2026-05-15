@@ -7962,20 +7962,29 @@ function renderReportingView() {
       '</div>';
   }
 
-  // ── date used for range inclusion: estDelivery or dateApproved (what period is this asset "in") ──
+  // ── date used for range inclusion: OR across estDelivery, dateApproved, chDateApproved ──
   function assetInRange(a) {
-    var d = a.estDelivery || a.dateApproved || '';
-    return d >= range.start && d <= range.end;
+    // Match if ANY of the relevant dates falls in range (OR logic so videos
+    // with estDelivery set to a different period aren't dropped when they were
+    // actually approved this period, and vice-versa).
+    var dEst = a.estDelivery || '';
+    var dAp  = a.dateApproved || '';
+    var dCh  = a.chDateApproved || '';
+    return (dEst  && dEst  >= range.start && dEst  <= range.end) ||
+           (dAp   && dAp   >= range.start && dAp   <= range.end) ||
+           (dCh   && dCh   >= range.start && dCh   <= range.end);
   }
 
-  // ── build campaign rows — total/range based on estDelivery, approved based on chDateApproved ──
+  // ── build campaign rows — total/range based on any matching date, approved based on chDateApproved ──
   function campRow(c) {
     var allAssets = campAssets(c.id);
     // Apply category filter at asset level
     if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category || '') === category; });
     var rangeAssets = allAssets.filter(assetInRange);
     var total    = rangeAssets.length;
-    var approved = rangeAssets.filter(function(a) {
+    // Approved = CH-approved within the period; scan allAssets so videos with an
+    // estDelivery outside the range aren't excluded from the approved tally.
+    var approved = allAssets.filter(function(a) {
       return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
     }).length;
     var revisions = rangeAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
