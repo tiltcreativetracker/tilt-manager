@@ -7907,7 +7907,83 @@ function renderReportingView() {
     });
   }
 
-  var paceHtml = '';
+  // ── pace bar ──
+  // UK + Paid Ads → show the UK Paid Media pace pill against the 200/month target.
+  // Any other filter combo → show a simple "approved this period" count for whatever
+  // market/type is selected (no fixed numeric target).
+  var paceHtml = (function() {
+    var periodLabel = period === 'weekly' ? 'this week' : period === 'quarterly' ? 'this quarter' : 'this month';
+    var periodLabelCap = period === 'weekly' ? 'This week' : period === 'quarterly' ? 'This quarter' : 'This month';
+
+    if (country === 'UK' && type === 'Paid Ads') {
+      // UK Paid Media pace — compare against MONTHLY_APPROVAL_TARGET (pro-rated for weekly/quarterly)
+      var ukPaidApproved = STATE.assets.filter(function(a) {
+        if (a.categoryHeadQc !== 'Approved') return false;
+        if (!a.chDateApproved) return false;
+        if (a.chDateApproved < range.start || a.chDateApproved > range.end) return false;
+        var c = findCampaignById(a.campaignId);
+        return c && c.country === 'UK' && (c.type || 'Paid Ads') === 'Paid Ads';
+      }).length;
+
+      var ukTarget;
+      if (period === 'monthly') {
+        ukTarget = MONTHLY_APPROVAL_TARGET;
+      } else if (period === 'weekly') {
+        var wWorkdays = countWorkdays(range.start, range.end);
+        ukTarget = wWorkdays * DAILY_APPROVAL_TARGET;
+      } else {
+        // quarterly: approximate as 3× monthly
+        ukTarget = MONTHLY_APPROVAL_TARGET * 3;
+      }
+      var ukPct = ukTarget > 0 ? Math.min(100, Math.round(ukPaidApproved / ukTarget * 100)) : 0;
+      var totalWd = countWorkdays(range.start, range.end);
+      var today2 = todayISO();
+      var elapsedWd = countWorkdays(range.start, today2 < range.end ? today2 : range.end);
+      var ukExpected = totalWd > 0 ? Math.round(ukTarget * elapsedWd / totalWd) : ukTarget;
+      var ukPace = classifyMonthPace(ukPaidApproved, ukExpected, ukTarget);
+      var ukPaceLabel = ukPace === 'ahead' ? 'Ahead of pace' : ukPace === 'on-track' ? 'On pace' : ukPace === 'behind' ? 'Behind pace' : 'At risk';
+      return '<div class="report-pace-wrap">' +
+        '<div class="report-pace-header">' +
+          '<span class="report-pace-title">UK Paid Media · ' + periodLabelCap + '</span>' +
+          '<span class="report-pace-meta">' + ukPaidApproved + ' / ' + ukTarget + ' approved · ' +
+            '<span class="month-panel-pace ' + ukPace + '" style="font-size:11px;display:inline-flex;align-items:center;gap:4px;">' +
+              '<span class="pace-dot"></span>' + ukPaceLabel +
+            '</span>' +
+          '</span>' +
+        '</div>' +
+        '<div class="report-pace-track"><div class="report-pace-fill" style="width:' + ukPct + '%;"></div></div>' +
+        '<div class="report-pace-markers">' +
+          '<span class="report-pace-marker">0</span>' +
+          '<span class="report-pace-marker">' + ukPct + '%</span>' +
+          '<span class="report-pace-marker">' + ukTarget + '</span>' +
+        '</div>' +
+      '</div>';
+    }
+
+    // Generic: count all CH-approved assets in range matching the current market/type filter
+    var filterLabel = (country !== 'all' ? country + ' ' : '') + (type !== 'all' ? type : (country !== 'all' ? '' : 'All markets'));
+    if (type === 'Organic') filterLabel = (country !== 'all' ? country + ' ' : '') + 'Organic';
+    if (type === 'all' && country === 'all') filterLabel = 'All campaigns';
+
+    var approvedCount = STATE.assets.filter(function(a) {
+      if (a.categoryHeadQc !== 'Approved') return false;
+      if (!a.chDateApproved) return false;
+      if (a.chDateApproved < range.start || a.chDateApproved > range.end) return false;
+      var c = findCampaignById(a.campaignId);
+      if (!c) return false;
+      if (country !== 'all' && c.country !== country) return false;
+      if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
+      return true;
+    }).length;
+
+    return '<div class="report-pace-wrap">' +
+      '<div class="report-pace-header">' +
+        '<span class="report-pace-title">' + escapeHtml(filterLabel) + ' · ' + periodLabelCap + '</span>' +
+        '<span class="report-pace-meta" style="font-size:13px;font-weight:700;color:var(--text1);">' + approvedCount + '</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">CH-approved videos ' + periodLabel + '</div>' +
+    '</div>';
+  })();
 
   // ── date used for range inclusion: OR across estDelivery, dateApproved, chDateApproved ──
   function assetInRange(a) {
