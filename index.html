@@ -1654,6 +1654,8 @@ var Fb = {
         noSplit: true,
         reportingPeriod: true,
         reportingMonth: true,
+        reportingWeekOffset: true,
+        reportingQuarter: true,
         reportingCountry: true,
         reportingType: true,
         reportingView: true
@@ -2406,11 +2408,13 @@ var STATE = {
   logWeekOffset: 0,
 
   // Reporting tab UI state — persisted so filter selections survive reloads.
-  reportingPeriod:  'monthly',
-  reportingMonth:   '',
-  reportingCountry: 'all',
-  reportingType:    'all',
-  reportingView:    'table',
+  reportingPeriod:      'monthly',
+  reportingMonth:       '',
+  reportingWeekOffset:  0,
+  reportingQuarter:     '',
+  reportingCountry:     'all',
+  reportingType:        'all',
+  reportingView:        'table',
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -7763,23 +7767,72 @@ function renderReportingView() {
   var type    = STATE.reportingType    || 'all';
   var view    = STATE.reportingView    || 'table';
 
-  // ── build month options (current + last 11) ──
   var now = new Date();
   var cy = now.getFullYear(), cm = now.getMonth();
   var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  var monthOpts = [];
-  for (var mo = 0; mo < 12; mo++) {
-    var my = cm - mo, yr = cy;
-    if (my < 0) { my += 12; yr -= 1; }
-    var key = yr + '-' + (my < 9 ? '0' : '') + (my + 1);
-    monthOpts.push({ key: key, label: MONTH_LONG[my] + ' ' + yr });
-  }
-  var selMonth = STATE.reportingMonth || monthOpts[0].key;
 
-  // ── derive date range from selMonth ──
-  var mYear = parseInt(selMonth.slice(0, 4));
-  var mMon  = parseInt(selMonth.slice(5, 7)) - 1;
-  var range = getMonthRange(mYear, mMon);
+  // ── helper: ISO date string ──
+  function isoDate(d) {
+    var mm = d.getMonth() + 1, dd = d.getDate();
+    return d.getFullYear() + '-' + (mm < 10 ? '0' + mm : mm) + '-' + (dd < 10 ? '0' + dd : dd);
+  }
+
+  // ── compute date range based on period ──
+  var range, periodPickerHtml = '';
+
+  if (period === 'weekly') {
+    var weekOffset = typeof STATE.reportingWeekOffset === 'number' ? STATE.reportingWeekOffset : 0;
+    var dow = now.getDay();
+    var daysToMon = dow === 0 ? -6 : 1 - dow;
+    var monday = new Date(now); monday.setDate(now.getDate() + daysToMon + weekOffset * 7);
+    var sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    range = { start: isoDate(monday), end: isoDate(sunday) };
+    // week picker: this week back 12
+    var weekOptHtml = '';
+    for (var wo = 0; wo >= -12; wo--) {
+      var wMon = new Date(now); wMon.setDate(now.getDate() + daysToMon + wo * 7);
+      var wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
+      var wLabel = wo === 0 ? 'This week' : (wo === -1 ? 'Last week' : Math.abs(wo) + ' weeks ago');
+      wLabel += ' (' + isoDate(wMon).slice(5) + ' – ' + isoDate(wSun).slice(5) + ')';
+      weekOptHtml += '<option value="' + wo + '"' + (wo === weekOffset ? ' selected' : '') + '>' + wLabel + '</option>';
+    }
+    periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setReporting(\'weekOffset\',this.value)">' + weekOptHtml + '</select>';
+
+  } else if (period === 'quarterly') {
+    var selQ = STATE.reportingQuarter || (cy + '-Q' + (Math.floor(cm / 3) + 1));
+    var qYear = parseInt(selQ.slice(0, 4));
+    var qNum  = parseInt(selQ.slice(6)) - 1; // 0-indexed
+    var qStart = new Date(qYear, qNum * 3, 1);
+    var qEnd   = new Date(qYear, qNum * 3 + 3, 0);
+    range = { start: isoDate(qStart), end: isoDate(qEnd) };
+    var qOptHtml = '';
+    for (var qi = 0; qi < 8; qi++) {
+      var qm = Math.floor(cm / 3) - qi, qy = cy;
+      if (qm < 0) { qm += 4; qy -= 1; }
+      var qKey = qy + '-Q' + (qm + 1);
+      var qLbl = 'Q' + (qm + 1) + ' ' + qy;
+      qOptHtml += '<option value="' + qKey + '"' + (qKey === selQ ? ' selected' : '') + '>' + qLbl + '</option>';
+    }
+    periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setReporting(\'quarter\',this.value)">' + qOptHtml + '</select>';
+
+  } else {
+    // monthly (default)
+    var monthOpts = [];
+    for (var mo = 0; mo < 12; mo++) {
+      var my = cm - mo, yr = cy;
+      if (my < 0) { my += 12; yr -= 1; }
+      var key = yr + '-' + (my < 9 ? '0' : '') + (my + 1);
+      monthOpts.push({ key: key, label: MONTH_LONG[my] + ' ' + yr });
+    }
+    var selMonth = STATE.reportingMonth || monthOpts[0].key;
+    var mYear = parseInt(selMonth.slice(0, 4));
+    var mMon  = parseInt(selMonth.slice(5, 7)) - 1;
+    range = getMonthRange(mYear, mMon);
+    var monthOptsHtml = monthOpts.map(function(o) {
+      return '<option value="' + o.key + '"' + (o.key === selMonth ? ' selected' : '') + '>' + o.label + '</option>';
+    }).join('');
+    periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setReporting(\'month\',this.value)">' + monthOptsHtml + '</select>';
+  }
 
   // ── filter campaigns ──
   var camps = STATE.campaigns.filter(function(c) {
@@ -7960,8 +8013,13 @@ function renderReportingView() {
     '<div class="report-controls">' +
       '<h2>Reporting</h2>' +
       '<div class="report-ctrl-divider"></div>' +
-      '<span class="report-ctrl-label">Month</span>' +
-      '<select class="report-ctrl-select" onchange="App.setReporting(\'month\',this.value)">' + monthOptsHtml + '</select>' +
+      '<div class="report-seg-group">' +
+        '<button class="report-seg-btn' + (period === 'weekly' ? ' active' : '') + '" onclick="App.setReporting(\'period\',\'weekly\')">Weekly</button>' +
+        '<button class="report-seg-btn' + (period === 'monthly' ? ' active' : '') + '" onclick="App.setReporting(\'period\',\'monthly\')">Monthly</button>' +
+        '<button class="report-seg-btn' + (period === 'quarterly' ? ' active' : '') + '" onclick="App.setReporting(\'period\',\'quarterly\')">Quarterly</button>' +
+      '</div>' +
+      '<div class="report-ctrl-divider"></div>' +
+      periodPickerHtml +
       '<div class="report-ctrl-divider"></div>' +
       '<span class="report-ctrl-label">Country</span>' +
       '<select class="report-ctrl-select" onchange="App.setReporting(\'country\',this.value)">' + countryOptsHtml + '</select>' +
@@ -9693,10 +9751,13 @@ var App = {
   // never store a name the tab can't render (e.g. Elsa, who's excluded), and
   // re-renders so the grid repopulates for the new editor.
   setReporting: function(key, val) {
-    if (key === 'month')   STATE.reportingMonth   = val;
-    if (key === 'country') STATE.reportingCountry = val;
-    if (key === 'type')    STATE.reportingType    = val;
-    if (key === 'view')    STATE.reportingView    = val;
+    if (key === 'period')     STATE.reportingPeriod     = val;
+    if (key === 'month')      STATE.reportingMonth      = val;
+    if (key === 'weekOffset') STATE.reportingWeekOffset = parseInt(val, 10);
+    if (key === 'quarter')    STATE.reportingQuarter    = val;
+    if (key === 'country')    STATE.reportingCountry    = val;
+    if (key === 'type')       STATE.reportingType       = val;
+    if (key === 'view')       STATE.reportingView       = val;
     render();
   },
   setLogEditor: function(name) {
