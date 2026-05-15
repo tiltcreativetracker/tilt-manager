@@ -5014,6 +5014,12 @@ function renderCampaignsView() {
           ? '<button class="edit-btn" onclick="App.bulkApproveAssigned()" title="Approve all ' + assignedCount + ' assigned video' + (assignedCount === 1 ? '' : 's') + '" style="color:#22c55e;border-color:#22c55e;">✓ Approve All Assigned (' + assignedCount + ')</button>'
           : '';
       })() +
+      (function() {
+        var nonReadyCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && (a.qc || 'Draft') !== 'Ready'; }).length;
+        return nonReadyCount > 0
+          ? '<button class="edit-btn" onclick="App.bulkQcReadyAll()" title="Mark all ' + nonReadyCount + ' asset' + (nonReadyCount === 1 ? '' : 's') + ' as QC Ready" style="color:#a78bfa;border-color:#a78bfa;">✓ All QC Approved (' + nonReadyCount + ')</button>'
+          : '';
+      })() +
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
@@ -9899,6 +9905,27 @@ var App = {
     saveState();
     render();
     toast(targets.length + ' video' + (targets.length === 1 ? '' : 's') + ' approved', 'success');
+  },
+
+  bulkQcReadyAll: function() {
+    var camp = getActiveCampaign();
+    if (!camp) return;
+    var targets = STATE.assets.filter(function(a) {
+      return String(a.campaignId) === String(camp.id) && (a.qc || 'Draft') !== 'Ready';
+    });
+    if (!targets.length) { toast('All assets already QC Ready', 'info'); return; }
+    targets.forEach(function(a) {
+      var old = a.qc || 'Draft';
+      recordUndo(a, ['qc'], 'QC: ' + old + ' → Ready');
+      a.qc = 'Ready';
+      if (STATE.qcDismissed && STATE.qcDismissed[a.campaignId]) {
+        delete STATE.qcDismissed[a.campaignId];
+      }
+      logAction('updated', 'Asset "' + a.name + '" QC: ' + old + ' → Ready (bulk)');
+    });
+    saveState();
+    render();
+    toast(targets.length + ' asset' + (targets.length === 1 ? '' : 's') + ' marked QC Ready', 'success');
   },
 
   setAssetStatus: function(id, newStatus) {
