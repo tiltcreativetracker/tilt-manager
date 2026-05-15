@@ -7810,13 +7810,25 @@ function renderReportingView() {
     var qEnd   = new Date(qYear, qNum * 3 + 3, 0);
     range = { start: isoDate(qStart), end: isoDate(qEnd) };
     var qOptHtml = '';
+    var qOptions = [];
     for (var qi = 0; qi < 8; qi++) {
       var absQ = curQIdx - qi;
       var qy = Math.floor(absQ / 4);
-      var qm = absQ % 4; // 0-3, always positive since absQ is always positive for recent dates
-      var qKey = qy + '-Q' + (qm + 1);
-      var qLbl = 'Q' + (qm + 1) + ' ' + qy;
-      qOptHtml += '<option value="' + qKey + '"' + (qKey === selQ ? ' selected' : '') + '>' + qLbl + '</option>';
+      var qm = absQ % 4;
+      qOptions.push({ key: qy + '-Q' + (qm + 1), lbl: 'Q' + (qm + 1) + ' ' + qy, absQ: absQ });
+    }
+    // Sort: newest year first, within each year Q1→Q4
+    qOptions.sort(function(a, b) {
+      if (b.absQ - a.absQ !== 0) {
+        var ay = Math.floor(a.absQ / 4), by = Math.floor(b.absQ / 4);
+        if (by !== ay) return by - ay;
+        return a.absQ - b.absQ; // Q1 before Q2 etc within same year
+      }
+      return 0;
+    });
+    for (var qi = 0; qi < qOptions.length; qi++) {
+      var q = qOptions[qi];
+      qOptHtml += '<option value="' + q.key + '"' + (q.key === selQ ? ' selected' : '') + '>' + q.lbl + '</option>';
     }
     periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setReporting(\'quarter\',this.value)">' + qOptHtml + '</select>';
 
