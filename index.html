@@ -1290,6 +1290,76 @@
     /* Scrollbar thumb */
     ::-webkit-scrollbar-thumb:hover { background: #c0bdd0; }
   }
+
+  /* ── Reporting tab ── */
+  .report-panel { padding: 22px 26px; overflow-y: auto; height: 100%; }
+  .report-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
+  .report-controls h2 { font-size: 15px; font-weight: 700; color: var(--text1); margin-right: 4px; }
+  .report-ctrl-divider { width: 1px; height: 20px; background: var(--border2); margin: 0 2px; }
+  .report-ctrl-label { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .report-seg-group { display: flex; background: var(--bg3); border-radius: 7px; border: 1px solid var(--border); overflow: hidden; }
+  .report-seg-btn { padding: 5px 13px; font-family: inherit; font-size: 12px; font-weight: 500; background: transparent; color: var(--text2); border: none; cursor: pointer; transition: all 0.12s; }
+  .report-seg-btn.active { background: var(--accent); color: #fff; }
+  .report-ctrl-select { padding: 5px 22px 5px 9px; background: var(--bg3); color: var(--text1); border: 1px solid var(--border); border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23999' d='M0 0l5 6 5-6z'/></svg>"); background-repeat: no-repeat; background-position: right 7px center; }
+  .report-view-toggle { display: flex; background: var(--bg3); border-radius: 7px; border: 1px solid var(--border); overflow: hidden; margin-left: auto; }
+  .report-view-btn { padding: 5px 12px; font-family: inherit; font-size: 12px; font-weight: 500; background: transparent; color: var(--text2); border: none; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.12s; }
+  .report-view-btn.active { background: var(--bg4); color: var(--text1); }
+
+  .report-pace-wrap { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 13px 18px; margin-bottom: 20px; }
+  .report-pace-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+  .report-pace-title { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); }
+  .report-pace-meta { font-size: 11px; color: var(--text2); font-family: 'JetBrains Mono', monospace; }
+  .report-pace-track { height: 5px; background: var(--bg4); border-radius: 3px; overflow: hidden; }
+  .report-pace-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .report-pace-markers { display: flex; justify-content: space-between; margin-top: 4px; }
+  .report-pace-marker { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+
+  .report-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; margin-top: 20px; }
+  .report-section-title { font-size: 10px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text3); }
+  .report-section-badge { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--text3); background: var(--bg4); padding: 2px 7px; border-radius: 4px; }
+
+  .report-table-wrap { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 6px; }
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table thead th { padding: 8px 14px; font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text3); text-align: left; border-bottom: 1px solid var(--border); background: var(--bg2); white-space: nowrap; }
+  .report-table tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; cursor: pointer; }
+  .report-table tbody tr:last-child { border-bottom: none; }
+  .report-table tbody tr:hover { background: var(--bg4); }
+  .report-table tbody td { padding: 9px 14px; font-size: 12px; color: var(--text2); white-space: nowrap; }
+  .report-table .td-name { color: var(--text1); font-weight: 500; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .report-table .td-mono { font-family: 'JetBrains Mono', monospace; }
+  .report-table .td-green { font-family: 'JetBrains Mono', monospace; color: var(--green-text); }
+  .report-table .td-amber { font-family: 'JetBrains Mono', monospace; color: var(--amber-text); }
+  .report-prog-cell { display: flex; align-items: center; gap: 8px; }
+  .report-mini-track { width: 56px; height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .report-mini-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+  .report-mini-fill.full { background: var(--green); }
+  .report-pct { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text2); }
+  .report-type-chip { padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+  .report-type-paid { background: var(--accent-dim); color: var(--accent2); }
+  .report-type-organic { background: rgba(29,158,117,0.12); color: var(--green-text); }
+  .report-done-chip { padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: var(--green-bg); color: var(--green-text); }
+  .report-active-chip { padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: var(--bg4); color: var(--text3); }
+
+  .report-kb-wrap { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 16px; min-height: 320px; }
+  .report-kb-col { flex: 0 0 230px; display: flex; flex-direction: column; gap: 8px; }
+  .report-kb-header { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; }
+  .report-kb-title { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .report-kb-count { font-size: 10px; font-family: 'JetBrains Mono', monospace; background: var(--bg4); padding: 1px 6px; border-radius: 4px; color: var(--text3); }
+  .report-kb-col.col-backlog .report-kb-header { border-top: 2px solid var(--gray-text); }
+  .report-kb-col.col-backlog .report-kb-title { color: var(--gray-text); }
+  .report-kb-col.col-inprog .report-kb-header { border-top: 2px solid var(--accent); }
+  .report-kb-col.col-inprog .report-kb-title { color: var(--accent2); }
+  .report-kb-col.col-approved .report-kb-header { border-top: 2px solid var(--green-text); }
+  .report-kb-col.col-approved .report-kb-title { color: var(--green-text); }
+  .report-kb-empty { font-size: 12px; color: var(--text3); text-align: center; padding: 20px 0; }
+  .report-kb-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .report-kb-card:hover { border-color: var(--border2); background: var(--bg4); }
+  .report-kb-card-name { font-size: 12px; font-weight: 500; color: var(--text1); margin-bottom: 6px; line-height: 1.35; }
+  .report-kb-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; }
+  .report-kb-card-editor { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .report-kb-card-videos { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-left: auto; }
+  .report-kb-bar { height: 3px; background: var(--bg4); border-radius: 2px; overflow: hidden; }
+  .report-kb-bar-fill { height: 100%; border-radius: 2px; }
 </style>
 </head>
 <body>
@@ -1581,7 +1651,12 @@ var Fb = {
         logWeekOffset: true,
         schedulerDate: true,
         qcDismissed: true,
-        noSplit: true
+        noSplit: true,
+        reportingPeriod: true,
+        reportingMonth: true,
+        reportingCountry: true,
+        reportingType: true,
+        reportingView: true
       };
       // Copy known fields onto STATE. Skip metadata fields prefixed with `_` and any
       // per-user UI field (so a teammate's tab/campaign/expansion choices don't override
@@ -2329,6 +2404,13 @@ var STATE = {
   // Daily Log tab: week offset from current week. 0 = this week, -1 = last week, etc.
   // Per-user UI preference, not shared via Firestore.
   logWeekOffset: 0,
+
+  // Reporting tab UI state — persisted so filter selections survive reloads.
+  reportingPeriod:  'monthly',
+  reportingMonth:   '',
+  reportingCountry: 'all',
+  reportingType:    'all',
+  reportingView:    'table',
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -4429,9 +4511,10 @@ var TAB_DEFS = {
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   briefs:           { label: 'Briefs', badge: true },
+  reporting:        { label: 'Reporting' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'briefs', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'briefs', 'reporting', 'config'];
 
 // Role-based tab visibility. Editors see the day-to-day tabs; PMs add Notifications
 // and Scheduler so they can drive comms; Admins see everything including Automations
@@ -4440,8 +4523,8 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingC
 // the documents these tabs touch (config/app and the users collection).
 var ROLE_TAB_VISIBILITY = {
   editor: ['campaigns', 'today', 'editingCalendar', 'log'],
-  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'briefs'],
-  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'briefs', 'config']
+  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'briefs', 'reporting'],
+  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'briefs', 'reporting', 'config']
 };
 
 // Returns the list of tab IDs the given role is allowed to see. Unknown roles
@@ -7673,6 +7756,229 @@ function renderBriefsView() {
   '</div>';
 }
 
+function renderReportingView() {
+  // ── read/default UI state ──
+  var period  = STATE.reportingPeriod  || 'monthly';
+  var country = STATE.reportingCountry || 'all';
+  var type    = STATE.reportingType    || 'all';
+  var view    = STATE.reportingView    || 'table';
+
+  // ── build month options (current + last 11) ──
+  var now = new Date();
+  var cy = now.getFullYear(), cm = now.getMonth();
+  var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var monthOpts = [];
+  for (var mo = 0; mo < 12; mo++) {
+    var my = cm - mo, yr = cy;
+    if (my < 0) { my += 12; yr -= 1; }
+    var key = yr + '-' + (my < 9 ? '0' : '') + (my + 1);
+    monthOpts.push({ key: key, label: MONTH_LONG[my] + ' ' + yr });
+  }
+  var selMonth = STATE.reportingMonth || monthOpts[0].key;
+
+  // ── derive date range from selMonth ──
+  var mYear = parseInt(selMonth.slice(0, 4));
+  var mMon  = parseInt(selMonth.slice(5, 7)) - 1;
+  var range = getMonthRange(mYear, mMon);
+
+  // ── filter campaigns ──
+  var camps = STATE.campaigns.filter(function(c) {
+    if (country !== 'all' && c.country !== country) return false;
+    if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
+    return true;
+  });
+
+  // ── gather assets per campaign, filtered to date range ──
+  function campAssets(campId) {
+    return STATE.assets.filter(function(a) {
+      return String(a.campaignId) === String(campId);
+    });
+  }
+
+  function assetsInRange(assets) {
+    return assets.filter(function(a) {
+      var d = a.dateApproved || a.estDelivery || '';
+      return d >= range.start && d <= range.end;
+    });
+  }
+
+  // ── pace bar (UK Paid Ads only, current month) ──
+  var paceHtml = '';
+  if (country === 'all' || country === 'UK') {
+    var ukPaidCamps = STATE.campaigns.filter(function(c) { return c.country === 'UK' && (c.type || 'Paid Ads') === 'Paid Ads'; });
+    var ukApproved = 0;
+    ukPaidCamps.forEach(function(c) {
+      campAssets(c.id).forEach(function(a) {
+        if (a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end) ukApproved++;
+      });
+    });
+    var target = MONTHLY_APPROVAL_TARGET;
+    var pct = Math.min(100, Math.round(ukApproved / target * 100));
+    var today = new Date();
+    var lastDay = new Date(mYear, mMon + 1, 0).getDate();
+    var daysLeft = (mYear === cy && mMon === cm) ? lastDay - today.getDate() : 0;
+    var needed = daysLeft > 0 ? (((target - ukApproved) / daysLeft).toFixed(1)) : '—';
+    var paceColor = daysLeft > 0 && parseFloat(needed) > DAILY_APPROVAL_TARGET ? 'color:var(--amber-text)' : 'color:var(--green-text)';
+    paceHtml =
+      '<div class="report-pace-wrap">' +
+        '<div class="report-pace-header">' +
+          '<span class="report-pace-title">Monthly target — UK Paid Ads</span>' +
+          '<span class="report-pace-meta">' + ukApproved + ' / ' + target + ' approved' +
+            (daysLeft > 0 ? ' &nbsp;·&nbsp; ' + daysLeft + ' days left &nbsp;·&nbsp; <span style="' + paceColor + '">' + needed + '/day needed</span>' : '') +
+          '</span>' +
+        '</div>' +
+        '<div class="report-pace-track"><div class="report-pace-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="report-pace-markers"><span class="report-pace-marker">0</span><span class="report-pace-marker">' + Math.round(target * 0.25) + '</span><span class="report-pace-marker">' + Math.round(target * 0.5) + '</span><span class="report-pace-marker">' + Math.round(target * 0.75) + '</span><span class="report-pace-marker">' + target + '</span></div>' +
+      '</div>';
+  }
+
+  // ── build campaign rows ──
+  function campRow(c) {
+    var assets = campAssets(c.id);
+    var total    = assets.length;
+    var approved = assets.filter(function(a) { return a.status === 'Approved'; }).length;
+    var revisions = assets.filter(function(a) { return a.status === 'Needs Revisions'; }).length;
+    var pct = total > 0 ? Math.round(approved / total * 100) : 0;
+    var isFull = pct === 100;
+    var editors = [];
+    assets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
+    return { c: c, total: total, approved: approved, revisions: revisions, pct: pct, isFull: isFull, editors: editors };
+  }
+
+  function flagHtml(country) {
+    return '<span class="country-flag flag-' + country + '" style="display:inline-flex;width:24px;height:16px;font-size:9px;">' +
+      (country === 'UK' || country === 'US' ? '<span style="position:relative;z-index:1">' + country + '</span>' : country) +
+    '</span>';
+  }
+
+  function typeChipHtml(t) {
+    var tp = (t || 'Paid Ads') === 'Organic' ? 'report-type-organic' : 'report-type-paid';
+    return '<span class="report-type-chip ' + tp + '">' + escapeHtml(t || 'Paid Ads') + '</span>';
+  }
+
+  // ── TABLE VIEW ──
+  function tableHtml() {
+    var paidRows = camps.filter(function(c) { return (c.type || 'Paid Ads') === 'Paid Ads'; }).map(campRow);
+    var organicRows = camps.filter(function(c) { return (c.type || 'Paid Ads') === 'Organic'; }).map(campRow);
+
+    function tableSection(rows, label) {
+      if (rows.length === 0) return '';
+      var header = '<div class="report-section-header"><span class="report-section-title">' + label + '</span><span class="report-section-badge">' + rows.length + ' campaign' + (rows.length !== 1 ? 's' : '') + '</span></div>';
+      var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>Total</th><th>Approved</th><th>Progress</th><th>Revisions</th><th>Editors</th><th>Status</th></tr></thead>';
+      var tbody = '<tbody>' + rows.map(function(r) {
+        var statusChip = r.c.done ? '<span class="report-done-chip">Done</span>' : '<span class="report-active-chip">Active</span>';
+        return '<tr onclick="App.selectCampaign(\'' + r.c.id + '\'); App.setTab(\'campaigns\')">' +
+          '<td class="td-name">' + escapeHtml(r.c.name) + '</td>' +
+          '<td>' + flagHtml(r.c.country) + '</td>' +
+          '<td class="td-mono">' + r.total + '</td>' +
+          '<td class="td-green">' + r.approved + '</td>' +
+          '<td><div class="report-prog-cell"><div class="report-mini-track"><div class="report-mini-fill' + (r.isFull ? ' full' : '') + '" style="width:' + r.pct + '%"></div></div><span class="report-pct">' + r.pct + '%</span></div></td>' +
+          '<td class="' + (r.revisions > 0 ? 'td-amber' : 'td-mono') + '">' + r.revisions + '</td>' +
+          '<td style="color:var(--text2);font-size:11px">' + escapeHtml(r.editors.join(', ') || '—') + '</td>' +
+          '<td>' + statusChip + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody>';
+      return header + '<div class="report-table-wrap"><table class="report-table">' + thead + tbody + '</table></div>';
+    }
+
+    var out = '';
+    if (type === 'all' || type === 'Paid Ads') out += tableSection(paidRows, 'Paid Ads campaigns');
+    if (type === 'all' || type === 'Organic') out += tableSection(organicRows, 'Organic campaigns');
+    if (!out) out = '<div style="color:var(--text3);font-size:13px;padding:40px 0;text-align:center">No campaigns match the current filters.</div>';
+    return out;
+  }
+
+  // ── KANBAN VIEW ──
+  function kanbanHtml() {
+    function kbStage(c) {
+      var assets = campAssets(c.id);
+      if (assets.length === 0) return 'backlog';
+      var statuses = assets.map(function(a) { return a.status; });
+      var allApproved = statuses.every(function(s) { return s === 'Approved'; });
+      if (allApproved || c.done) return 'approved';
+      var anyActive = statuses.some(function(s) { return s === 'In Progress' || s === 'For Review' || s === 'Needs Revisions' || s === 'Assigned'; });
+      if (anyActive) return 'inprog';
+      return 'backlog';
+    }
+
+    var backlog  = camps.filter(function(c) { return kbStage(c) === 'backlog'; });
+    var inprog   = camps.filter(function(c) { return kbStage(c) === 'inprog'; });
+    var approved = camps.filter(function(c) { return kbStage(c) === 'approved'; });
+
+    function kbCard(c) {
+      var r = campRow(c);
+      var barColor = r.isFull ? 'var(--green)' : (kbStage(c) === 'inprog' ? 'var(--accent)' : 'var(--gray-text)');
+      return '<div class="report-kb-card" onclick="App.selectCampaign(\'' + c.id + '\'); App.setTab(\'campaigns\')">' +
+        '<div class="report-kb-card-name">' + escapeHtml(c.name) + '</div>' +
+        '<div class="report-kb-card-meta">' +
+          flagHtml(c.country) +
+          typeChipHtml(c.type) +
+          '<span class="report-kb-card-editor">' + escapeHtml(r.editors[0] || '—') + '</span>' +
+          '<span class="report-kb-card-videos">' + r.approved + '/' + r.total + '</span>' +
+        '</div>' +
+        '<div class="report-kb-bar"><div class="report-kb-bar-fill" style="width:' + r.pct + '%;background:' + barColor + '"></div></div>' +
+      '</div>';
+    }
+
+    function kbCol(label, cls, items) {
+      return '<div class="report-kb-col ' + cls + '">' +
+        '<div class="report-kb-header"><span class="report-kb-title">' + label + '</span><span class="report-kb-count">' + items.length + '</span></div>' +
+        (items.length === 0 ? '<div class="report-kb-empty">—</div>' : items.map(kbCard).join('')) +
+      '</div>';
+    }
+
+    return '<div class="report-kb-wrap">' +
+      kbCol('Backlog', 'col-backlog', backlog) +
+      kbCol('In Progress', 'col-inprog', inprog) +
+      kbCol('Approved', 'col-approved', approved) +
+    '</div>';
+  }
+
+  // ── controls bar ──
+  function segBtn(val, cur, label, fn) {
+    return '<button class="report-seg-btn' + (cur === val ? ' active' : '') + '" onclick="' + fn + '(\'' + val + '\')">' + label + '</button>';
+  }
+
+  var monthOptsHtml = monthOpts.map(function(o) {
+    return '<option value="' + o.key + '"' + (o.key === selMonth ? ' selected' : '') + '>' + o.label + '</option>';
+  }).join('');
+
+  var countryOptsHtml = '<option value="all"' + (country === 'all' ? ' selected' : '') + '>All markets</option>' +
+    ['UK','IT','ES','US','PL'].map(function(c) {
+      return '<option value="' + c + '"' + (country === c ? ' selected' : '') + '>' + c + '</option>';
+    }).join('');
+
+  var typeOptsHtml = '<option value="all"' + (type === 'all' ? ' selected' : '') + '>All types</option>' +
+    ['Paid Ads','Organic'].map(function(t) {
+      return '<option value="' + t + '"' + (type === t ? ' selected' : '') + '>' + t + '</option>';
+    }).join('');
+
+  var tableIcon = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="2.5" rx="1" fill="currentColor"/><rect x="1" y="5.25" width="11" height="2.5" rx="1" fill="currentColor"/><rect x="1" y="9.5" width="11" height="2.5" rx="1" fill="currentColor"/></svg>';
+  var kanbanIcon = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="3" height="11" rx="1" fill="currentColor"/><rect x="5" y="1" width="3" height="8" rx="1" fill="currentColor"/><rect x="9" y="1" width="3" height="9.5" rx="1" fill="currentColor"/></svg>';
+
+  var controls =
+    '<div class="report-controls">' +
+      '<h2>Reporting</h2>' +
+      '<div class="report-ctrl-divider"></div>' +
+      '<span class="report-ctrl-label">Month</span>' +
+      '<select class="report-ctrl-select" onchange="App.setReporting(\'month\',this.value)">' + monthOptsHtml + '</select>' +
+      '<div class="report-ctrl-divider"></div>' +
+      '<span class="report-ctrl-label">Country</span>' +
+      '<select class="report-ctrl-select" onchange="App.setReporting(\'country\',this.value)">' + countryOptsHtml + '</select>' +
+      '<div class="report-ctrl-divider"></div>' +
+      '<span class="report-ctrl-label">Type</span>' +
+      '<select class="report-ctrl-select" onchange="App.setReporting(\'type\',this.value)">' + typeOptsHtml + '</select>' +
+      '<div class="report-view-toggle">' +
+        '<button class="report-view-btn' + (view === 'table' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'table\')">' + tableIcon + ' Table</button>' +
+        '<button class="report-view-btn' + (view === 'kanban' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'kanban\')">' + kanbanIcon + ' Kanban</button>' +
+      '</div>' +
+    '</div>';
+
+  var mainContent = view === 'kanban' ? kanbanHtml() : tableHtml();
+
+  return '<div class="report-panel">' + controls + paceHtml + mainContent + '</div>';
+}
+
 function renderConfigView() {
   var counts = {};
   EDITORS.forEach(function(e) { counts[e] = STATE.assets.filter(function(a) { return a.editor === e; }).length; });
@@ -9100,6 +9406,7 @@ function render() {
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
   else if (STATE.tab === 'briefs') body = renderBriefsView();
+  else if (STATE.tab === 'reporting') body = renderReportingView();
   else body = renderConfigView();
   document.getElementById('app').innerHTML = renderTopbar() + '<div class="main">' + body + '</div>';
   // Context menu layer \u2014 empty if nothing is open; a positioned popup if ContextMenuState is set
@@ -9385,6 +9692,13 @@ var App = {
   // Daily Log tab editor picker. Validates against DAILY_LOG_EDITORS so we
   // never store a name the tab can't render (e.g. Elsa, who's excluded), and
   // re-renders so the grid repopulates for the new editor.
+  setReporting: function(key, val) {
+    if (key === 'month')   STATE.reportingMonth   = val;
+    if (key === 'country') STATE.reportingCountry = val;
+    if (key === 'type')    STATE.reportingType    = val;
+    if (key === 'view')    STATE.reportingView    = val;
+    render();
+  },
   setLogEditor: function(name) {
     if (!name || DAILY_LOG_EDITORS.indexOf(name) < 0) return;
     STATE.logEditor = name;
