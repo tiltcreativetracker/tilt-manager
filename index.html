@@ -5020,6 +5020,12 @@ function renderCampaignsView() {
           ? '<button class="edit-btn" onclick="App.bulkQcReadyAll()" title="Mark all ' + nonReadyCount + ' asset' + (nonReadyCount === 1 ? '' : 's') + ' as QC Ready" style="color:#a78bfa;border-color:#a78bfa;">✓ All QC Approved (' + nonReadyCount + ')</button>'
           : '';
       })() +
+      (function() {
+        var nonChCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && (a.categoryHeadQc || 'Draft') !== 'Approved'; }).length;
+        return nonChCount > 0
+          ? '<button class="edit-btn" onclick="App.bulkCategoryHeadQcApproveAll()" title="Mark all ' + nonChCount + ' asset' + (nonChCount === 1 ? '' : 's') + ' as CH QC Approved" style="color:#f472b6;border-color:#f472b6;">✓ All CH QC Approved (' + nonChCount + ')</button>'
+          : '';
+      })() +
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
@@ -9926,6 +9932,26 @@ var App = {
     saveState();
     render();
     toast(targets.length + ' asset' + (targets.length === 1 ? '' : 's') + ' marked QC Ready', 'success');
+  },
+
+  bulkCategoryHeadQcApproveAll: function() {
+    var camp = getActiveCampaign();
+    if (!camp) return;
+    var today = todayISO();
+    var targets = STATE.assets.filter(function(a) {
+      return String(a.campaignId) === String(camp.id) && (a.categoryHeadQc || 'Draft') !== 'Approved';
+    });
+    if (!targets.length) { toast('All assets already CH QC Approved', 'info'); return; }
+    targets.forEach(function(a) {
+      var old = a.categoryHeadQc || 'Draft';
+      recordUndo(a, ['categoryHeadQc', 'chDateApproved'], 'CH QC: ' + old + ' → Approved');
+      a.categoryHeadQc = 'Approved';
+      a.chDateApproved = today;
+      logAction('updated', 'Asset "' + a.name + '" CH QC: ' + old + ' → Approved (bulk)');
+    });
+    saveState();
+    render();
+    toast(targets.length + ' asset' + (targets.length === 1 ? '' : 's') + ' marked CH QC Approved', 'success');
   },
 
   setAssetStatus: function(id, newStatus) {
