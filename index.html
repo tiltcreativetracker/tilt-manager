@@ -3343,9 +3343,14 @@ function emitAssetChangeNotifications(asset, ctx) {
   var editorChanged = oldEditor !== newEditor;
   var statusChanged = oldStatus !== newStatus;
 
-  // Rule: Assigned (editor newly assigned or reassigned) \u2014 ping editor with raw + brief
-  // Fires when: new asset with editor, or editor changed (and someone is assigned), or status flipped to Assigned
-  var justAssigned = (ctx.isNew && newEditor) || (editorChanged && newEditor) || (statusChanged && newStatus === 'Assigned' && newEditor);
+  // Rule: Assigned \u2014 ping editor with raw + brief only when the asset is actually
+  // landing in Assigned status. Guarding all three conditions on newStatus === 'Assigned'
+  // prevents a double-ping when the editor changes AND the status moves to a different
+  // actionable state (For Review, Needs Revisions, etc.) in the same save \u2014 the
+  // status-specific rule below already handles those cases.
+  var justAssigned = (ctx.isNew && newEditor && newStatus === 'Assigned') ||
+                     (editorChanged && newEditor && newStatus === 'Assigned') ||
+                     (statusChanged && newStatus === 'Assigned' && newEditor);
   if (justAssigned) {
     // Fall back to campaign-level raw / brief if per-asset fields are empty.
     var campForDetail = findCampaignById(asset.campaignId);
@@ -7882,7 +7887,7 @@ function renderConfigView() {
     teamSection =
       '<div class="section-title">Team \u00B7 ' + users.length + (users.length === 1 ? ' member' : ' members') + '</div>' +
       '<div class="auto-card">' +
-        '<div class="auto-desc" style="margin-bottom:14px;">Everyone who\'s signed in at least once with their @tilt.app account. Change roles below \u2014 the dropdown saves immediately and the affected person sees their tabs update on their next render (no refresh needed). <strong>Editor</strong> = Campaigns + Board + Daily Log only. <strong>PM</strong> = Editor tabs plus Notifications + Scheduler. <strong>Admin</strong> = everything, including this Team panel and Automations. The founding admin cannot be demoted.</div>' +
+        '<div class="auto-desc" style="margin-bottom:14px;">Everyone who\'s signed in at least once with their @tilt.app account. Change roles below \u2014 the dropdown saves immediately and the affected person sees their tabs update on their next render (no refresh needed). <strong>Editor</strong> = Campaigns + Board + Daily Log only. <strong>PM</strong> = Editor tabs plus Notifications. <strong>Admin</strong> = everything, including this Team panel and Automations. The founding admin cannot be demoted.</div>' +
         teamRows +
       '</div>';
   }
