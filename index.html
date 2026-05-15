@@ -7799,6 +7799,7 @@ function renderReportingView() {
     periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setReporting(\'weekOffset\',this.value)">' + weekOptHtml + '</select>';
 
   } else if (period === 'quarterly') {
+    var curQIdx = cy * 4 + Math.floor(cm / 3); // absolute quarter index
     var selQ = STATE.reportingQuarter || (cy + '-Q' + (Math.floor(cm / 3) + 1));
     var qYear = parseInt(selQ.slice(0, 4));
     var qNum  = parseInt(selQ.slice(6)) - 1; // 0-indexed
@@ -7807,8 +7808,9 @@ function renderReportingView() {
     range = { start: isoDate(qStart), end: isoDate(qEnd) };
     var qOptHtml = '';
     for (var qi = 0; qi < 8; qi++) {
-      var qm = Math.floor(cm / 3) - qi, qy = cy;
-      if (qm < 0) { qm += 4; qy -= 1; }
+      var absQ = curQIdx - qi;
+      var qy = Math.floor(absQ / 4);
+      var qm = absQ % 4; // 0-3, always positive since absQ is always positive for recent dates
       var qKey = qy + '-Q' + (qm + 1);
       var qLbl = 'Q' + (qm + 1) + ' ' + qy;
       qOptHtml += '<option value="' + qKey + '"' + (qKey === selQ ? ' selected' : '') + '>' + qLbl + '</option>';
@@ -7855,48 +7857,91 @@ function renderReportingView() {
     });
   }
 
-  // ── pace bar (UK Paid Ads only, current month) ──
+  // ── pace bar — adapts to period ──
   var paceHtml = '';
   if (country === 'all' || country === 'UK') {
     var ukPaidCamps = STATE.campaigns.filter(function(c) { return c.country === 'UK' && (c.type || 'Paid Ads') === 'Paid Ads'; });
     var ukApproved = 0;
     ukPaidCamps.forEach(function(c) {
       campAssets(c.id).forEach(function(a) {
-        if (a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end) ukApproved++;
+        if (a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end) ukApproved++;
       });
     });
-    var target = MONTHLY_APPROVAL_TARGET;
-    var pct = Math.min(100, Math.round(ukApproved / target * 100));
-    var today = new Date();
-    var lastDay = new Date(mYear, mMon + 1, 0).getDate();
-    var daysLeft = (mYear === cy && mMon === cm) ? lastDay - today.getDate() : 0;
-    var needed = daysLeft > 0 ? (((target - ukApproved) / daysLeft).toFixed(1)) : '—';
+
+    var paceTarget, paceLabel, daysLeft = 0, needed = '—';
+    if (period === 'weekly') {
+      paceTarget = Math.round(MONTHLY_APPROVAL_TARGET / 4); // ~50/week
+      paceLabel = 'Weekly target — UK Paid Ads';
+      var todayStr = isoDate(now);
+      if (todayStr >= range.start && todayStr <= range.end) {
+        var endOfWeek = new Date(range.end);
+        daysLeft = Math.max(0, Math.round((endOfWeek - now) / 86400000));
+        needed = daysLeft > 0 ? ((paceTarget - ukApproved) / daysLeft).toFixed(1) : '—';
+      }
+    } else if (period === 'quarterly') {
+      paceTarget = MONTHLY_APPROVAL_TARGET * 3; // 600/quarter
+      paceLabel = 'Quarterly target — UK Paid Ads';
+      var todayStr = isoDate(now);
+      if (todayStr >= range.start && todayStr <= range.end) {
+        var endOfQ = new Date(range.end);
+        daysLeft = Math.max(0, Math.round((endOfQ - now) / 86400000));
+        needed = daysLeft > 0 ? ((paceTarget - ukApproved) / daysLeft).toFixed(1) : '—';
+      }
+    } else {
+      paceTarget = MONTHLY_APPROVAL_TARGET;
+      paceLabel = 'Monthly target — UK Paid Ads';
+      var rangeEnd = new Date(range.end);
+      var todayStr = isoDate(now);
+      if (todayStr >= range.start && todayStr <= range.end) {
+        daysLeft = Math.max(0, Math.round((rangeEnd - now) / 86400000));
+        needed = daysLeft > 0 ? ((paceTarget - ukApproved) / daysLeft).toFixed(1) : '—';
+      }
+    }
+
+    var pct = Math.min(100, Math.round(ukApproved / paceTarget * 100));
     var paceColor = daysLeft > 0 && parseFloat(needed) > DAILY_APPROVAL_TARGET ? 'color:var(--amber-text)' : 'color:var(--green-text)';
     paceHtml =
       '<div class="report-pace-wrap">' +
         '<div class="report-pace-header">' +
-          '<span class="report-pace-title">Monthly target — UK Paid Ads</span>' +
-          '<span class="report-pace-meta">' + ukApproved + ' / ' + target + ' approved' +
+          '<span class="report-pace-title">' + paceLabel.toUpperCase() + '</span>' +
+          '<span class="report-pace-meta">' + ukApproved + ' / ' + paceTarget + ' approved' +
             (daysLeft > 0 ? ' &nbsp;·&nbsp; ' + daysLeft + ' days left &nbsp;·&nbsp; <span style="' + paceColor + '">' + needed + '/day needed</span>' : '') +
           '</span>' +
         '</div>' +
         '<div class="report-pace-track"><div class="report-pace-fill" style="width:' + pct + '%"></div></div>' +
-        '<div class="report-pace-markers"><span class="report-pace-marker">0</span><span class="report-pace-marker">' + Math.round(target * 0.25) + '</span><span class="report-pace-marker">' + Math.round(target * 0.5) + '</span><span class="report-pace-marker">' + Math.round(target * 0.75) + '</span><span class="report-pace-marker">' + target + '</span></div>' +
+        '<div class="report-pace-markers"><span class="report-pace-marker">0</span><span class="report-pace-marker">' + Math.round(paceTarget * 0.25) + '</span><span class="report-pace-marker">' + Math.round(paceTarget * 0.5) + '</span><span class="report-pace-marker">' + Math.round(paceTarget * 0.75) + '</span><span class="report-pace-marker">' + paceTarget + '</span></div>' +
       '</div>';
   }
 
-  // ── build campaign rows ──
+  // ── date used for range filtering: chDateApproved if CH-approved, else estDelivery ──
+  function assetRangeDate(a) {
+    return a.chDateApproved || a.estDelivery || '';
+  }
+
+  // ── build campaign rows — scoped to selected date range ──
   function campRow(c) {
-    var assets = campAssets(c.id);
-    var total    = assets.length;
-    var approved = assets.filter(function(a) { return a.status === 'Approved'; }).length;
-    var revisions = assets.filter(function(a) { return a.status === 'Needs Revisions'; }).length;
+    var allAssets = campAssets(c.id);
+    var rangeAssets = allAssets.filter(function(a) {
+      var d = assetRangeDate(a);
+      return d >= range.start && d <= range.end;
+    });
+    var total    = rangeAssets.length;
+    var approved = rangeAssets.filter(function(a) { return a.categoryHeadQc === 'Approved'; }).length;
+    var revisions = rangeAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
     var pct = total > 0 ? Math.round(approved / total * 100) : 0;
-    var isFull = pct === 100;
+    var isFull = total > 0 && pct === 100;
     var editors = [];
-    assets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
+    rangeAssets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
     return { c: c, total: total, approved: approved, revisions: revisions, pct: pct, isFull: isFull, editors: editors };
   }
+
+  // Only show campaigns that have at least one asset in the selected range
+  camps = camps.filter(function(c) {
+    return campAssets(c.id).some(function(a) {
+      var d = assetRangeDate(a);
+      return d >= range.start && d <= range.end;
+    });
+  });
 
   function flagHtml(country) {
     return '<span class="country-flag flag-' + country + '" style="display:inline-flex;width:24px;height:16px;font-size:9px;">' +
