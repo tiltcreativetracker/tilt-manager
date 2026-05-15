@@ -7975,23 +7975,21 @@ function renderReportingView() {
            (dCh   && dCh   >= range.start && dCh   <= range.end);
   }
 
-  // ── build campaign rows — total/range based on any matching date, approved based on chDateApproved ──
+  // ── build campaign rows — totals reflect the full campaign (not date-filtered).
+  //    The period filter controls which campaigns appear; once visible, stats show
+  //    the whole campaign completion so in-progress videos with no dates yet and
+  //    approvals from a prior period are all counted correctly.
   function campRow(c) {
     var allAssets = campAssets(c.id);
     // Apply category filter at asset level
     if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category || '') === category; });
-    var rangeAssets = allAssets.filter(assetInRange);
-    var total    = rangeAssets.length;
-    // Approved = CH-approved within the period; scan allAssets so videos with an
-    // estDelivery outside the range aren't excluded from the approved tally.
-    var approved = allAssets.filter(function(a) {
-      return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
-    }).length;
-    var revisions = rangeAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
+    var total     = allAssets.length;
+    var approved  = allAssets.filter(function(a) { return a.categoryHeadQc === 'Approved'; }).length;
+    var revisions = allAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
     var pct = total > 0 ? Math.round(approved / total * 100) : 0;
-    var isFull = total > 0 && pct === 100;
+    var isFull = total > 0 && approved === total;
     var editors = [];
-    rangeAssets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
+    allAssets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
     return { c: c, total: total, approved: approved, revisions: revisions, pct: pct, isFull: isFull, editors: editors };
   }
 
