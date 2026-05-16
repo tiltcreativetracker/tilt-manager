@@ -4895,10 +4895,11 @@ function renderCampaignsView() {
   // BOTH the <thead> below and each row, and the empty-state colspan adjusts.
   var hideLinkCols = !!camp.hideAssetLinkCols;
   var showSparksCode = ['IT', 'ES', 'PL'].indexOf(camp.country) !== -1;
+  var hideCHQC = ['IT', 'ES', 'PL'].indexOf(camp.country) !== -1;
   var rows = '';
   if (filtered.length === 0) {
     var baseColspan = hideLinkCols ? 13 : 15;
-    rows = '<tr><td colspan="' + (baseColspan + (showSparksCode ? 1 : 0)) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
+    rows = '<tr><td colspan="' + (baseColspan + (showSparksCode ? 1 : 0) - (hideCHQC ? 2 : 0)) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
   } else {
     for (var i = 0; i < filtered.length; i++) {
       var a = filtered[i];
@@ -4918,18 +4919,15 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
           '<td>' + renderStatusSelect(a) + '</td>' +
-          '<td>' + (function() {
-            // Category Head QC cell — head name (auto-assigned from category) on top,
-            // editable status dropdown below (Draft / For Review / Needs Revisions /
-            // Approved). Categories not in CATEGORY_HEADS (e.g. Essentials, BTS) show
-            // an em-dash for the name but still let the user set a status.
-            var head = getCategoryHead(a.category);
-            var nameHtml = head
-              ? '<span class="cat-head-chip" title="Auto-assigned by category: ' + escapeHtml(a.category) + '">' + escapeHtml(head) + '</span>'
-              : '<span class="cat-head-chip cat-head-chip-empty" title="No head assigned for this category">—</span>';
-            return '<div class="cat-head-cell">' + nameHtml + renderEditableCell(a, 'categoryHeadQc') + '</div>';
-          })() + '</td>' +
-          '<td>' + renderEditableCell(a, 'chDateApproved') + '</td>' +
+          (hideCHQC ? '' :
+            '<td>' + (function() {
+              var head = getCategoryHead(a.category);
+              var nameHtml = head
+                ? '<span class="cat-head-chip" title="Auto-assigned by category: ' + escapeHtml(a.category) + '">' + escapeHtml(head) + '</span>'
+                : '<span class="cat-head-chip cat-head-chip-empty" title="No head assigned for this category">—</span>';
+              return '<div class="cat-head-cell">' + nameHtml + renderEditableCell(a, 'categoryHeadQc') + '</div>';
+            })() + '</td>' +
+            '<td>' + renderEditableCell(a, 'chDateApproved') + '</td>') +
           '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(\'' + a.id + '\')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(\'' + a.id + '\')" title="Duplicate this row">Dup</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(\'' + a.id + '\')" title="Delete this row">Del</button>' : '') + '</div></td>' +
         '</tr>';
     }
@@ -5053,7 +5051,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Drive</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th><th>Category Head QC</th><th>CH Date Approved</th><th style="width:110px">Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -7763,7 +7761,7 @@ function parseItalyCSV(csvText) {
   var rows = [];
   for (var i = headerIdx + 1; i < processedLines.length; i++) {
     var cols = parseCSVLine(processedLines[i]);
-    var name = (cols[ITALY_COL.NAME] || '').trim();
+    var name = (cols[ITALY_COL.RAW] || cols[ITALY_COL.NAME] || '').trim();
     if (!name) continue; // skip empty rows
     rows.push(cols);
   }
@@ -7933,7 +7931,7 @@ function executeItalyImport() {
   var imported = 0, skipped = 0, updated = 0;
 
   rows.forEach(function(r) {
-    var name = (r[ITALY_COL.NAME] || '').trim();
+    var name = (r[ITALY_COL.RAW] || r[ITALY_COL.NAME] || '').trim();
     if (!name) return;
 
     var adStatus = (r[ITALY_COL.ST_AD] || '').toLowerCase();
@@ -7998,7 +7996,7 @@ function renderBriefsView() {
           '<input id="brief-notion" type="url" placeholder="https://notion.so/..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;" />' +
         '</div>' +
         '<div>' +
-          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Raw File Link <span style="font-weight:400;color:var(--text3)">(Drive, Dropbox, etc.)</span></label>' +
+          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Raw File Link <span style="font-weight:400;color:var(--text3)">(Drive/Dropbox, etc.)</span></label>' +
           '<input id="brief-rawfile" type="url" placeholder="https://drive.google.com/..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;" />' +
         '</div>' +
         '<div>' +
@@ -8761,7 +8759,7 @@ function renderConfigView() {
       '<div class="config-row"><div class="config-label">Video Name</div><div class="config-value">Single line text</div></div>' +
       '<div class="config-row"><div class="config-label">Category</div><div class="config-value">Single line text</div></div>' +
       '<div class="config-row"><div class="config-label">Difficulty</div><div class="config-value">Low / Moderate / High / Max</div></div>' +
-      '<div class="config-row"><div class="config-label">Drive (Raw Video)</div><div class="config-value">URL</div></div>' +
+      '<div class="config-row"><div class="config-label">Raw (Raw Video)</div><div class="config-value">URL</div></div>' +
       '<div class="config-row"><div class="config-label">Brief (Editing Brief)</div><div class="config-value">URL</div></div>' +
       '<div class="config-row"><div class="config-label">Editor</div><div class="config-value">Zidni / Sharm / Patty / Elsa</div></div>' +
       '<div class="config-row"><div class="config-label">Video (Frame.io Link)</div><div class="config-value">URL</div></div>' +
@@ -9669,7 +9667,7 @@ function buildQcReportMessage(campaignId) {
     var briefSrc = a.editingBrief || camp.brief   || '';
     var rawUrl = extractSingleUrl(rawSrc);
     var briefUrl = extractSingleUrl(briefSrc);
-    var rawLink  = rawUrl   ? '<' + rawUrl   + '|Drive>'  : '\u2014';
+    var rawLink  = rawUrl   ? '<' + rawUrl   + '|Raw>'  : '\u2014';
     var briefLink = briefUrl ? '<' + briefUrl + '|Notion>' : '\u2014';
     return '  ' + (i + 1) + '. ' + a.name + ' \u2014 Raw: ' + rawLink + ' \u00B7 Brief: ' + briefLink;
   }
