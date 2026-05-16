@@ -5036,18 +5036,18 @@ function renderCampaignsView() {
           ? '<button class="edit-btn" onclick="App.bulkQcReadyAll()" title="Mark all ' + nonReadyCount + ' asset' + (nonReadyCount === 1 ? '' : 's') + ' as QC Ready" style="color:#a78bfa;border-color:#a78bfa;">✓ All QC Approved (' + nonReadyCount + ')</button>'
           : '';
       })() +
-      (function() {
+      (!hideCHQC ? (function() {
         var nonChCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && (a.categoryHeadQc || 'Draft') !== 'Approved'; }).length;
         return nonChCount > 0
           ? '<button class="edit-btn" onclick="App.bulkCategoryHeadQcApproveAll()" title="Mark all ' + nonChCount + ' asset' + (nonChCount === 1 ? '' : 's') + ' as CH QC Approved" style="color:#f472b6;border-color:#f472b6;">✓ All CH QC Approved (' + nonChCount + ')</button>'
           : '';
-      })() +
-      (function() {
+      })() : '') +
+      (!hideCHQC ? (function() {
         var mismatchCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && a.dateApproved && a.chDateApproved !== a.dateApproved; }).length;
         return mismatchCount > 0
           ? '<button class="edit-btn" onclick="App.bulkSyncChDateApproved()" title="Copy Date Approved → CH Date Approved for ' + mismatchCount + ' asset' + (mismatchCount === 1 ? '' : 's') + '" style="color:#38bdf8;border-color:#38bdf8;">⇄ Sync CH Date (' + mismatchCount + ')</button>'
           : '';
-      })() +
+      })() : '') +
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
