@@ -4726,7 +4726,7 @@ function renderSidebar() {
     if (!compact) {
       html += '<div class="country-action-btns">' +
         '<button class="add-sub-btn" onclick="App.addSub(\'' + country.code + '\')">+ Add Campaign</button>' +
-        '<button class="add-sub-btn" onclick="App.showImportModal()">⬇ Import</button>' +
+        '<button class="add-sub-btn" onclick="' + (country.code === 'IT' ? 'App.showItalyImportModal()' : 'App.showImportModal()') + '">⬇ Import</button>' +
       '</div>';
     }
     if (isOpen) {
@@ -6937,7 +6937,10 @@ function renderAutomationsView() {
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">📥</div><div><div class="auto-title">Import Campaigns & Assets</div><div class="auto-sub">load data from Google Sheets CSV export</div></div></div>' +
       '<div class="auto-desc">Export your campaigns and assets from Google Sheets as CSV files, then import them here. The importer will skip any campaigns or assets that already exist (by name + country). New categories will be auto-created.</div>' +
-      '<button class="run-btn" style="margin-top:8px;" onclick="App.showImportModal()">📥 Open Import Modal</button>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;">' +
+        '<button class="run-btn" onclick="App.showImportModal()">📥 Import UK</button>' +
+        '<button class="run-btn" onclick="App.showItalyImportModal()">🇮🇹 Import Italy</button>' +
+      '</div>' +
     '</div>' +
 
     '<div class="auto-card">' +
@@ -7719,6 +7722,263 @@ function executeSheetImport() {
   }
 }
 
+// ─── Italy Import ────────────────────────────────────────────────────────────
+// Italy CSVs have duplicate column headers so we use positional indices.
+// Column layout (0-based after finding the header row):
+//  0: PN #   1: Video Concept/Idea   2: Raw Video File   3: Date Submitted
+//  4: Sparkcodes   5: IG link   6: Meta Ads code   7: Extra Notes
+//  8: Editor
+//  9: Final Video (Frame.io Link) — editor's working copy
+// 10: Status — editing status
+// 11: Final Video (Frame.io Link) — QC final copy  ← preferred for finalVideo
+// 12: Status — QC status
+// 13: Status — AD Status (e.g. "Live")
+// 14: Platform
+var ITALY_COL = { PN:0, NAME:1, RAW:2, DATE:3, SPARK:4, IG:5, META:6, NOTES:7, EDITOR:8, FV_EDIT:9, ST_EDIT:10, FV_QC:11, ST_QC:12, ST_AD:13, PLATFORM:14 };
+
+function parseItalyCSV(csvText) {
+  // Re-use the quote-aware line joiner from parseCSV
+  var lines = csvText.split('\n');
+  var processedLines = [];
+  var currentLine = '';
+  var insideQuotes = false;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    currentLine += (currentLine ? '\n' : '') + line;
+    for (var j = 0; j < line.length; j++) {
+      if (line[j] === '"' && (j === 0 || line[j-1] !== '\\')) insideQuotes = !insideQuotes;
+    }
+    if (!insideQuotes) { processedLines.push(currentLine); currentLine = ''; }
+  }
+  if (currentLine) processedLines.push(currentLine);
+
+  // Find header row: must contain "PN #" AND "Video Concept"
+  var headerIdx = -1;
+  for (var i = 0; i < processedLines.length; i++) {
+    var l = processedLines[i];
+    if (l.includes('PN #') && l.toLowerCase().includes('video concept')) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return { rows: [], error: 'Could not find header row (expected "PN #" and "Video Concept/Idea")' };
+
+  var rows = [];
+  for (var i = headerIdx + 1; i < processedLines.length; i++) {
+    var cols = parseCSVLine(processedLines[i]);
+    var name = (cols[ITALY_COL.NAME] || '').trim();
+    if (!name) continue; // skip empty rows
+    rows.push(cols);
+  }
+  return { rows: rows };
+}
+
+function guessItalyMonthYear(filename) {
+  // Try to match "May '26" style anywhere in the filename
+  var m = filename.match(/([A-Za-z]+\s+'?\d{2,4})/);
+  return m ? m[1] : '';
+}
+
+function showItalyImportModal() {
+  var html =
+    '<div class="modal-overlay open" onclick="if(event.target===this) closeAllModals();">' +
+    '<div class="modal" style="max-width:860px; max-height:92vh; overflow-y:auto;">' +
+      '<div class="modal-header">' +
+        '<h2>🇮🇹 Import Italy Ads CSV</h2>' +
+        '<button class="close-btn" onclick="closeAllModals()">×</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<p style="font-size:12px;color:var(--text2);margin-bottom:14px;">Upload the Italy Ads Google Sheet exported as CSV. Each file becomes one IT campaign. Columns are matched positionally — Sparkcodes, dual Final Video links, and AD Status are all supported.</p>' +
+
+        // Campaign meta override
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">' +
+          '<div>' +
+            '<label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px;">Campaign Name <span style="color:var(--red-text);">*</span></label>' +
+            '<input id="it-camp-name" class="edit-input" style="width:100%;box-sizing:border-box;" placeholder="e.g. Italy Ads May \'26" oninput="App._italyUpdateBtn()">' +
+          '</div>' +
+          '<div>' +
+            '<label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px;">Month / Year</label>' +
+            '<input id="it-month-year" class="edit-input" style="width:100%;box-sizing:border-box;" placeholder="e.g. May \'26">' +
+          '</div>' +
+          '<div>' +
+            '<label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px;">Category</label>' +
+            '<select id="it-category" class="edit-input" style="width:100%;box-sizing:border-box;">' +
+              STATE.categories.map(function(c){ return '<option value="'+escapeHtml(c.name)+'">'+escapeHtml(c.name)+'</option>'; }).join('') +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+
+        '<input type="file" id="it-csv-input" accept=".csv" onchange="App.handleItalyCSVUpload(this)">' +
+        '<div id="it-preview" style="margin-top:12px;"></div>' +
+
+        '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">' +
+          '<button class="cancel-btn" onclick="closeAllModals()">Cancel</button>' +
+          '<button class="primary-btn" id="it-import-btn" disabled onclick="App.executeItalyImport()">Import</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '</div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+  window._italyImportRows = null;
+}
+
+function _italyUpdateBtn() {
+  var name = (document.getElementById('it-camp-name') || {}).value || '';
+  var btn = document.getElementById('it-import-btn');
+  if (btn) btn.disabled = !name.trim() || !window._italyImportRows || window._italyImportRows.length === 0;
+}
+
+function handleItalyCSVUpload(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+
+  // Pre-fill campaign name and month/year from filename
+  var nameEl = document.getElementById('it-camp-name');
+  var myEl = document.getElementById('it-month-year');
+  if (nameEl && !nameEl.value) {
+    // Strip extension and common prefixes
+    var base = file.name.replace(/\.csv$/i, '');
+    nameEl.value = base;
+  }
+  if (myEl && !myEl.value) {
+    myEl.value = guessItalyMonthYear(file.name);
+  }
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var result = parseItalyCSV(e.target.result);
+    var previewEl = document.getElementById('it-preview');
+    if (result.error) {
+      previewEl.innerHTML = '<div style="color:var(--red-text);font-size:12px;padding:8px;background:var(--red-bg);border-radius:6px;">⚠ ' + escapeHtml(result.error) + '</div>';
+      window._italyImportRows = null;
+      _italyUpdateBtn();
+      return;
+    }
+    window._italyImportRows = result.rows;
+
+    // Build preview table
+    var liveCount = result.rows.filter(function(r){ return (r[ITALY_COL.ST_AD]||'').toLowerCase().includes('live'); }).length;
+    var sparkCount = result.rows.filter(function(r){ return (r[ITALY_COL.SPARK]||'').trim(); }).length;
+    var fvCount = result.rows.filter(function(r){ return (r[ITALY_COL.FV_QC]||r[ITALY_COL.FV_EDIT]||'').trim(); }).length;
+
+    var summaryHtml =
+      '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">' +
+        '<span style="font-size:11px;background:var(--bg3);padding:3px 8px;border-radius:4px;border:1px solid var(--border);">' + result.rows.length + ' videos</span>' +
+        (liveCount ? '<span style="font-size:11px;background:var(--green-bg);color:var(--green-text);padding:3px 8px;border-radius:4px;border:1px solid rgba(63,185,80,.3);">✓ ' + liveCount + ' Live → Approved</span>' : '') +
+        (fvCount ? '<span style="font-size:11px;background:var(--bg3);color:var(--text2);padding:3px 8px;border-radius:4px;border:1px solid var(--border);">🎬 ' + fvCount + ' Final Videos</span>' : '') +
+        (sparkCount ? '<span style="font-size:11px;background:var(--accent-dim);color:var(--accent2);padding:3px 8px;border-radius:4px;border:1px solid rgba(127,119,221,.3);">⚡ ' + sparkCount + ' Sparkcodes</span>' : '') +
+      '</div>';
+
+    var tableHtml =
+      '<div style="overflow-x:auto;max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:11px;">' +
+        '<thead style="position:sticky;top:0;background:var(--bg3);z-index:1;">' +
+          '<tr>' +
+            ['#','Video Concept / Idea','Editor','Sparkcode','Final Video (QC)','AD Status','Platform'].map(function(h){
+              return '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border2);white-space:nowrap;color:var(--text2);font-weight:600;">'+escapeHtml(h)+'</th>';
+            }).join('') +
+          '</tr>' +
+        '</thead>' +
+        '<tbody>' +
+          result.rows.map(function(r, i) {
+            var adSt = (r[ITALY_COL.ST_AD] || '').trim();
+            var fv = (r[ITALY_COL.FV_QC] || r[ITALY_COL.FV_EDIT] || '').trim();
+            var spark = (r[ITALY_COL.SPARK] || '').trim();
+            var stColor = adSt.toLowerCase().includes('live') ? 'var(--green-text)' : 'var(--text2)';
+            return '<tr style="border-bottom:1px solid var(--border);">' +
+              '<td style="padding:5px 8px;color:var(--text3);">' + escapeHtml(r[ITALY_COL.PN] || String(i+1)) + '</td>' +
+              '<td style="padding:5px 8px;font-weight:500;">' + escapeHtml((r[ITALY_COL.NAME]||'')) + '</td>' +
+              '<td style="padding:5px 8px;color:var(--text2);">' + escapeHtml((r[ITALY_COL.EDITOR]||'—')) + '</td>' +
+              '<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--accent2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escapeHtml(spark)+'">' + (spark ? escapeHtml(spark.slice(0,20)+(spark.length>20?'…':'')) : '<span style="color:var(--text3);">—</span>') + '</td>' +
+              '<td style="padding:5px 8px;">' + (fv ? '<a href="'+escapeHtml(fv)+'" target="_blank" style="color:var(--accent2);text-decoration:none;font-size:10px;">Open ↗</a>' : '<span style="color:var(--text3);">—</span>') + '</td>' +
+              '<td style="padding:5px 8px;color:'+stColor+';font-weight:600;">' + escapeHtml(adSt || '—') + '</td>' +
+              '<td style="padding:5px 8px;color:var(--text2);">' + escapeHtml((r[ITALY_COL.PLATFORM]||'—')) + '</td>' +
+            '</tr>';
+          }).join('') +
+        '</tbody>' +
+      '</table>' +
+      '</div>';
+
+    previewEl.innerHTML = summaryHtml + tableHtml;
+    _italyUpdateBtn();
+  };
+  reader.readAsText(file);
+}
+
+function executeItalyImport() {
+  var rows = window._italyImportRows;
+  if (!rows || rows.length === 0) { toast('No rows to import', 'error'); return; }
+
+  var campName = (document.getElementById('it-camp-name').value || '').trim();
+  var monthYear = (document.getElementById('it-month-year').value || '').trim();
+  var category = (document.getElementById('it-category').value || '').trim();
+
+  if (!campName) { toast('Campaign name is required', 'error'); return; }
+
+  // Flush pending Firestore snapshots
+  if (typeof Fb !== 'undefined') { Fb._pendingSnapshotData = null; clearTimeout(Fb._snapshotRetryTimer); Fb._snapshotRetries = 0; }
+
+  // Find or create the IT campaign
+  var existingCamp = STATE.campaigns.find(function(c) { return c.country === 'IT' && c.name.toLowerCase() === campName.toLowerCase(); });
+  var campaignId;
+  var newCampaign = false;
+  if (existingCamp) {
+    campaignId = existingCamp.id;
+  } else {
+    campaignId = 'c' + (++STATE.nextCampaignId);
+    var rank = STATE.campaigns.filter(function(c){ return c.country === 'IT'; }).length + 1;
+    STATE.campaigns.push({ id: campaignId, country: 'IT', rank: rank, name: campName, brief: '', driveId: '', category: category, type: 'Paid Ads', slackOverride: '', monthYear: monthYear, hideAssetLinkCols: false });
+    newCampaign = true;
+  }
+
+  findOrCreateCategory(category);
+
+  var imported = 0, skipped = 0, updated = 0;
+
+  rows.forEach(function(r) {
+    var name = (r[ITALY_COL.NAME] || '').trim();
+    if (!name) return;
+
+    var adStatus = (r[ITALY_COL.ST_AD] || '').toLowerCase();
+    var editorName = (r[ITALY_COL.EDITOR] || '').trim();
+    var fv = (r[ITALY_COL.FV_QC] || r[ITALY_COL.FV_EDIT] || '').trim();
+    var spark = (r[ITALY_COL.SPARK] || '').trim();
+    var pnRaw = parseInt(r[ITALY_COL.PN]) || 0;
+
+    // Derive status
+    var status = 'Draft';
+    var dateApproved = '';
+    if (adStatus.includes('live')) { status = 'Approved'; dateApproved = toISODate(r[ITALY_COL.DATE] || '') || ''; }
+    else if (editorName) status = 'Assigned';
+
+    var existing = STATE.assets.find(function(a){ return String(a.campaignId) === String(campaignId) && a.name.toLowerCase() === name.toLowerCase(); });
+    if (existing) {
+      var changed = false;
+      if (!existing.finalVideo && fv) { existing.finalVideo = fv; changed = true; }
+      if (!existing.sparksCode && spark) { existing.sparksCode = spark; changed = true; }
+      if (changed) updated++;
+      else skipped++;
+    } else {
+      var assetId = 'a' + (++STATE.nextAssetId);
+      var asset = mkAsset(assetId, pnRaw || (STATE.assets.filter(function(a){ return String(a.campaignId)===String(campaignId); }).length + 1), campaignId, name, editorName, 'Low', '', 'V1');
+      asset.category = category;
+      asset.sparksCode = spark;
+      asset.finalVideo = fv;
+      asset.status = status;
+      if (dateApproved) asset.dateApproved = dateApproved;
+      STATE.assets.push(asset);
+      imported++;
+    }
+  });
+
+  saveState();
+  logAction('imported', 'Italy import: ' + (newCampaign ? '1 new campaign' : 'existing campaign') + ' "' + campName + '", ' + imported + ' assets imported, ' + updated + ' updated, ' + skipped + ' skipped');
+  toast('🇮🇹 ' + (newCampaign ? 'Created campaign "' + campName + '"' : 'Updated existing campaign') + ' · ' + imported + ' imported, ' + updated + ' updated, ' + skipped + ' skipped', 'success');
+  closeAllModals();
+  render();
+  if (typeof Fb !== 'undefined' && Fb.uploadNow) {
+    Fb.uploadNow().catch(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); });
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function renderBriefsView() {
   var isAdmin = roleAtLeast('admin');
   var isPm = roleAtLeast('pm');
@@ -8008,12 +8268,13 @@ function renderReportingView() {
   function campRow(c) {
     var allAssets = campAssets(c.id);
     if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category || '') === category; });
-    var total            = allAssets.length;
-    var approvedInPeriod = allAssets.filter(function(a) {
+    var activeAssets     = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
+    var total            = activeAssets.length;
+    var approvedInPeriod = activeAssets.filter(function(a) {
       return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
     }).length;
-    var approvedAllTime  = allAssets.filter(function(a) { return a.categoryHeadQc === 'Approved'; }).length;
-    var revisions        = allAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
+    var approvedAllTime  = activeAssets.filter(function(a) { return a.categoryHeadQc === 'Approved'; }).length;
+    var revisions        = activeAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
     var pct    = total > 0 ? Math.round(approvedAllTime / total * 100) : 0;
     var isFull = total > 0 && approvedAllTime === total;
     var editors = [];
@@ -11814,7 +12075,12 @@ var App = {
   showImportModal: showImportModal,
   handleSheetsCSVUpload: handleSheetsCSVUpload,
   executeSheetImport: executeSheetImport,
-  exportToCSV: exportToCSV
+  exportToCSV: exportToCSV,
+  // Italy import
+  showItalyImportModal: showItalyImportModal,
+  handleItalyCSVUpload: handleItalyCSVUpload,
+  executeItalyImport: executeItalyImport,
+  _italyUpdateBtn: _italyUpdateBtn
 };
 window.App = App;
 
