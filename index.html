@@ -8298,7 +8298,9 @@ function renderReportingView() {
     var isFull = total > 0 && approvedAllTime === total;
     var editors = [];
     allAssets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
-    return { c: c, total: total, approved: approvedInPeriod, revisions: revisions, pct: pct, isFull: isFull, editors: editors };
+    var finishDate = '';
+    activeAssets.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
+    return { c: c, total: total, approved: approvedInPeriod, revisions: revisions, pct: pct, isFull: isFull, editors: editors, finishDate: finishDate };
   }
 
   // Only show campaigns that have at least one asset in the selected range (and matching category)
@@ -8322,10 +8324,11 @@ function renderReportingView() {
   // ── TABLE VIEW — grouped by category ──
   var approvedColLabel = period === 'weekly' ? 'Approved This Week' : period === 'quarterly' ? 'Approved This Quarter' : 'Approved This Month';
   function tableHtml() {
-    var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>' + approvedColLabel + '</th><th>Total</th><th>Progress</th><th>Revisions</th><th>Editors</th><th>Status</th></tr></thead>';
+    var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>' + approvedColLabel + '</th><th>Total</th><th>Progress</th><th>Revisions</th><th>Editors</th><th>Finish Date</th><th>Status</th></tr></thead>';
 
     function campTr(r) {
       var statusChip = (r.c.done || r.isFull) ? '<span class="report-done-chip">Done</span>' : '<span class="report-active-chip">Active</span>';
+      var finishCell = r.finishDate ? '<span style="font-size:10px;color:var(--text3)">will be finished on</span> <span class="td-mono" style="font-size:12px">' + escapeHtml(formatDate(r.finishDate)) + '</span>' : '<span style="color:var(--text3)">—</span>';
       return '<tr onclick="App.selectCampaign(\'' + r.c.id + '\'); App.setTab(\'campaigns\')">' +
         '<td class="td-name">' + escapeHtml(r.c.name) + '</td>' +
         '<td>' + flagHtml(r.c.country) + '</td>' +
@@ -8334,6 +8337,7 @@ function renderReportingView() {
         '<td><div class="report-prog-cell"><div class="report-mini-track"><div class="report-mini-fill' + (r.isFull ? ' full' : '') + '" style="width:' + r.pct + '%"></div></div><span class="report-pct">' + r.pct + '%</span></div></td>' +
         '<td class="' + (r.revisions > 0 ? 'td-amber' : 'td-mono') + '">' + r.revisions + '</td>' +
         '<td style="color:var(--text2);font-size:11px">' + escapeHtml(r.editors.join(', ') || '—') + '</td>' +
+        '<td style="white-space:nowrap">' + finishCell + '</td>' +
         '<td>' + statusChip + '</td>' +
       '</tr>';
     }
