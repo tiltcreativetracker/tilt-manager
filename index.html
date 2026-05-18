@@ -2515,7 +2515,9 @@ function getThisWeekRange() {
 // so a 20-workday month \u2192 10/day, a 22-workday month \u2192 ~9/day.
 var MONTHLY_APPROVAL_TARGET = 200;
 var DAILY_APPROVAL_TARGET = 10; // Explicit daily goal (UK Paid Ads) \u2014 keeps the pace pill stable regardless of month length.
-var DAILY_EDITOR_APPROVAL_TARGET = 3; // Per-editor daily minimum used by the Daily Log tab for accountability colouring.
+var DAILY_EDITOR_APPROVAL_TARGET = 3; // Default per-editor daily minimum for the Daily Log tab.
+var EDITOR_DAILY_APPROVAL_TARGET = { Zidni: 4, Sharm: 3, Patty: 3, Elsa: 3 }; // Per-editor overrides.
+function getEditorDailyTarget(editor) { return EDITOR_DAILY_APPROVAL_TARGET[editor] || DAILY_EDITOR_APPROVAL_TARGET; }
 
 // Returns { start, end, year, month, label } describing the current calendar month.
 // 'month' is 0-indexed to match Date API. 'label' is "April 2026".
@@ -6061,7 +6063,6 @@ function renderDailyLogView() {
   var weekOffset = (typeof STATE.logWeekOffset === 'number') ? STATE.logWeekOffset : 0;
   var days = getWorkdaysForOffset(weekOffset);
   var data = computeDailyLog(days);
-  var target = DAILY_EDITOR_APPROVAL_TARGET;
 
   // Resolve the selected editor from STATE (with fallback). The dropdown writes
   // to STATE.logEditor via App.setLogEditor, so a hard refresh still remembers
@@ -6070,6 +6071,7 @@ function renderDailyLogView() {
   var selectedEditor = STATE.logEditor && DAILY_LOG_EDITORS.indexOf(STATE.logEditor) >= 0
     ? STATE.logEditor
     : DAILY_LOG_EDITORS[0];
+  var target = getEditorDailyTarget(selectedEditor);
 
   // Week picker \u2014 options from current week back 8 weeks.
   var weekOptHtml = '';
@@ -6216,7 +6218,7 @@ function renderDailyLogView() {
         '<h2 class="log-title">Daily Log</h2>' +
         '<div class="log-sub">' +
           weekLabel + ' (' + firstDay + ' \u2013 ' + lastDay + ') \u00B7 ' +
-          'Target: <b>' + target + '</b> approved videos per editor per day' +
+          'Target: <b>' + target + '</b> approved videos per day for ' + selectedEditor +
         '</div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-left:auto;">' +
@@ -7360,7 +7362,7 @@ function exportDailyLogCSV(weekOffset) {
 
 // Build a Slack-formatted summary of one editor's week from the daily log data.
 function buildDailyLogSlackMessage(editor, days, data) {
-  var target = DAILY_EDITOR_APPROVAL_TARGET;
+  var target = getEditorDailyTarget(editor);
   var row = data[editor] || { videos: [], approvedByDay: days.map(function() { return 0; }) };
 
   var videosByDay = days.map(function() { return []; });
