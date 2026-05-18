@@ -1585,6 +1585,7 @@ var Fb = {
       briefs: STATE.briefs || [],
       nextBriefId: STATE.nextBriefId || 1,
       briefsWebhookUrl: STATE.briefsWebhookUrl || '',
+      qcDismissed: STATE.qcDismissed || {},
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedAt: Date.now()
@@ -1653,7 +1654,7 @@ var Fb = {
         logEditor: true,
         logWeekOffset: true,
         schedulerDate: true,
-        qcDismissed: true,
+        // qcDismissed is now persisted — intentionally excluded from PER_USER_UI_FIELDS
         noSplit: true,
         reportingPeriod: true,
         reportingMonth: true,
@@ -6568,15 +6569,15 @@ function renderNotificationsView() {
         var ready         = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
         var totalMissing = missingFiles.length + missingPrices.length;
         if (totalMissing === 0 && ready.length === 0) return ''; // skip untouched sub-campaigns
-        // Skip cards that were dismissed via a successful send in this session. Refreshing
-        // the page clears qcDismissed (non-persisted) so the card reappears.
+        // Skip cards that were dismissed (via send or the dismiss button). qcDismissed is
+        // persisted to Firestore so dismissals survive page reloads.
         if (STATE.qcDismissed && STATE.qcDismissed[camp.id]) return '';
         var qcUrl = resolveQcWebhookForCampaign(camp.id);
         var hasUrl = webhookValid(qcUrl);
-        var canSend = hasUrl && totalMissing > 0;
+        var canSend = hasUrl && (totalMissing > 0 || ready.length > 0);
         var sendAttrs = canSend
           ? 'class="sent-copy-btn" title="Send QC report for this campaign"'
-          : 'class="sent-copy-btn" title="' + (hasUrl ? 'Add at least one Missing-files or Missing-prices video to send a report' : 'No QC webhook resolves for ' + camp.country + ' \u2014 set one in Automations') + '" disabled style="opacity:0.45; cursor:not-allowed;"';
+          : 'class="sent-copy-btn" title="' + (hasUrl ? 'No QC activity to report for this campaign' : 'No QC webhook resolves for ' + camp.country + ' \u2014 set one in Automations') + '" disabled style="opacity:0.45; cursor:not-allowed;"';
         var listParts = [];
         if (missingFiles.length) {
           listParts.push('<div style="margin-top:6px; font-size:11px; color:var(--amber-text);"><strong>Missing files:</strong> ' + missingFiles.map(function(a) { return escapeHtml(a.name); }).join(', ') + '</div>');
@@ -6598,6 +6599,7 @@ function renderNotificationsView() {
             '</div>' +
             '<button ' + sendAttrs + ' onclick="App.sendQcReport(\'' + camp.id + '\')">\u{1F680}</button>' +
             '<button class="sent-copy-btn" title="Copy QC report" onclick="App.copyQcReport(\'' + camp.id + '\')">\u{1F4CB}</button>' +
+            '<button class="sent-copy-btn" title="Dismiss this QC card" onclick="App.dismissQcReport(\'' + camp.id + '\')" style="opacity:0.6;">&#x2715;</button>' +
           '</div>' +
           missingList +
         '</div>';
@@ -6610,7 +6612,7 @@ function renderNotificationsView() {
       }
       return '<div class="section-title">QC Reports <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(manual send to the country\u2019s QC webhook)</span></div>' +
         '<div class="auto-card">' +
-          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send is enabled once at least one video is marked <span style="color:var(--amber-text);">Missing files</span> or <span style="color:var(--pink-text);">Missing prices</span>. Ready videos are included as a count in the Slack message.</div>' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One card per campaign with any QC activity. Send (🚀) is enabled whenever there is any QC activity — including campaigns where all videos are Ready. Copy (📋) pastes the report without sending. Dismiss (✕) permanently hides the card.</div>' +
           '<div class="batch-grid">' + qcCards + '</div>' +
         '</div>';
   })();
@@ -11924,6 +11926,12 @@ var App = {
         toast('Network error sending QC report: ' + (e && e.message ? e.message : 'unknown'), 'error');
       });
     });
+  },
+
+  dismissQcReport: function(campaignId) {
+    if (!STATE.qcDismissed) STATE.qcDismissed = {};
+    STATE.qcDismissed[campaignId] = Date.now();
+    render();
   },
 
   // Copy QC report text to clipboard without sending \u2014 useful if the user wants to paste
