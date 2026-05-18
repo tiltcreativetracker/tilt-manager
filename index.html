@@ -5834,7 +5834,7 @@ function computeDailyLog(days) {
     // not a workload timeline — so drafts, in-progress, and for-review videos
     // are intentionally hidden, and approved videos only surface on the day
     // matching their dateApproved field.
-    var approvedThisWeek = a.dateApproved && days.indexOf(a.dateApproved) >= 0;
+    var approvedThisWeek = a.status === 'Approved' && a.dateApproved && days.indexOf(a.dateApproved) >= 0;
     if (!approvedThisWeek) return;
     byEditor[a.editor].videos.push({ asset: a, statusByDay: statusByDay });
     // Per-day approval count: strictly based on the asset's dateApproved field. If the
