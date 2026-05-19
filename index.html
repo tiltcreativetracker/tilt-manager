@@ -9198,6 +9198,10 @@ function postToSlackThread(channel, threadTs, text) {
     }).catch(function() {
       return { ok: false, body: 'invalid Slack response', status: res.status };
     });
+  }).catch(function(err) {
+    // Network / CORS failure — return a structured error so callers fall back
+    // to the webhook rather than throwing into the blind-send catch handler.
+    return { ok: false, body: (err && err.message) || 'network error', status: 0 };
   });
 }
 
@@ -9332,18 +9336,20 @@ function sendDailyTally(triggerKind) {
         return;
       }
       if (useThread) {
-        logAction('updated', 'Daily tally thread post failed for ' + ed + ' (' + r.body + ') \u2014 falling back to channel post');
-        postToSlack(url, msg).then(function(r2) {
-          if (r2.ok) logSent('webhook-fallback');
-          else logAction('deleted', 'Daily tally fallback rejected for ' + ed + ': ' + r2.body);
-        });
+        logAction('deleted', 'Daily tally thread post failed for ' + ed + ' (' + r.body + ') \u2014 not falling back to avoid main-channel leak');
+        toast('Thread post failed for ' + ed + ': ' + r.body, 'error');
         return;
       }
       logAction('deleted', 'Daily tally rejected for ' + ed + ': ' + r.body);
-    }).catch(function() {
-      // CORS/network \u2014 blind no-cors send to webhook
+    }).catch(function(err) {
+      if (useThread) {
+        // Never fall back to webhook when a thread is set \u2014 doing so would broadcast to the main channel.
+        logAction('deleted', 'Daily tally thread post failed (network/CORS) for ' + ed + ' \u2014 not falling back to avoid main-channel leak');
+        toast('Thread post failed for ' + ed + ' (network error)', 'error');
+        return;
+      }
       if (!webhookValid(url)) return;
-      fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: msg }) })
+      fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg })) })
         .then(function() { logSent('blind'); }).catch(function() {});
     });
   });
@@ -9576,21 +9582,11 @@ function sendPendingBatch(editor, opts) {
       if (!r.ok) {
         // If the thread post failed, retry without thread_ts (plain channel post).
         if (useThread) {
-          logAction('updated', editor + ': thread post failed (' + r.body + ') \u2014 falling back to channel post');
-          return postToSlack(url, msg).then(function(r2) {
-            if (!r2.ok) {
-              clearInFlight();
-              toast('Slack rejected the batch: "' + r2.body + '"', 'error');
-              logAction('deleted', editor + ': Slack send failed \u2014 ' + r2.body);
-              return;
-            }
-            markSent('sent-fallback');
-            dualPostToSecondaryThreads(editor, windowItems, msg);
-            clearInFlight();
-            logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) via webhook fallback');
-            toast('\u2713 Sent to Slack (webhook fallback)', 'success');
-            render();
-          });
+          // Never fall back to webhook when a thread is set \u2014 doing so would broadcast to the main channel.
+          clearInFlight();
+          logAction('deleted', editor + ': thread post failed (' + r.body + ') \u2014 not falling back to avoid main-channel leak');
+          toast('Thread post failed: "' + r.body + '"', 'error');
+          return;
         }
         clearInFlight();
         toast('Slack rejected the batch: "' + r.body + '"', 'error');
@@ -9604,13 +9600,19 @@ function sendPendingBatch(editor, opts) {
       toast('\u2713 Sent to Slack' + (useThread ? ' (thread)' : ''), 'success');
       render();
     }).catch(function(err) {
-      // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
-      var blindPayload = { text: msg };
-      if (useThread && thread) { blindPayload.thread_ts = thread.threadTs; blindPayload.reply_broadcast = false; }
+      if (useThread) {
+        // Never fall back to webhook when a thread is set \u2014 doing so would broadcast to the main channel.
+        clearInFlight();
+        logAction('deleted', editor + ': thread post failed (network/CORS) \u2014 not falling back to avoid main-channel leak');
+        var hint = (location.protocol === 'file:') ? ' (file:// origin blocks cross-origin requests \u2014 host on a local server)' : '';
+        toast('Thread post failed (network error)' + hint, 'error');
+        return;
+      }
+      // No thread \u2014 blind no-cors webhook send as last resort.
       fetch(url, {
         method: 'POST', mode: 'no-cors',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'payload=' + encodeURIComponent(JSON.stringify(blindPayload))
+        body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg }))
       }).then(function() {
         markSent('sent-blind');
         dualPostToSecondaryThreads(editor, windowItems, msg);
