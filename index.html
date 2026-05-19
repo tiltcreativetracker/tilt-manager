@@ -7777,18 +7777,48 @@ function executeSheetImport() {
 }
 
 // ─── Italy Import ────────────────────────────────────────────────────────────
-// Italy CSVs have duplicate column headers so we use positional indices.
-// Column layout (0-based after finding the header row):
-//  0: PN #   1: Video Concept/Idea   2: Raw Video File   3: Date Submitted
-//  4: Sparkcodes   5: IG link   6: Meta Ads code   7: Extra Notes
-//  8: Editor
-//  9: Final Video (Frame.io Link) — editor's working copy
-// 10: Status — editing status
-// 11: Final Video (Frame.io Link) — QC final copy  ← preferred for finalVideo
-// 12: Status — QC status
-// 13: Status — AD Status (e.g. "Live")
-// 14: Platform
+// Italy CSVs have duplicate column headers so we detect columns by header name,
+// with positional fallback for sheets that omit optional columns (e.g. Date).
+// Default positional layout (0-based after finding the header row):
+//  0: PN #   1: Video Concept/Idea   2: Raw Video File   3: Date Submitted (optional)
+//  then: Sparkcodes, IG link, Meta Ads code, Extra Notes, Editor,
+//        Final Video (editor), Status, Final Video (QC), Status, AD Status, Platform
 var ITALY_COL = { PN:0, NAME:1, RAW:2, DATE:3, SPARK:4, IG:5, META:6, NOTES:7, EDITOR:8, FV_EDIT:9, ST_EDIT:10, FV_QC:11, ST_QC:12, ST_AD:13, PLATFORM:14 };
+
+function buildItalyColMap(headerCols) {
+  // Map header names → column indices so layout changes don't break imports.
+  var map = {};
+  for (var i = 0; i < headerCols.length; i++) {
+    var h = (headerCols[i] || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (h === 'pn #' || h === 'pn#')                         map.PN   = i;
+    else if (h.includes('video concept') || h.includes('video idea')) map.NAME = i;
+    else if (h.includes('raw video'))                          map.RAW  = i;
+    else if (h.includes('date'))                               map.DATE = i;
+    else if (h.includes('sparkcode') || h.includes('spark code')) map.SPARK = i;
+    else if (h.includes('ig link') || h === 'ig')             map.IG   = i;
+    else if (h.includes('meta ads') || h.includes('meta ad')) map.META  = i;
+    else if (h.includes('extra note') || h.includes('notes')) map.NOTES = i;
+    else if (h === 'editor')                                   map.EDITOR = i;
+    else if (h.includes('platform'))                           map.PLATFORM = i;
+  }
+  // Final Video / Status columns: positional scan for the two pairs after editor
+  var fvIndices = [];
+  var stIndices = [];
+  for (var i = 0; i < headerCols.length; i++) {
+    var h = (headerCols[i] || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (h.includes('final video') || h.includes('frame.io')) fvIndices.push(i);
+    else if (h === 'status')                                   stIndices.push(i);
+  }
+  if (fvIndices[0] != null) map.FV_EDIT = fvIndices[0];
+  if (stIndices[0] != null) map.ST_EDIT = stIndices[0];
+  if (fvIndices[1] != null) map.FV_QC   = fvIndices[1];
+  if (stIndices[1] != null) map.ST_QC   = stIndices[1];
+  if (stIndices[2] != null) map.ST_AD   = stIndices[2];
+  // Fill any unresolved keys with the hardcoded fallback
+  var fallback = { PN:0, NAME:1, RAW:2, DATE:3, SPARK:4, IG:5, META:6, NOTES:7, EDITOR:8, FV_EDIT:9, ST_EDIT:10, FV_QC:11, ST_QC:12, ST_AD:13, PLATFORM:14 };
+  for (var k in fallback) { if (map[k] == null) map[k] = fallback[k]; }
+  return map;
+}
 
 function parseItalyCSV(csvText) {
   // Re-use the quote-aware line joiner from parseCSV
@@ -7814,14 +7844,16 @@ function parseItalyCSV(csvText) {
   }
   if (headerIdx === -1) return { rows: [], error: 'Could not find header row (expected "PN #" and "Video Concept/Idea")' };
 
+  var colMap = buildItalyColMap(parseCSVLine(processedLines[headerIdx]));
+
   var rows = [];
   for (var i = headerIdx + 1; i < processedLines.length; i++) {
     var cols = parseCSVLine(processedLines[i]);
-    var name = (cols[ITALY_COL.RAW] || cols[ITALY_COL.NAME] || '').trim();
+    var name = (cols[colMap.RAW] || cols[colMap.NAME] || '').trim();
     if (!name) continue; // skip empty rows
-    rows.push(cols);
+    rows.push({ _cols: cols, _map: colMap });
   }
-  return { rows: rows };
+  return { rows: rows, colMap: colMap };
 }
 
 function guessItalyMonthYear(filename) {
@@ -7908,10 +7940,10 @@ function handleItalyCSVUpload(input) {
     window._italyImportRows = result.rows;
 
     // Build preview table
-    var liveCount = result.rows.filter(function(r){ return (r[ITALY_COL.ST_AD]||'').toLowerCase().includes('live'); }).length;
-    var sparkCount = result.rows.filter(function(r){ return (r[ITALY_COL.SPARK]||'').trim(); }).length;
-    var fvCount = result.rows.filter(function(r){ return (r[ITALY_COL.FV_QC]||r[ITALY_COL.FV_EDIT]||'').trim(); }).length;
-    var igCount = result.rows.filter(function(r){ return (r[ITALY_COL.IG]||'').trim(); }).length;
+    var liveCount = result.rows.filter(function(r){ return (r._cols[r._map.ST_AD]||'').toLowerCase().includes('live'); }).length;
+    var sparkCount = result.rows.filter(function(r){ return (r._cols[r._map.SPARK]||'').trim(); }).length;
+    var fvCount = result.rows.filter(function(r){ return (r._cols[r._map.FV_QC]||r._cols[r._map.FV_EDIT]||'').trim(); }).length;
+    var igCount = result.rows.filter(function(r){ return (r._cols[r._map.IG]||'').trim(); }).length;
 
     var summaryHtml =
       '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">' +
@@ -7934,18 +7966,19 @@ function handleItalyCSVUpload(input) {
         '</thead>' +
         '<tbody>' +
           result.rows.map(function(r, i) {
-            var adSt = (r[ITALY_COL.ST_AD] || '').trim();
-            var fv = (r[ITALY_COL.FV_QC] || r[ITALY_COL.FV_EDIT] || '').trim();
-            var spark = (r[ITALY_COL.SPARK] || '').trim();
+            var m = r._map, c = r._cols;
+            var adSt = (c[m.ST_AD] || '').trim();
+            var fv = (c[m.FV_QC] || c[m.FV_EDIT] || '').trim();
+            var spark = (c[m.SPARK] || '').trim();
             var stColor = adSt.toLowerCase().includes('live') ? 'var(--green-text)' : 'var(--text2)';
             return '<tr style="border-bottom:1px solid var(--border);">' +
-              '<td style="padding:5px 8px;color:var(--text3);">' + escapeHtml(r[ITALY_COL.PN] || String(i+1)) + '</td>' +
-              '<td style="padding:5px 8px;font-weight:500;">' + escapeHtml((r[ITALY_COL.NAME]||'')) + '</td>' +
-              '<td style="padding:5px 8px;color:var(--text2);">' + escapeHtml((r[ITALY_COL.EDITOR]||'—')) + '</td>' +
+              '<td style="padding:5px 8px;color:var(--text3);">' + escapeHtml(c[m.PN] || String(i+1)) + '</td>' +
+              '<td style="padding:5px 8px;font-weight:500;">' + escapeHtml((c[m.NAME]||'')) + '</td>' +
+              '<td style="padding:5px 8px;color:var(--text2);">' + escapeHtml((c[m.EDITOR]||'—')) + '</td>' +
               '<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--accent2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escapeHtml(spark)+'">' + (spark ? escapeHtml(spark.slice(0,20)+(spark.length>20?'…':'')) : '<span style="color:var(--text3);">—</span>') + '</td>' +
               '<td style="padding:5px 8px;">' + (fv ? '<a href="'+escapeHtml(fv)+'" target="_blank" style="color:var(--accent2);text-decoration:none;font-size:10px;">Open ↗</a>' : '<span style="color:var(--text3);">—</span>') + '</td>' +
               '<td style="padding:5px 8px;color:'+stColor+';font-weight:600;">' + escapeHtml(adSt || '—') + '</td>' +
-              '<td style="padding:5px 8px;color:var(--text2);">' + escapeHtml((r[ITALY_COL.PLATFORM]||'—')) + '</td>' +
+              '<td style="padding:5px 8px;color:var(--text2);">' + escapeHtml((c[m.PLATFORM]||'—')) + '</td>' +
             '</tr>';
           }).join('') +
         '</tbody>' +
@@ -7989,20 +8022,21 @@ function executeItalyImport() {
   var imported = 0, skipped = 0, updated = 0;
 
   rows.forEach(function(r) {
-    var name = (r[ITALY_COL.RAW] || r[ITALY_COL.NAME] || '').trim();
+    var m = r._map, c = r._cols;
+    var name = (c[m.RAW] || c[m.NAME] || '').trim();
     if (!name) return;
 
-    var adStatus = (r[ITALY_COL.ST_AD] || '').toLowerCase();
-    var editorName = (r[ITALY_COL.EDITOR] || '').trim();
-    var fv = (r[ITALY_COL.FV_QC] || r[ITALY_COL.FV_EDIT] || '').trim();
-    var spark = (r[ITALY_COL.SPARK] || '').trim();
-    var igLink = (r[ITALY_COL.IG] || '').trim();
-    var pnRaw = parseInt(r[ITALY_COL.PN]) || 0;
+    var adStatus = (c[m.ST_AD] || '').toLowerCase();
+    var editorName = (c[m.EDITOR] || '').trim();
+    var fv = (c[m.FV_QC] || c[m.FV_EDIT] || '').trim();
+    var spark = (c[m.SPARK] || '').trim();
+    var igLink = (c[m.IG] || '').trim();
+    var pnRaw = parseInt(c[m.PN]) || 0;
 
     // Derive status
     var status = 'Draft';
     var dateApproved = '';
-    if (adStatus.includes('live')) { status = 'Approved'; dateApproved = toISODate(r[ITALY_COL.DATE] || '') || ''; }
+    if (adStatus.includes('live')) { status = 'Approved'; dateApproved = toISODate(c[m.DATE] || '') || ''; }
     else if (editorName) status = 'Assigned';
 
     var existing = STATE.assets.find(function(a){ return String(a.campaignId) === String(campaignId) && a.name.toLowerCase() === name.toLowerCase(); });
