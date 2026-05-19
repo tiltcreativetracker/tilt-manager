@@ -7690,8 +7690,12 @@ function handleSheetsCSVUpload(input) {
         errorCount: errorCount
       });
 
-      var videoColName = getCol(parsed.rows[0] || {}, ['Final Video', 'Video']) ? (parsed.header.find(function(h) { return h === 'Final Video' || h.toLowerCase() === 'final video'; }) || parsed.header.find(function(h) { return h === 'Video' || h.toLowerCase() === 'video'; }) || '?') : null;
-      var videoLinkCount = parsed.rows.filter(function(r) { return getCol(r, ['Final Video', 'Video']); }).length;
+      var driveColNames = ['Raw Video File', 'Drive Link', 'Drive', 'Raw Video', 'Raw Video Link', 'Raw Video URL', 'Google Drive'];
+      var videoColNames = ['Final Video', 'Video'];
+      var videoColName = getCol(parsed.rows[0] || {}, videoColNames) ? (parsed.header.find(function(h) { return h === 'Final Video' || h.toLowerCase() === 'final video'; }) || parsed.header.find(function(h) { return h === 'Video' || h.toLowerCase() === 'video'; }) || '?') : null;
+      var videoLinkCount = parsed.rows.filter(function(r) { return getCol(r, videoColNames); }).length;
+      var driveColName = getCol(parsed.rows[0] || {}, driveColNames) ? (parsed.header.find(function(h) { return driveColNames.some(function(d) { return h.toLowerCase() === d.toLowerCase() || h.toLowerCase().indexOf(d.toLowerCase()) === 0; }); }) || '?') : null;
+      var driveLinkCount = parsed.rows.filter(function(r) { return getCol(r, driveColNames); }).length;
       previewHtml += '<div style="margin-bottom:12px; padding:10px; background:var(--bg3); border-radius:6px; border-left:3px solid ' +
         (errorCount > 0 ? 'var(--red-text)' : 'var(--green-text)') + ';">' +
         '<div style="font-weight:600; font-size:12px; margin-bottom:4px;">' + campaignInfo.campaignName + '</div>' +
@@ -7699,8 +7703,11 @@ function handleSheetsCSVUpload(input) {
         '<div style="font-size:11px;"><strong>' + validCount + '</strong> videos' +
         (errorCount > 0 ? ', <strong style="color:var(--red-text);">' + errorCount + ' errors</strong>' : '') + '</div>' +
         (videoColName
-          ? '<div style="font-size:11px; color:var(--green-text); margin-top:4px;">✓ Video links detected (' + videoLinkCount + '/' + validCount + ' rows) from column "' + escapeHtml(videoColName) + '"</div>'
-          : '<div style="font-size:11px; color:var(--amber-text); margin-top:4px;">⚠ No video link column found — columns: ' + escapeHtml(parsed.header.join(', ')) + '</div>') +
+          ? '<div style="font-size:11px; color:var(--green-text); margin-top:4px;">✓ Final video links detected (' + videoLinkCount + '/' + validCount + ' rows) from column "' + escapeHtml(videoColName) + '"</div>'
+          : '<div style="font-size:11px; color:var(--amber-text); margin-top:4px;">⚠ No final video column found — columns: ' + escapeHtml(parsed.header.join(', ')) + '</div>') +
+        (driveColName
+          ? '<div style="font-size:11px; color:var(--green-text); margin-top:2px;">✓ Drive links detected (' + driveLinkCount + '/' + validCount + ' rows) from column "' + escapeHtml(driveColName) + '"</div>'
+          : '<div style="font-size:11px; color:var(--text2); margin-top:2px;">— No Drive link column found</div>') +
         (sheetPreview ? '<div style="margin-top:4px;">' + sheetPreview + '</div>' : '') +
         '</div>';
 
@@ -7807,6 +7814,7 @@ function executeSheetImport() {
         asset.category = campaignInfo.category || 'LUXURY';
         asset.editingBrief = getCol(row, ['Editing Brief', 'Brief']) || asset.editingBrief;
         asset.finalVideo = getCol(row, ['Final Video', 'Video']) || '';
+        asset.rawVideo = getCol(row, ['Raw Video File', 'Drive Link', 'Drive', 'Raw Video', 'Raw Video Link', 'Raw Video URL', 'Google Drive']) || '';
         if (row['Date Approved']) asset.dateApproved = toISODate(row['Date Approved']);
         if (row['Status'] && row['Status'].includes('Appro')) asset.status = 'Approved';
         if (row['Editor']) asset.status = 'Assigned';
