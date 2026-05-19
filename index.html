@@ -6830,10 +6830,25 @@ function renderAutomationsView() {
       '</div>';
     }).join('');
 
+    var tokenVal = escapeHtml(STATE.slackBotToken || '');
+    var tokenDot = tokenVal ? 'ok' : '';
+    var tokenRow = '<div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border2);">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+        '<span style="font-weight:600;font-size:13px;color:var(--text1);">Bot token</span>' +
+        '<span style="font-size:12px;color:var(--text3);">required for thread-only replies (no channel broadcast)</span>' +
+        '<span class="webhook-dot ' + tokenDot + '" title="' + (tokenVal ? 'Token set' : 'No token — thread replies will also post to the channel') + '" style="margin-left:auto;"></span>' +
+      '</div>' +
+      '<div class="webhook-row">' +
+        '<input type="password" id="slack-bot-token-input" value="' + tokenVal + '" placeholder="xoxb-..." style="flex:1; font-family: monospace;">' +
+        '<button class="save-btn" onclick="App.saveBotToken()">Save</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Get it from api.slack.com/apps → Creative Tracker → OAuth &amp; Permissions. Needs <code>chat:write</code> scope. Also run <code>/invite @Creative Tracker</code> in each thread channel.</div>' +
+    '</div>';
     return '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack threads (per editor)</div><div class="auto-sub">paste each editor\'s daily thread URL — notifications post as replies</div></div></div>' +
       '<div class="auto-desc">Each editor has their own daily Slack thread. Paste today\'s thread URL below and notifications for that editor (Assigned, For Review, Needs Revisions, Approved, CHQ events) will post as replies in the thread instead of the channel. Threads reset at local midnight; the previous day\'s URL is archived. Falls back to the webhook below when no thread is set or when the post fails.</div>' +
       rows +
+      tokenRow +
     '</div>';
   }
 
