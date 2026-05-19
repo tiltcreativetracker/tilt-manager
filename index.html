@@ -9082,11 +9082,10 @@ function groupItemsByCountry(items) {
 function postToSlack(url, text, threadTs) {
   var payload = { text: text };
   if (threadTs) { payload.thread_ts = threadTs; payload.reply_broadcast = false; }
-  var formBody = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   return fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formBody
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
   }).then(function(res) {
     return res.text().then(function(body) {
       return { ok: res.status === 200 && body === 'ok', status: res.status, body: body };
@@ -9148,6 +9147,19 @@ function resolveDailyThreadForIntl(items) {
     }
   }
   return t;
+}
+
+// Send a message to a daily thread. Prefers chat.postMessage (bot token) because
+// incoming webhooks don't support reply_broadcast:false — webhook thread replies
+// always also broadcast to the main channel. Falls back to the webhook with
+// thread_ts only when no bot token is set (will broadcast, but better than nothing).
+// Returns the same { ok, body, status } shape as postToSlack.
+function postToThreadPreferred(thread, webhookUrl, msg) {
+  var token = (STATE.slackBotToken || '').trim();
+  if (token) {
+    return postToSlackThread(thread.channelId, thread.threadTs, msg);
+  }
+  return postToSlack(webhookUrl, msg, thread.threadTs);
 }
 
 // POST a Slack chat.postMessage as a thread reply. Requires slackBotToken with
@@ -9298,7 +9310,7 @@ function sendDailyTally(triggerKind) {
       logAction('notified', 'Daily tally sent for ' + ed + ' (' + kind + ', ' + reasonTag + ')');
       render();
     }
-    postToSlack(url, msg, useThread ? thread.threadTs : undefined).then(function(r) {
+    (useThread ? postToThreadPreferred(thread, url, msg) : postToSlack(url, msg)).then(function(r) {
       if (r.ok) {
         logSent(useThread ? 'thread' : 'webhook');
         return;
@@ -9341,7 +9353,7 @@ function sendDailyTallyForEditor(editor) {
     return;
   }
   toast('Sending tally for ' + editor + '...', '');
-  postToSlack(url, msg, useThread ? thread.threadTs : undefined).then(function(r) {
+  (useThread ? postToThreadPreferred(thread, url, msg) : postToSlack(url, msg)).then(function(r) {
     if (r.ok) {
       STATE.sentNotifications.unshift({
         time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
@@ -9420,7 +9432,7 @@ function dualPostToSecondaryThreads(recipient, items, msg) {
       if (!edThread) return;
       posted[item.editor] = true;
       var edUrl = resolveWebhookForEditor(item.editor, [item]);
-      if (webhookValid(edUrl)) postToSlack(edUrl, msg, edThread.threadTs);
+      if (webhookValid(edUrl)) postToThreadPreferred(edThread, edUrl, msg);
     });
   } else if (EDITORS.indexOf(recipient) >= 0) {
     var chqItems = items.filter(function(it) {
@@ -9433,7 +9445,7 @@ function dualPostToSecondaryThreads(recipient, items, msg) {
       if (!catThread) return;
       postedCat[item.category] = true;
       var chUrl = STATE.categoryHeadWebhook || STATE.webhookUrl;
-      if (webhookValid(chUrl)) postToSlack(chUrl, msg, catThread.threadTs);
+      if (webhookValid(chUrl)) postToThreadPreferred(catThread, chUrl, msg);
     });
   }
 }
@@ -9543,7 +9555,7 @@ function sendPendingBatch(editor, opts) {
     extraItems  = batch.items.slice(BATCH_SIZE_LIMIT);
     if (!windowItems.length) { clearInFlight(); return; }
     msg = buildBatchMessage(editor, windowItems);
-    var primary = postToSlack(url, msg, useThread ? thread.threadTs : undefined);
+    var primary = useThread ? postToThreadPreferred(thread, url, msg) : postToSlack(url, msg);
     return primary.then(function(r) {
       if (!r.ok) {
         // If the thread post failed, retry without thread_ts (plain channel post).
@@ -9774,13 +9786,17 @@ function buildQcReportMessage(campaignId) {
   var missingFiles  = assetsInCamp.filter(function(a) { return a.qc === 'Missing files'; });
   var missingPrices = assetsInCamp.filter(function(a) { return a.qc === 'Missing prices'; });
   var ready         = assetsInCamp.filter(function(a) { return a.qc === 'Ready'; });
-  if (missingFiles.length === 0 && missingPrices.length === 0) return null; // caller should have prevented this, but double-check
+  if (missingFiles.length === 0 && missingPrices.length === 0 && ready.length === 0) return null;
+  var hasMissing = missingFiles.length > 0 || missingPrices.length > 0;
   var headerParts = [];
   if (missingFiles.length)  headerParts.push('missing files');
   if (missingPrices.length) headerParts.push('missing prices');
-  var qcHeaderLabel = headerParts.join(' & ');
   var lines = [];
-  lines.push(':warning: *QC flagged ' + qcHeaderLabel + ' \u2014 ' + countryName + ' \u00B7 ' + camp.name + '*');
+  if (hasMissing) {
+    lines.push(':warning: *QC flagged ' + headerParts.join(' & ') + ' \u2014 ' + countryName + ' \u00B7 ' + camp.name + '*');
+  } else {
+    lines.push(':white_check_mark: *QC report \u2014 ' + countryName + ' \u00B7 ' + camp.name + '*');
+  }
   function renderQcItem(a, i) {
     // Fall back to the campaign-level raw / brief link when the per-asset field is empty.
     var rawSrc   = a.rawVideo     || camp.driveId || '';
@@ -9788,8 +9804,14 @@ function buildQcReportMessage(campaignId) {
     var rawUrl = extractSingleUrl(rawSrc);
     var briefUrl = extractSingleUrl(briefSrc);
     var rawLink  = rawUrl   ? '<' + rawUrl   + '|Raw>'  : '\u2014';
-    var briefLink = briefUrl ? '<' + briefUrl + '|Notion>' : '\u2014';
+    var briefLink = briefUrl ? '<' + briefUrl + '|Brief>' : '\u2014';
     return '  ' + (i + 1) + '. ' + a.name + ' \u2014 Raw: ' + rawLink + ' \u00B7 Brief: ' + briefLink;
+  }
+  function renderReadyItem(a, i) {
+    var briefSrc = a.editingBrief || camp.brief || '';
+    var briefUrl = extractSingleUrl(briefSrc);
+    var briefLink = briefUrl ? '<' + briefUrl + '|Brief>' : '\u2014';
+    return '  ' + (i + 1) + '. ' + a.name + ' \u2014 Brief: ' + briefLink;
   }
   if (missingFiles.length) {
     lines.push('');
@@ -9801,8 +9823,11 @@ function buildQcReportMessage(campaignId) {
     lines.push('Missing prices (' + missingPrices.length + '):');
     missingPrices.forEach(function(a, i) { lines.push(renderQcItem(a, i)); });
   }
-  lines.push('');
-  lines.push('Ready: ' + ready.length + ' video' + (ready.length === 1 ? '' : 's'));
+  if (ready.length) {
+    lines.push('');
+    lines.push('Ready (' + ready.length + '):');
+    ready.forEach(function(a, i) { lines.push(renderReadyItem(a, i)); });
+  }
   return lines.join('\n');
 }
 
@@ -12110,7 +12135,7 @@ var App = {
       return;
     }
     var msg = buildQcReportMessage(campaignId);
-    if (!msg) { toast('Nothing flagged Missing files or Missing prices in this campaign', 'error'); return; }
+    if (!msg) { toast('No QC activity in this campaign yet', 'error'); return; }
     toast('Sending QC report for ' + camp.name + '...', '');
     // Multi-browser dedupe: claim the send slot so two PMs clicking simultaneously
     // don't both POST the same QC report.
@@ -12156,14 +12181,7 @@ var App = {
   // into a different channel manually or review before sending.
   copyQcReport: function(campaignId) {
     var msg = buildQcReportMessage(campaignId);
-    if (!msg) {
-      // No Missing files \u2014 build a placeholder "nothing flagged" report so Copy still does
-      // something meaningful (the button isn't disabled)
-      var camp = findCampaignById(campaignId);
-      if (!camp) return;
-      var ready = STATE.assets.filter(function(a) { return a.campaignId === camp.id && a.qc === 'Ready'; });
-      msg = ':white_check_mark: *QC \u2014 ' + camp.country + ' \u00B7 ' + camp.name + '*\n\nNo missing files or prices flagged. Ready: ' + ready.length + ' video' + (ready.length === 1 ? '' : 's');
-    }
+    if (!msg) { toast('No QC activity in this campaign yet', 'error'); return; }
     copyToClipboard(msg, 'QC report copied');
   },
 
