@@ -8023,7 +8023,10 @@ function executeItalyImport() {
 
   rows.forEach(function(r) {
     var m = r._map, c = r._cols;
-    var name = (c[m.RAW] || c[m.NAME] || '').trim();
+    var rawCol = (c[m.RAW] || '').trim();
+    var rawIsUrl = /^https?:\/\//i.test(rawCol);
+    var rawVideo = rawIsUrl ? rawCol : '';
+    var name = (c[m.NAME] || (!rawIsUrl ? rawCol : '') || '').trim();
     if (!name) return;
 
     var adStatus = (c[m.ST_AD] || '').toLowerCase();
@@ -8045,6 +8048,7 @@ function executeItalyImport() {
       if (!existing.finalVideo && fv) { existing.finalVideo = fv; changed = true; }
       if (!existing.sparksCode && spark) { existing.sparksCode = spark; changed = true; }
       if (!existing.igLink && igLink) { existing.igLink = igLink; changed = true; }
+      if (!existing.rawVideo && rawVideo) { existing.rawVideo = rawVideo; changed = true; }
       if (changed) updated++;
       else skipped++;
     } else {
@@ -8054,6 +8058,7 @@ function executeItalyImport() {
       asset.sparksCode = spark;
       asset.finalVideo = fv;
       asset.igLink = igLink;
+      asset.rawVideo = rawVideo;
       asset.status = status;
       if (dateApproved) asset.dateApproved = dateApproved;
       STATE.assets.push(asset);
