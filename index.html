@@ -4728,7 +4728,7 @@ function renderTopbar() {
           if (s === 'error')  return '<div class="sync-indicator visible error">\u26A0 Save failed</div>';
           return '<div class="sync-indicator"></div>';
         })() +
-        '<span>' + STATE.countries.length + ' countries \u00B7 ' + STATE.campaigns.length + ' subs \u00B7 ' + STATE.assets.length + ' assets</span>' +
+        '<span>' + STATE.countries.length + ' countries \u00B7 ' + STATE.campaigns.length + ' campaigns \u00B7 ' + STATE.assets.length + ' assets</span>' +
         userChip +
       '</div>' +
     '</div>';
@@ -10415,8 +10415,10 @@ var App = {
 
     if (!camps.length) { copyToClipboard('No campaigns match current filters.', 'Copied'); return; }
 
+    var periodWord = period === 'weekly' ? 'this week' : period === 'quarterly' ? 'this quarter' : 'this month';
+
     var totalApproved = 0;
-    var lines = [':bar_chart: *Reporting — '+periodLabel+'*'+filterStr, ''];
+    var lines = ['Editing Report - ' + periodLabel, ''];
     camps.forEach(function(c) {
       var allAssets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category||'')===category; });
@@ -10426,13 +10428,14 @@ var App = {
       var total = active.length;
       var pct = total > 0 ? Math.round(approvedAllTime/total*100) : 0;
       totalApproved += approvedInPeriod;
-      var bar = (function() { var f=Math.round(pct/10); return '█'.repeat(f)+'░'.repeat(10-f); })();
-      lines.push('*'+c.name+'* _('+c.country+')_');
-      lines.push('  '+approvedInPeriod+' approved this period · '+approvedAllTime+'/'+total+' all-time ('+pct+'%)');
-      lines.push('  `'+bar+'`');
+      var finishDate = '';
+      active.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
+      lines.push(c.name + ' - (' + c.country + ')');
+      lines.push('• ' + approvedInPeriod + ' approved ' + periodWord + ' · ' + approvedAllTime + '/' + total + ' total videos (' + pct + '%)');
+      if (finishDate) lines.push('• Will be finished on ' + formatDate(finishDate));
       lines.push('');
     });
-    lines.push('*Total approved this period: '+totalApproved+'* across '+camps.length+' campaign'+(camps.length!==1?'s':''));
+    lines.push('Total approved this period: ' + totalApproved + ' videos across ' + camps.length + ' campaign' + (camps.length !== 1 ? 's' : ''));
     copyToClipboard(lines.join('\n'), 'Slack message copied');
   },
 
