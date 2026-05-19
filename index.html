@@ -9184,13 +9184,17 @@ function postToThreadPreferred(thread, webhookUrl, msg) {
 function postToSlackThread(channel, threadTs, text) {
   var token = (STATE.slackBotToken || '').trim();
   if (!token) return Promise.resolve({ ok: false, body: 'no bot token configured' });
-  var body = JSON.stringify({ channel: channel, thread_ts: threadTs, text: text });
+  // Use form-encoded body with token in the payload (not Authorization header) so the
+  // request qualifies as a CORS simple request and skips the OPTIONS preflight — which
+  // is blocked in some browser/network environments. Slack's API supports this form.
+  var body = 'token=' + encodeURIComponent(token) +
+    '&channel=' + encodeURIComponent(channel) +
+    '&thread_ts=' + encodeURIComponent(threadTs) +
+    '&reply_broadcast=false' +
+    '&text=' + encodeURIComponent(text);
   return fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Authorization': 'Bearer ' + token
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body
   }).then(function(res) {
     return res.json().then(function(json) {
