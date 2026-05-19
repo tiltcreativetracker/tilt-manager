@@ -7911,6 +7911,7 @@ function handleItalyCSVUpload(input) {
     var liveCount = result.rows.filter(function(r){ return (r[ITALY_COL.ST_AD]||'').toLowerCase().includes('live'); }).length;
     var sparkCount = result.rows.filter(function(r){ return (r[ITALY_COL.SPARK]||'').trim(); }).length;
     var fvCount = result.rows.filter(function(r){ return (r[ITALY_COL.FV_QC]||r[ITALY_COL.FV_EDIT]||'').trim(); }).length;
+    var igCount = result.rows.filter(function(r){ return (r[ITALY_COL.IG]||'').trim(); }).length;
 
     var summaryHtml =
       '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">' +
@@ -7918,6 +7919,7 @@ function handleItalyCSVUpload(input) {
         (liveCount ? '<span style="font-size:11px;background:var(--green-bg);color:var(--green-text);padding:3px 8px;border-radius:4px;border:1px solid rgba(63,185,80,.3);">✓ ' + liveCount + ' Live → Approved</span>' : '') +
         (fvCount ? '<span style="font-size:11px;background:var(--bg3);color:var(--text2);padding:3px 8px;border-radius:4px;border:1px solid var(--border);">🎬 ' + fvCount + ' Final Videos</span>' : '') +
         (sparkCount ? '<span style="font-size:11px;background:var(--accent-dim);color:var(--accent2);padding:3px 8px;border-radius:4px;border:1px solid rgba(127,119,221,.3);">⚡ ' + sparkCount + ' Sparkcodes</span>' : '') +
+        (igCount ? '<span style="font-size:11px;background:var(--pink-bg);color:var(--pink-text);padding:3px 8px;border-radius:4px;border:1px solid rgba(244,192,209,.3);">📸 ' + igCount + ' IG Links</span>' : '') +
       '</div>';
 
     var tableHtml =
@@ -7994,6 +7996,7 @@ function executeItalyImport() {
     var editorName = (r[ITALY_COL.EDITOR] || '').trim();
     var fv = (r[ITALY_COL.FV_QC] || r[ITALY_COL.FV_EDIT] || '').trim();
     var spark = (r[ITALY_COL.SPARK] || '').trim();
+    var igLink = (r[ITALY_COL.IG] || '').trim();
     var pnRaw = parseInt(r[ITALY_COL.PN]) || 0;
 
     // Derive status
@@ -8007,6 +8010,7 @@ function executeItalyImport() {
       var changed = false;
       if (!existing.finalVideo && fv) { existing.finalVideo = fv; changed = true; }
       if (!existing.sparksCode && spark) { existing.sparksCode = spark; changed = true; }
+      if (!existing.igLink && igLink) { existing.igLink = igLink; changed = true; }
       if (changed) updated++;
       else skipped++;
     } else {
@@ -8015,6 +8019,7 @@ function executeItalyImport() {
       asset.category = category;
       asset.sparksCode = spark;
       asset.finalVideo = fv;
+      asset.igLink = igLink;
       asset.status = status;
       if (dateApproved) asset.dateApproved = dateApproved;
       STATE.assets.push(asset);
@@ -10440,12 +10445,12 @@ var App = {
       var finishDate = '';
       active.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
       var cat = c.category || 'Uncategorised';
-      lines.push('**' + cat + ' - ' + c.name + ' - (' + c.country + ')**');
+      lines.push('*' + cat + ' - ' + c.name + ' - (' + c.country + ')*');
       lines.push('• ' + approvedInPeriod + ' approved ' + periodWord + ' · ' + approvedAllTime + '/' + total + ' total videos (' + pct + '%)');
       if (finishDate) lines.push('• Will be finished on ' + formatDate(finishDate));
       lines.push('');
     });
-    lines.push('**Total approved this period:** ' + totalApproved + ' videos across ' + camps.length + ' campaign' + (camps.length !== 1 ? 's' : ''));
+    lines.push('*Total approved this period:* ' + totalApproved + ' videos across ' + camps.length + ' campaign' + (camps.length !== 1 ? 's' : ''));
     copyToClipboard(lines.join('\n'), 'Slack message copied');
   },
 
