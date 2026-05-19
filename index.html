@@ -9097,10 +9097,11 @@ function groupItemsByCountry(items) {
 function postToSlack(url, text, threadTs) {
   var payload = { text: text };
   if (threadTs) { payload.thread_ts = threadTs; payload.reply_broadcast = false; }
+  var formBody = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   return fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody
   }).then(function(res) {
     return res.text().then(function(body) {
       return { ok: res.status === 200 && body === 'ok', status: res.status, body: body };
@@ -9604,10 +9605,12 @@ function sendPendingBatch(editor, opts) {
       render();
     }).catch(function(err) {
       // CORS-blocked or file:// origin \u2014 fall back to blind no-cors send so the message at least reaches Slack.
+      var blindPayload = { text: msg };
+      if (useThread && thread) { blindPayload.thread_ts = thread.threadTs; blindPayload.reply_broadcast = false; }
       fetch(url, {
         method: 'POST', mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: msg })
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'payload=' + encodeURIComponent(JSON.stringify(blindPayload))
       }).then(function() {
         markSent('sent-blind');
         dualPostToSecondaryThreads(editor, windowItems, msg);
