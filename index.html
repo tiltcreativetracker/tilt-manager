@@ -12768,8 +12768,8 @@ bootApp = function() {
       window.__deepLinkApplied = true;
       var match = (location.hash || '').match(/^#campaign=([^&]+)(?:&asset=([^&]+))?/);
       if (match) {
-        var targetId = parseInt(match[1], 10);
-        var targetAssetId = match[2] ? parseInt(match[2], 10) : null;
+        var targetId = match[1];
+        var targetAssetId = match[2] || null;
         var targetCamp = findCampaignById(targetId);
         if (targetCamp) {
           STATE.activeSubCampaignId = targetCamp.id;
