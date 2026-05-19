@@ -1307,6 +1307,8 @@
   .report-view-toggle { display: flex; background: var(--bg3); border-radius: 7px; border: 1px solid var(--border); overflow: hidden; margin-left: auto; }
   .report-view-btn { padding: 5px 12px; font-family: inherit; font-size: 12px; font-weight: 500; background: transparent; color: var(--text2); border: none; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.12s; }
   .report-view-btn.active { background: var(--bg4); color: var(--text1); }
+  .report-slack-copy-btn { padding: 5px 12px; font-family: inherit; font-size: 12px; font-weight: 500; background: transparent; color: var(--text2); border: 1px solid var(--border2); border-radius: 6px; cursor: pointer; transition: all 0.12s; white-space: nowrap; }
+  .report-slack-copy-btn:hover { border-color: var(--green); color: var(--green-text); background: var(--green-bg); }
 
   .report-pace-wrap { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 13px 18px; margin-bottom: 20px; }
   .report-pace-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
@@ -1422,6 +1424,79 @@ var fbAuth = firebase.auth();
 var fbDb = firebase.firestore();
 fbAuth.useDeviceLanguage();
 fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+
+// Second Firebase app — Millie's Production Hub (tilt-hub project).
+// We write into her editingTasks collection so her Editing Calendar stays in sync.
+var _millieHubApp = firebase.initializeApp({
+  apiKey:            "AIzaSyAoRHJksz0es4lOdTGhZITzFMsXpKmlvFs",
+  authDomain:        "tilt-hub.firebaseapp.com",
+  projectId:         "tilt-hub",
+  storageBucket:     "tilt-hub.firebasestorage.app",
+  messagingSenderId: "515235019115",
+  appId:             "1:515235019115:web:21e483618e62830a1af42e"
+}, 'millie-hub');
+var _millieDb = _millieHubApp.firestore();
+
+var HubSync = {
+  _lastPushedIds: {},  // docId -> true, tracks what we've written so we can delete stale entries
+  _pushTimer: null,
+
+  schedulePush: function() {
+    if (HubSync._pushTimer) clearTimeout(HubSync._pushTimer);
+    HubSync._pushTimer = setTimeout(HubSync.push, 1000);
+  },
+
+  // Map a tracker asset status to Millie's status values.
+  _mapStatus: function(status) {
+    if (status === 'Approved') return 'complete';
+    if (status === 'For Review' || status === 'Category Head QC' || status === 'Category Head Approved') return 'review';
+    return 'in-progress';
+  },
+
+  push: function() {
+    HubSync._pushTimer = null;
+
+    // Build the set of tasks to push — only assets that have a date.
+    var tasks = {};
+    STATE.assets.forEach(function(a) {
+      var date = a.scheduledFor || a.estDelivery;
+      if (!date) return;
+      var camp = (typeof findCampaignById === 'function') ? findCampaignById(a.campaignId) : null;
+      var docId = 'tracker-' + String(a.id);
+      var month = date.substring(0, 7); // YYYY-MM
+      tasks[docId] = {
+        id:        docId,
+        title:     a.name || '',
+        editor:    a.editor || '',
+        project:   camp ? camp.name : '',
+        startDate: date,
+        endDate:   date,
+        status:    HubSync._mapStatus(a.status),
+        notes:     a.notes || '',
+        category:  a.category || (camp ? camp.country : ''),
+        month:     month
+      };
+    });
+
+    var staleIds = Object.keys(HubSync._lastPushedIds).filter(function(id) { return !tasks[id]; });
+    if (Object.keys(tasks).length === 0 && staleIds.length === 0) return;
+
+    var batch = _millieDb.batch();
+    Object.keys(tasks).forEach(function(docId) {
+      batch.set(_millieDb.collection('editingTasks').doc(docId), tasks[docId]);
+    });
+    staleIds.forEach(function(docId) {
+      batch.delete(_millieDb.collection('editingTasks').doc(docId));
+    });
+
+    batch.commit().then(function() {
+      HubSync._lastPushedIds = {};
+      Object.keys(tasks).forEach(function(id) { HubSync._lastPushedIds[id] = true; });
+    }).catch(function(err) {
+      console.warn('[HubSync] push failed:', err);
+    });
+  }
+};
 
 function showSigninOverlay(errorMsg) {
   var overlay = document.getElementById('signin-overlay');
@@ -1582,9 +1657,6 @@ var Fb = {
       nextAssetId: STATE.nextAssetId,
       nextCampaignId: STATE.nextCampaignId,
       nextBatchItemId: STATE.nextBatchItemId,
-      briefs: STATE.briefs || [],
-      nextBriefId: STATE.nextBriefId || 1,
-      briefsWebhookUrl: STATE.briefsWebhookUrl || '',
       qcDismissed: STATE.qcDismissed || {},
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
@@ -1863,6 +1935,7 @@ var Fb = {
         Fb._syncStatus = 'idle';
         Fb._updateSyncDom();
       }, 2500);
+      HubSync.schedulePush();
     }).catch(function(err) {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
@@ -2480,12 +2553,6 @@ var STATE = {
   nextCampaignId: 6,
   nextBatchItemId: 1,
 
-  // Brief intake submissions. Each entry: { id, subcampId, notionUrl, rawFileUrl,
-  // notes, submittedBy, submittedAt, acknowledged }. Persisted to Firestore.
-  briefs: [],
-  nextBriefId: 1,
-  // Slack webhook for brief-ready alerts. Falls back to global webhookUrl if blank.
-  briefsWebhookUrl: ''
 };
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -4538,11 +4605,10 @@ var TAB_DEFS = {
   log:              { label: 'Daily Log' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
-  briefs:           { label: 'Briefs', badge: true },
   reporting:        { label: 'Reporting' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'briefs', 'reporting', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'reporting', 'config'];
 
 // Role-based tab visibility. Editors see the day-to-day tabs; PMs add Notifications
 // and Scheduler so they can drive comms; Admins see everything including Automations
@@ -4551,8 +4617,8 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingC
 // the documents these tabs touch (config/app and the users collection).
 var ROLE_TAB_VISIBILITY = {
   editor: ['campaigns', 'today', 'editingCalendar', 'log'],
-  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'briefs', 'reporting'],
-  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'briefs', 'reporting', 'config']
+  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'reporting'],
+  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'reporting', 'config']
 };
 
 // Returns the list of tab IDs the given role is allowed to see. Unknown roles
@@ -4613,10 +4679,7 @@ function renderTopbar() {
   // guarded by pdragCheckClick so a dragging-then-releasing doesn't also switch tabs.
   var tabsHtml = order.map(function(tabId) {
     var def = TAB_DEFS[tabId];
-    var briefsPending = STATE.briefs.filter(function(b) { return !b.acknowledged; }).length;
-    var briefsBadge = briefsPending > 0 ? '<span class="tab-badge">' + briefsPending + '</span>' : '';
-    var badge = (def.badge && tabId === 'notifications') ? pendingBadge
-              : (def.badge && tabId === 'briefs') ? briefsBadge : '';
+    var badge = (def.badge && tabId === 'notifications') ? pendingBadge : '';
     return '<div class="tab-btn ' + (STATE.tab === tabId ? 'active' : '') +
       '" role="button" tabindex="0" data-tab-id="' + tabId + '"' +
       ' onmousedown="pdragStart(event, \'tab\', \'' + tabId + '\')"' +
@@ -4901,13 +4964,14 @@ function renderCampaignsView() {
   var hideCHQC = ['IT', 'ES', 'PL'].indexOf(camp.country) !== -1;
   var rows = '';
   if (filtered.length === 0) {
-    var baseColspan = hideLinkCols ? 13 : 15;
+    var baseColspan = hideLinkCols ? 14 : 16;
     rows = '<tr><td colspan="' + (baseColspan + (showSparksCode ? 1 : 0) - (hideCHQC ? 2 : 0)) + '"><div class="empty-state">No assets match your filters</div></td></tr>';
   } else {
     for (var i = 0; i < filtered.length; i++) {
       var a = filtered[i];
       rows +=
-        '<tr data-asset-id="' + a.id + '">' +
+        '<tr data-asset-id="' + a.id + '" draggable="true" ondragstart="App.videoDragStart(event,\'' + a.id + '\')" ondragover="App.videoDragOver(event)" ondrop="App.videoDrop(event,\'' + a.id + '\')" ondragend="App.videoDragEnd(event)">' +
+          '<td style="width:28px;padding:0 6px;cursor:grab"><span class="drag-handle" title="Drag to reorder">⠿</span></td>' +
           '<td><span class="pn">' + a.pn + '</span></td>' +
           '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + '</div></td>' +
           '<td>' + renderEditableCell(a, 'category') + '</td>' +
@@ -5054,7 +5118,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -6832,26 +6896,6 @@ function renderAutomationsView() {
     '</div>' +
 
     (function() {
-      var bwh = STATE.briefsWebhookUrl || '';
-      var bwhEsc = escapeHtml(bwh);
-      var bwhValid = webhookValid(bwh);
-      var bwhEmpty = !bwh;
-      var bwhDotClass = bwhValid ? 'ok' : (bwhEmpty ? '' : 'bad');
-      var bwhDotTitle = bwhValid
-        ? 'Valid webhook saved for brief alerts'
-        : (bwhEmpty ? 'No webhook — falls back to the global webhook above' : 'Saved value isn\'t a valid webhook URL');
-      return '<div class="auto-card">' +
-        '<div class="auto-header"><div class="auto-icon">✦</div><div><div class="auto-title">Slack Webhook — Brief Alerts</div><div class="auto-sub">pings this channel when a content lead submits a brief</div></div></div>' +
-        '<div class="auto-desc">When a brief is submitted via the <strong style="color:var(--text1);">Briefs</strong> tab, the tracker posts a Slack message to this webhook. Leave blank to fall back to the global webhook above.</div>' +
-        '<div class="webhook-row">' +
-          '<span class="webhook-status-dot ' + bwhDotClass + '" title="' + bwhDotTitle + '"></span>' +
-          '<input type="text" id="briefs-webhook-input" value="' + bwhEsc + '" placeholder="https://hooks.slack.com/services/...">' +
-          '<button class="save-btn" onclick="App.saveBriefsWebhook()">Save</button>' +
-        '</div>' +
-      '</div>';
-    })() +
-
-    (function() {
       // Category Head QC webhook \u2014 single URL for ALL category-head batches (Sneakers,
       // Bags, Apparel, etc.). When set, every CHQ batch routes here regardless of
       // category. When blank, falls back to the global webhook (04).
@@ -7981,85 +8025,6 @@ function executeItalyImport() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function renderBriefsView() {
-  var isAdmin = roleAtLeast('admin');
-  var isPm = roleAtLeast('pm');
-
-  // Submission form (visible to pm + admin)
-  var campOptions = STATE.campaigns.map(function(c) {
-    return '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</option>';
-  }).join('');
-
-  var formHtml =
-    '<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:22px 24px;max-width:580px;margin-bottom:28px;">' +
-      '<div style="font-size:15px;font-weight:700;color:var(--text1);margin-bottom:4px;letter-spacing:-0.2px;">Submit a Brief</div>' +
-      '<div style="font-size:12px;color:var(--text3);margin-bottom:18px;">Paste the Notion brief URL and raw file link so the team is notified.</div>' +
-      '<div style="display:flex;flex-direction:column;gap:12px;">' +
-        '<div>' +
-          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Notion Brief URL</label>' +
-          '<input id="brief-notion" type="url" placeholder="https://notion.so/..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;" />' +
-        '</div>' +
-        '<div>' +
-          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Raw File Link <span style="font-weight:400;color:var(--text3)">(Drive/Dropbox, etc.)</span></label>' +
-          '<input id="brief-rawfile" type="url" placeholder="https://drive.google.com/..." style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;" />' +
-        '</div>' +
-        '<div>' +
-          '<label style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:5px;">Notes <span style="font-weight:400;color:var(--text3)">(optional)</span></label>' +
-          '<textarea id="brief-notes" rows="3" placeholder="Seller Name - Categories" style="width:100%;padding:8px 10px;background:var(--bg3);color:var(--text1);border:1px solid var(--border2);border-radius:6px;font-family:inherit;font-size:13px;outline:none;resize:vertical;"></textarea>' +
-        '</div>' +
-        '<div style="display:flex;justify-content:flex-end;">' +
-          '<button onclick="App.submitBrief()" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:opacity 0.12s;" onmouseover="this.style.opacity=\'0.85\'" onmouseout="this.style.opacity=\'1\'">Submit brief</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-
-  // Submissions list (pm + admin can see; admin can acknowledge)
-  var listHtml = '';
-  if (isPm) {
-    var allBriefs = STATE.briefs.slice().sort(function(a, b) { return (b.submittedAt || 0) - (a.submittedAt || 0); });
-    if (allBriefs.length === 0) {
-      listHtml = '<div style="font-size:13px;color:var(--text3);padding:12px 0;">No briefs submitted yet.</div>';
-    } else {
-      listHtml = allBriefs.map(function(b) {
-        var ts = b.submittedAt ? new Date(b.submittedAt).toLocaleString() : '';
-        var ackBtn = isAdmin && !b.acknowledged
-          ? '<button onclick="App.acknowledgeBrief(\'' + b.id + '\')" style="padding:4px 12px;background:var(--green-bg);color:var(--green-text);border:1px solid rgba(29,158,117,0.3);border-radius:5px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Mark seen</button>'
-          : '';
-        var clearBtn = isAdmin
-          ? '<button onclick="App.clearBrief(\'' + b.id + '\')" style="padding:4px 12px;background:transparent;color:var(--text3);border:1px solid var(--border2);border-radius:5px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;" onmouseover="this.style.color=\'var(--red-text)\';this.style.borderColor=\'var(--red-text)\'" onmouseout="this.style.color=\'var(--text3)\';this.style.borderColor=\'var(--border2)\'">Clear</button>'
-          : '';
-        var seenChip = b.acknowledged
-          ? '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">seen</span>'
-          : '<span style="font-size:11px;font-weight:700;color:var(--amber-text);font-family:\'JetBrains Mono\',monospace;">new</span>';
-        return '<div style="background:var(--bg2);border:1px solid ' + (b.acknowledged ? 'var(--border)' : 'var(--border2)') + ';border-radius:8px;padding:14px 16px;margin-bottom:10px;">' +
-          '<div style="display:flex;align-items:flex-start;gap:10px;">' +
-            '<div style="flex:1;min-width:0;">' +
-              '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
-                seenChip +
-                '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + escapeHtml(b.submittedBy || '') + ' · ' + ts + '</span>' +
-              '</div>' +
-              '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:' + (b.notes ? '8' : '0') + 'px;">' +
-                (b.notionUrl ? '<a href="' + escapeHtml(b.notionUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--blue-bg);color:var(--blue-text);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Brief ↗</a><button onclick="copyToClipboard(\'' + escapeHtml(b.notionUrl).replace(/'/g,'\\x27') + '\',\'Brief URL copied\')" title="Copy Brief URL" style="display:inline-flex;align-items:center;justify-content:center;padding:3px 7px;background:var(--blue-bg);color:var(--blue-text);border:none;border-radius:5px;font-size:12px;cursor:pointer;opacity:0.75;" onmouseover="this.style.opacity=\'1\'" onmouseout="this.style.opacity=\'0.75\'">⎘</button>' : '') +
-                (b.rawFileUrl ? '<a href="' + escapeHtml(b.rawFileUrl) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--bg4);color:var(--text2);border-radius:5px;font-size:12px;font-weight:500;text-decoration:none;">Raw files ↗</a><button onclick="copyToClipboard(\'' + escapeHtml(b.rawFileUrl).replace(/'/g,'\\x27') + '\',\'Raw files URL copied\')" title="Copy Raw files URL" style="display:inline-flex;align-items:center;justify-content:center;padding:3px 7px;background:var(--bg4);color:var(--text2);border:none;border-radius:5px;font-size:12px;cursor:pointer;opacity:0.75;" onmouseover="this.style.opacity=\'1\'" onmouseout="this.style.opacity=\'0.75\'">⎘</button>' : '') +
-              '</div>' +
-              (b.notes ? '<div style="font-size:12px;color:var(--text2);line-height:1.5;">' + escapeHtml(b.notes) + '</div>' : '') +
-            '</div>' +
-            ((ackBtn || clearBtn) ? '<div style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' + ackBtn + clearBtn + '</div>' : '') +
-          '</div>' +
-        '</div>';
-      }).join('');
-    }
-  }
-
-  return '<div class="content-area" style="padding:24px 28px;overflow-y:auto;">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">' +
-      '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);">Briefs</div>' +
-      '<button onclick="App.copyBriefTabLink()" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:5px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;" onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\'var(--bg3)\'" title="Copy a direct link to this tab">🔗 Copy link</button>' +
-    '</div>' +
-    formHtml +
-    (isPm ? '<div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text3);margin-bottom:12px;">Submitted briefs</div>' + listHtml : '') +
-  '</div>';
-}
 
 function renderReportingView() {
   // ── read/default UI state ──
@@ -8478,6 +8443,8 @@ function renderReportingView() {
         '<button class="report-view-btn' + (view === 'table' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'table\')">' + tableIcon + ' Table</button>' +
         '<button class="report-view-btn' + (view === 'kanban' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'kanban\')">' + kanbanIcon + ' Kanban</button>' +
       '</div>' +
+      '<div class="report-ctrl-divider"></div>' +
+      '<button class="report-slack-copy-btn" onclick="App.copyReportingSlack()" title="Copy a Slack-formatted summary of this report to clipboard">📋 Copy for Slack</button>' +
     '</div>';
 
   var mainContent = view === 'kanban' ? kanbanHtml() : tableHtml();
@@ -9911,7 +9878,6 @@ function render() {
   else if (STATE.tab === 'log') body = renderDailyLogView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
-  else if (STATE.tab === 'briefs') body = renderBriefsView();
   else if (STATE.tab === 'reporting') body = renderReportingView();
   else body = renderConfigView();
   document.getElementById('app').innerHTML = renderTopbar() + '<div class="main">' + body + '</div>';
@@ -10345,59 +10311,129 @@ var App = {
   deleteAsset: deleteAsset,
   duplicateAsset: duplicateAsset,
 
-  submitBrief: function() {
-    var notionUrl = ((document.getElementById('brief-notion') || {}).value || '').trim();
-    var rawFileUrl = ((document.getElementById('brief-rawfile') || {}).value || '').trim();
-    var notes = ((document.getElementById('brief-notes') || {}).value || '').trim();
-    if (!notionUrl) { toast('Please paste the Notion brief URL.', 'error'); return; }
-    var submittedBy = (Auth && Auth.user && Auth.user.displayName) ? Auth.user.displayName : (Auth && Auth.user && Auth.user.email) ? Auth.user.email : 'Unknown';
-    var entry = {
-      id: 'b' + (STATE.nextBriefId || 1),
-      notionUrl: notionUrl,
-      rawFileUrl: rawFileUrl,
-      notes: notes,
-      submittedBy: submittedBy,
-      submittedAt: Date.now(),
-      acknowledged: false
-    };
-    STATE.briefs = (STATE.briefs || []).concat([entry]);
-    STATE.nextBriefId = (STATE.nextBriefId || 1) + 1;
-    var webhookUrl = STATE.briefsWebhookUrl || STATE.webhookUrl;
-    saveState();
-    render();
-    if (webhookValid(webhookUrl)) {
-      var msg = ':memo: *Campaign ready*\n' +
-        'Submitted by ' + submittedBy + '\n' +
-        (notionUrl ? 'Brief: <' + notionUrl + '|Open in Notion>' : '') +
-        (rawFileUrl ? '  ·  Raw files: <' + rawFileUrl + '|Open files>' : '') +
-        (notes ? '\n' + notes : '');
-      postToSlack(webhookUrl, msg).then(function(r) {
-        if (r.ok) {
-          toast('Brief submitted — Slack notified!', 'success');
-        } else {
-          toast('Brief saved, but Slack notification failed (' + r.status + '). Check your webhook in Automations.', 'error');
-        }
-      }).catch(function() {
-        toast('Brief saved, but could not reach Slack. Check your webhook in Automations.', 'error');
-      });
-    } else {
-      toast('Brief submitted!', 'success');
+  // --- Video row drag-to-reorder ---
+  _videoDragId: null,
+  videoDragStart: function(event, id) {
+    App._videoDragId = id;
+    event.dataTransfer.effectAllowed = 'move';
+    event.target.closest('tr').classList.add('dragging');
+  },
+  videoDragOver: function(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    var tr = event.target.closest('tr');
+    if (tr) {
+      document.querySelectorAll('tr.drag-over-top, tr.drag-over-bottom').forEach(function(el) { el.classList.remove('drag-over-top','drag-over-bottom'); });
+      var rect = tr.getBoundingClientRect();
+      tr.classList.add(event.clientY < rect.top + rect.height / 2 ? 'drag-over-top' : 'drag-over-bottom');
     }
   },
-
-  acknowledgeBrief: function(id) {
-    STATE.briefs = (STATE.briefs || []).map(function(b) {
-      return b.id === id ? Object.assign({}, b, { acknowledged: true }) : b;
-    });
+  videoDrop: function(event, targetId) {
+    event.preventDefault();
+    var sourceId = App._videoDragId;
+    if (!sourceId || sourceId === targetId) return App.videoDragEnd(event);
+    var tr = event.target.closest('tr');
+    var insertBefore = tr && tr.classList.contains('drag-over-top');
+    App.videoDragEnd(event);
+    var camp = getActiveCampaign();
+    if (!camp) return;
+    var assets = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id); })
+                             .sort(function(a, b) { return a.pn - b.pn; });
+    var srcIdx = assets.findIndex(function(a) { return String(a.id) === String(sourceId); });
+    var tgtIdx = assets.findIndex(function(a) { return String(a.id) === String(targetId); });
+    if (srcIdx < 0 || tgtIdx < 0) return;
+    var moved = assets.splice(srcIdx, 1)[0];
+    var insertIdx = assets.findIndex(function(a) { return String(a.id) === String(targetId); });
+    if (!insertBefore) insertIdx++;
+    assets.splice(insertIdx, 0, moved);
+    assets.forEach(function(a, i) { a.pn = i + 1; });
     saveState();
     render();
   },
+  videoDragEnd: function(event) {
+    App._videoDragId = null;
+    document.querySelectorAll('tr.dragging, tr.drag-over-top, tr.drag-over-bottom').forEach(function(el) {
+      el.classList.remove('dragging','drag-over-top','drag-over-bottom');
+    });
+  },
 
-  clearBrief: function(id) {
-    STATE.briefs = (STATE.briefs || []).filter(function(b) { return b.id !== id; });
-    saveState();
-    render();
-    toast('Brief cleared', 'success');
+  // --- Reporting Slack copy ---
+  copyReportingSlack: function() {
+    var period  = STATE.reportingPeriod  || 'monthly';
+    var country = STATE.reportingCountry || 'all';
+    var type    = STATE.reportingType    || 'all';
+    var category = STATE.reportingCategory || 'all';
+    var now = new Date();
+    var cy = now.getFullYear(), cm = now.getMonth();
+    var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    function isoDate(d) { var mm=d.getMonth()+1,dd=d.getDate(); return d.getFullYear()+'-'+(mm<10?'0':'')+mm+'-'+(dd<10?'0':'')+dd; }
+
+    var range, periodLabel;
+    if (period === 'weekly') {
+      var weekOffset = typeof STATE.reportingWeekOffset === 'number' ? STATE.reportingWeekOffset : 0;
+      var dow = now.getDay(), daysToMon = dow===0?-6:1-dow;
+      var monday = new Date(now); monday.setDate(now.getDate()+daysToMon+weekOffset*7);
+      var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+      range = { start: isoDate(monday), end: isoDate(sunday) };
+      periodLabel = (weekOffset===0?'This week':weekOffset===-1?'Last week':Math.abs(weekOffset)+' weeks ago')+' ('+isoDate(monday).slice(5)+' – '+isoDate(sunday).slice(5)+')';
+    } else if (period === 'quarterly') {
+      var selQ = STATE.reportingQuarter || (cy+'-Q'+(Math.floor(cm/3)+1));
+      var qYear=parseInt(selQ.slice(0,4)), qNum=parseInt(selQ.slice(6))-1;
+      var qStart=new Date(qYear,qNum*3,1), qEnd=new Date(qYear,qNum*3+3,0);
+      range = { start: isoDate(qStart), end: isoDate(qEnd) };
+      periodLabel = selQ;
+    } else {
+      var selMonth = STATE.reportingMonth || (cy+'-'+(cm<9?'0':'')+(cm+1));
+      var mYear=parseInt(selMonth.slice(0,4)), mMon=parseInt(selMonth.slice(5,7))-1;
+      range = getMonthRange(mYear, mMon);
+      periodLabel = MONTH_LONG[mMon]+' '+mYear;
+    }
+
+    var filterParts = [];
+    if (country !== 'all') filterParts.push(country);
+    if (type !== 'all') filterParts.push(type);
+    if (category !== 'all') filterParts.push(category);
+    var filterStr = filterParts.length ? ' · '+filterParts.join(' · ') : '';
+
+    var camps = STATE.campaigns.filter(function(c) {
+      if (country !== 'all' && c.country !== country) return false;
+      if (type !== 'all' && (c.type||'Paid Ads') !== type) return false;
+      return true;
+    });
+
+    function assetInRange(a) {
+      var d = a.dateApproved || a.estDelivery || '';
+      return d >= range.start && d <= range.end;
+    }
+
+    camps = camps.filter(function(c) {
+      var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
+      return assets.some(assetInRange);
+    });
+
+    if (!camps.length) { copyToClipboard('No campaigns match current filters.', 'Copied'); return; }
+
+    var totalApproved = 0;
+    var lines = [':bar_chart: *Reporting — '+periodLabel+'*'+filterStr, ''];
+    camps.forEach(function(c) {
+      var allAssets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category||'')===category; });
+      var active = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
+      var approvedInPeriod = active.filter(function(a) { return assetInRange(a) && (a.status==='Approved'); }).length;
+      var approvedAllTime = active.filter(function(a) { return a.status==='Approved'; }).length;
+      var total = active.length;
+      var pct = total > 0 ? Math.round(approvedAllTime/total*100) : 0;
+      totalApproved += approvedInPeriod;
+      var bar = (function() { var f=Math.round(pct/10); return '█'.repeat(f)+'░'.repeat(10-f); })();
+      lines.push('*'+c.name+'* _('+c.country+')_');
+      lines.push('  '+approvedInPeriod+' approved this period · '+approvedAllTime+'/'+total+' all-time ('+pct+'%)');
+      lines.push('  `'+bar+'`');
+      lines.push('');
+    });
+    lines.push('*Total approved this period: '+totalApproved+'* across '+camps.length+' campaign'+(camps.length!==1?'s':''));
+    copyToClipboard(lines.join('\n'), 'Slack message copied');
   },
 
   // --- Topbar tab drag-to-reorder ---
@@ -11198,11 +11234,6 @@ var App = {
   // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
   // hash (#campaign=N) so it doesn't collide with Firebase auth's query-string redirects.
   // Boot logic in attachAuthListener parses this and selects the campaign on load.
-  copyBriefTabLink: function() {
-    var url = location.origin + location.pathname + '#tab=briefs';
-    copyToClipboard(url, 'Briefs link copied');
-  },
-
   copyCampaignLink: function(campaignId) {
     var camp = findCampaignById(campaignId);
     if (!camp) return;
@@ -11639,14 +11670,6 @@ var App = {
         logAction('updated', 'Global Slack webhook updated');
       }
       toast('Webhook URL saved', 'success');
-    }
-  },
-  saveBriefsWebhook: function() {
-    var input = document.getElementById('briefs-webhook-input');
-    if (input) {
-      STATE.briefsWebhookUrl = input.value.trim();
-      saveState();
-      toast('Briefs webhook saved', 'success');
     }
   },
   testWebhook: testWebhookPing,
@@ -12504,12 +12527,6 @@ bootApp = function() {
     // and expands its country). Guard ensures this runs only once per session.
     if (!window.__deepLinkApplied) {
       window.__deepLinkApplied = true;
-      if ((location.hash || '') === '#tab=briefs') {
-        STATE.tab = 'briefs';
-        if (typeof saveState === 'function') saveState();
-        render();
-        setTimeout(function() { if (typeof toast === 'function') toast('Opened Briefs tab from link', 'success'); }, 400);
-      }
       var match = (location.hash || '').match(/^#campaign=([^&]+)(?:&asset=([^&]+))?/);
       if (match) {
         var targetId = parseInt(match[1], 10);
