@@ -3160,6 +3160,12 @@ var EDITABLE_FIELDS = {
     value: function(a) { return a.sparksCode || ''; },
     appMethod: 'setAssetSparksCode'
   },
+  igLink: {
+    kind: 'url',
+    linkLabel: 'IG',
+    value: function(a) { return a.igLink || ''; },
+    appMethod: 'setAssetIgLink'
+  },
   qc: {
     kind: 'select',
     options: function() { return QC_VALUES; },
@@ -4961,6 +4967,7 @@ function renderCampaignsView() {
   // BOTH the <thead> below and each row, and the empty-state colspan adjusts.
   var hideLinkCols = !!camp.hideAssetLinkCols;
   var showSparksCode = ['IT', 'ES', 'PL'].indexOf(camp.country) !== -1;
+  var showIgLink = camp.country === 'IT';
   var hideCHQC = ['IT', 'ES', 'PL'].indexOf(camp.country) !== -1;
   var rows = '';
   if (filtered.length === 0) {
@@ -4982,6 +4989,7 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'editor') + '</td>' +
           '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
           (showSparksCode ? '<td>' + renderEditableCell(a, 'sparksCode') + '</td>' : '') +
+          (showIgLink ? '<td class="link-cell">' + renderEditableCell(a, 'igLink') + '</td>' : '') +
           '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
           '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
           '<td>' + renderEditableCell(a, 'qc') + '</td>' +
@@ -5118,7 +5126,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -10376,7 +10384,8 @@ var App = {
       var monday = new Date(now); monday.setDate(now.getDate()+daysToMon+weekOffset*7);
       var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
       range = { start: isoDate(monday), end: isoDate(sunday) };
-      periodLabel = (weekOffset===0?'This week':weekOffset===-1?'Last week':Math.abs(weekOffset)+' weeks ago')+' ('+isoDate(monday).slice(5)+' – '+isoDate(sunday).slice(5)+')';
+      var wLabel = weekOffset===0?'This week':weekOffset===-1?'Last week':Math.abs(weekOffset)+' weeks ago';
+      periodLabel = wLabel+' ('+isoDate(monday).slice(5)+' – '+isoDate(sunday).slice(5)+')';
     } else if (period === 'quarterly') {
       var selQ = STATE.reportingQuarter || (cy+'-Q'+(Math.floor(cm/3)+1));
       var qYear=parseInt(selQ.slice(0,4)), qNum=parseInt(selQ.slice(6))-1;
@@ -10430,12 +10439,13 @@ var App = {
       totalApproved += approvedInPeriod;
       var finishDate = '';
       active.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
-      lines.push(c.name + ' - (' + c.country + ')');
+      var cat = c.category || 'Uncategorised';
+      lines.push('**' + cat + ' - ' + c.name + ' - (' + c.country + ')**');
       lines.push('• ' + approvedInPeriod + ' approved ' + periodWord + ' · ' + approvedAllTime + '/' + total + ' total videos (' + pct + '%)');
       if (finishDate) lines.push('• Will be finished on ' + formatDate(finishDate));
       lines.push('');
     });
-    lines.push('Total approved this period: ' + totalApproved + ' videos across ' + camps.length + ' campaign' + (camps.length !== 1 ? 's' : ''));
+    lines.push('**Total approved this period:** ' + totalApproved + ' videos across ' + camps.length + ' campaign' + (camps.length !== 1 ? 's' : ''));
     copyToClipboard(lines.join('\n'), 'Slack message copied');
   },
 
@@ -10816,6 +10826,23 @@ var App = {
     recordUndo(a, ['finalVideo'], 'final video link');
     a.finalVideo = trimmed;
     logAction('updated', 'Asset "' + a.name + '" final video \u2192 ' + (trimmed ? 'updated' : 'cleared'));
+    render();
+  },
+
+  setAssetIgLink: function(id, newUrl) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var trimmed = String(newUrl || '').trim();
+    if (a.igLink === trimmed) { render(); return; }
+    if (trimmed && !extractSingleUrl(trimmed)) {
+      toast('IG link must be a URL (or leave empty)', 'error');
+      EditState.assetId = id; EditState.field = 'igLink';
+      render();
+      return;
+    }
+    recordUndo(a, ['igLink'], 'IG link');
+    a.igLink = trimmed;
+    logAction('updated', 'Asset "' + a.name + '" IG link → ' + (trimmed ? 'updated' : 'cleared'));
     render();
   },
 
