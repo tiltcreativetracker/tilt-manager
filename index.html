@@ -1648,6 +1648,8 @@ var Fb = {
       dailyThreadHistory: STATE.dailyThreadHistory,
       catHeadDailyThreads: STATE.catHeadDailyThreads,
       catHeadDailyThreadHistory: STATE.catHeadDailyThreadHistory,
+      intlDailyThread: STATE.intlDailyThread,
+      intlDailyThreadHistory: STATE.intlDailyThreadHistory,
       countries: STATE.countries,
       categories: STATE.categories,
       campaigns: STATE.campaigns,
@@ -2491,6 +2493,10 @@ var STATE = {
   // for that category post as replies in the thread when set; otherwise webhook.
   catHeadDailyThreads: {},
   catHeadDailyThreadHistory: {},
+  // Single shared daily thread for all international (non-UK) videos. Same
+  // shape as per-editor threads: { date, url, channelId, threadTs }.
+  intlDailyThread: null,
+  intlDailyThreadHistory: [],
   schedulerDate: todayISO(),
   schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
@@ -6831,6 +6837,40 @@ function renderAutomationsView() {
     '</div>';
   }
 
+  function renderIntlDailyThreadCard() {
+    var today = todayISO();
+    var t = STATE.intlDailyThread || null;
+    var url = t ? t.url : '';
+    var dot = '', dotTitle = 'No thread set — falls back to webhook';
+    if (t) {
+      if (t.date === today) { dot = 'ok'; dotTitle = 'Thread set for today'; }
+      else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at midnight'; }
+    }
+    var hist = STATE.intlDailyThreadHistory || [];
+    var histHtml = hist.length === 0 ? '' :
+      '<div style="font-size:11px; color:var(--text3); margin-top:4px;">Recent: ' +
+      hist.slice(0, 3).map(function(h) {
+        return '<a href="' + escapeHtml(h.url) + '" target="_blank" style="color:var(--text3);">' + h.date + '</a>';
+      }).join(' · ') + '</div>';
+    var row = '<div style="margin-top:10px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+        '<span style="font-weight:600;font-size:13px;color:var(--text1);">International</span>' +
+        '<span style="font-size:12px;color:var(--text3);">IT · ES · PL · US</span>' +
+        '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '" style="margin-left:auto;"></span>' +
+      '</div>' +
+      '<div class="webhook-row">' +
+        '<input type="text" id="intl-thread-input" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx" style="flex:1;">' +
+        '<button class="save-btn" onclick="App.saveIntlDailyThread()">Set</button>' +
+        (t ? '<button class="edit-btn" onclick="App.clearIntlDailyThread()" style="margin-left:4px;">Clear</button>' : '') +
+      '</div>' + histHtml +
+    '</div>';
+    return '<div class="auto-card">' +
+      '<div class="auto-header"><div class="auto-icon">🌍</div><div><div class="auto-title">Daily Slack thread (International)</div><div class="auto-sub">paste today\'s thread URL — intl video notifications post as replies</div></div></div>' +
+      '<div class="auto-desc">One shared thread for all international (IT, ES, PL, US) video notifications. When set, any editor batch containing only international videos posts as a reply here instead of using the country webhook. Resets at local midnight.</div>' +
+      row +
+    '</div>';
+  }
+
   function renderCatHeadThreadCard() {
     var today = todayISO();
     var cats = Object.keys(CATEGORY_HEADS);
@@ -6874,6 +6914,7 @@ function renderAutomationsView() {
     '<div class="section-title">Automations</div>' +
 
     renderDailyThreadCard() +
+    renderIntlDailyThreadCard() +
     renderCatHeadThreadCard() +
 
     '<div class="auto-card">' +
@@ -9091,6 +9132,24 @@ function resolveDailyThreadForCategory(category) {
   return t;
 }
 
+// International country codes — videos from these campaigns share the intl thread.
+var INTL_COUNTRIES = ['IT', 'ES', 'PL', 'US'];
+
+// Returns the intl daily-thread IFF its date matches today and all items are
+// from international countries. Falls back to null so the caller uses the webhook.
+function resolveDailyThreadForIntl(items) {
+  var t = STATE.intlDailyThread;
+  if (!t) return null;
+  if (t.date !== todayISO()) return null;
+  if (!t.channelId || !t.threadTs) return null;
+  if (items && items.length > 0) {
+    for (var i = 0; i < items.length; i++) {
+      if (INTL_COUNTRIES.indexOf(items[i].country) < 0) return null;
+    }
+  }
+  return t;
+}
+
 // POST a Slack chat.postMessage as a thread reply. Requires slackBotToken with
 // chat:write scope. Returns { ok, body, status } the same shape as postToSlack
 // so the caller can handle uniformly.
@@ -9146,6 +9205,17 @@ function sweepStaleDailyThreads() {
       logAction('updated', 'Category head thread reset for ' + cat + ' (was ' + t.date + ')');
       changed = true;
     });
+  }
+  if (STATE.intlDailyThread) {
+    var ti = STATE.intlDailyThread;
+    if (ti.date !== today) {
+      if (!STATE.intlDailyThreadHistory) STATE.intlDailyThreadHistory = [];
+      STATE.intlDailyThreadHistory.unshift({ date: ti.date, url: ti.url });
+      while (STATE.intlDailyThreadHistory.length > 7) STATE.intlDailyThreadHistory.pop();
+      STATE.intlDailyThread = null;
+      logAction('updated', 'Intl daily thread reset (was ' + ti.date + ')');
+      changed = true;
+    }
   }
   return changed;
 }
@@ -9402,7 +9472,9 @@ function sendPendingBatch(editor, opts) {
   var extraItems = batch.items.slice(BATCH_SIZE_LIMIT);
   var countries = batchCountriesOf(windowItems);
   var userWantsNoSplit = !!STATE.noSplit[editor];
-  var shouldSplit = !isPmBatch && countries.length > 1 && !userWantsNoSplit;
+  // Don't split if the intl thread covers all items — they should go to one thread.
+  var intlThreadActive = !!(EDITORS.indexOf(editor) >= 0 && resolveDailyThreadForIntl(windowItems));
+  var shouldSplit = !isPmBatch && countries.length > 1 && !userWantsNoSplit && !intlThreadActive;
 
   if (shouldSplit) {
     return sendPendingBatchSplit(editor, windowItems, extraItems, opts);
@@ -9415,6 +9487,10 @@ function sendPendingBatch(editor, opts) {
   var thread = null;
   if (EDITORS.indexOf(editor) >= 0) {
     thread = resolveDailyThreadForEditor(editor);
+    // For all-international batches, prefer the shared intl thread over the
+    // per-editor thread (intl thread takes priority when set).
+    var intlThread = resolveDailyThreadForIntl(windowItems);
+    if (intlThread) thread = intlThread;
   } else if (typeof editor === 'string' && editor.indexOf('CHQ:') === 0) {
     var chqCategory = editor.slice(4);
     thread = resolveDailyThreadForCategory(chqCategory);
@@ -11822,6 +11898,45 @@ var App = {
     STATE.catHeadDailyThreads[cat] = null;
     saveState();
     logAction('updated', 'Cleared category head thread for ' + cat);
+    render();
+  },
+  saveIntlDailyThread: function() {
+    var input = document.getElementById('intl-thread-input');
+    if (!input) return;
+    var url = (input.value || '').trim();
+    if (!url) {
+      STATE.intlDailyThread = null;
+      saveState();
+      logAction('updated', 'Cleared intl daily thread');
+      toast('Cleared', 'success');
+      render();
+      return;
+    }
+    var parsed = parseSlackThreadUrl(url);
+    if (!parsed) {
+      toast('Not a valid Slack thread URL', 'error');
+      return;
+    }
+    STATE.intlDailyThread = {
+      date: todayISO(),
+      url: url,
+      channelId: parsed.channelId,
+      threadTs: parsed.threadTs
+    };
+    saveState();
+    logAction('updated', 'Intl daily thread set (channel ' + parsed.channelId + ')');
+    toast('✓ International thread set', 'success');
+    render();
+  },
+  clearIntlDailyThread: function() {
+    if (!STATE.intlDailyThread) return;
+    var t = STATE.intlDailyThread;
+    if (!STATE.intlDailyThreadHistory) STATE.intlDailyThreadHistory = [];
+    STATE.intlDailyThreadHistory.unshift({ date: t.date, url: t.url });
+    while (STATE.intlDailyThreadHistory.length > 7) STATE.intlDailyThreadHistory.pop();
+    STATE.intlDailyThread = null;
+    saveState();
+    logAction('updated', 'Cleared intl daily thread');
     render();
   },
   saveBotToken: function() {
