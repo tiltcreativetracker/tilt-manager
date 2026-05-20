@@ -2370,7 +2370,8 @@ var CATEGORY_HEADS = {
   'Y2K':                  'Nazy',
   'Jewellery':            'Nazy',
   'Health and Beauty':    'Nazy',
-  'Streetwear':           'Jacob'
+  'Streetwear':           'Jacob',
+  'Homewear':             'Jacob'
 };
 
 // Returns the assigned head's name for a given category name, or '' if none.
@@ -2473,7 +2474,7 @@ var STATE = {
   // when set, asset-change notifications mention the head so they get pinged.
   // Heads are derived from category via CATEGORY_HEADS; this map is keyed by
   // the head's display name (Anand, Hanyan, Nazy, Cristian).
-  categoryHeadSlackIds: { Anand: '', Hanyan: '', Nazy: '', Cristian: '' },
+  categoryHeadSlackIds: { Anand: '', Hanyan: '', Nazy: '', Cristian: '', Jacob: '' },
   // Slack member IDs per country PM — keyed by country code, values are the
   // PM's Slack member ID. When set, PM Review queue and Category Head QC
   // Approved messages @mention the PM so they get pinged. Names of the PMs
@@ -9103,7 +9104,7 @@ function groupItemsByCountry(items) {
 // Shared Slack sender. Returns a Promise that resolves { ok, body, status } or rejects on hard network failure.
 // Uses Slack's documented form-encoded mode so we can actually read the response.
 function postToSlack(url, text, threadTs) {
-  var payload = { text: text };
+  var payload = { text: text, unfurl_links: false, unfurl_media: false };
   if (threadTs) { payload.thread_ts = threadTs; payload.reply_broadcast = false; }
   var formBody = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   return fetch(url, {
@@ -9199,6 +9200,8 @@ function postToSlackThread(channel, threadTs, text) {
     '&channel=' + encodeURIComponent(channel) +
     '&thread_ts=' + encodeURIComponent(threadTs) +
     '&reply_broadcast=false' +
+    '&unfurl_links=false' +
+    '&unfurl_media=false' +
     '&text=' + encodeURIComponent(text);
   return fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
@@ -9361,7 +9364,7 @@ function sendDailyTally(triggerKind) {
         return;
       }
       if (!webhookValid(url)) return;
-      fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg })) })
+      fetch(url, { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg, unfurl_links: false, unfurl_media: false })) })
         .then(function() { logSent('blind'); }).catch(function() {});
     });
   });
@@ -9432,8 +9435,8 @@ function testWebhookPing() {
     // Network-level failure. Fall back to no-cors blind send so it still reaches Slack.
     fetch(url, {
       method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text })
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'payload=' + encodeURIComponent(JSON.stringify({ text: text, unfurl_links: false, unfurl_media: false }))
     }).then(function() {
       toast('Ping sent (could not read Slack\'s response \u2014 check the channel to confirm)', 'success');
       logAction('notified', 'Webhook test ping sent (blind, no-cors fallback)');
@@ -9608,6 +9611,7 @@ function sendPendingBatch(editor, opts) {
       markSent(useThread ? 'sent-thread' : 'sent-live');
       dualPostToSecondaryThreads(editor, windowItems, msg);
       clearInFlight();
+      if (typeof Fb !== 'undefined' && Fb.uploadNow) Fb.uploadNow();
       logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) ' + (useThread ? 'in daily thread' : 'live to Slack') + ' (confirmed)');
       toast('\u2713 Sent to Slack' + (useThread ? ' (thread)' : ''), 'success');
       render();
@@ -9624,11 +9628,12 @@ function sendPendingBatch(editor, opts) {
       fetch(url, {
         method: 'POST', mode: 'no-cors',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg }))
+        body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg, unfurl_links: false, unfurl_media: false }))
       }).then(function() {
         markSent('sent-blind');
         dualPostToSecondaryThreads(editor, windowItems, msg);
         clearInFlight();
+        if (typeof Fb !== 'undefined' && Fb.uploadNow) Fb.uploadNow();
         logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) blind (no confirmation)');
         toast('Sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
         render();
@@ -9666,8 +9671,8 @@ function sendOneGroup(editor, groupItems, countryLabel) {
     // CORS/file:// fallback: blind no-cors send
     return fetch(url, {
       method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: msg })
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'payload=' + encodeURIComponent(JSON.stringify({ text: msg, unfurl_links: false, unfurl_media: false }))
     }).then(function() {
       return { ok: true, reason: 'sent-blind', country: countryLabel, items: groupItems, msg: msg };
     }).catch(function(e2) {
@@ -9757,6 +9762,7 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
         toast(successLabels.length + ' sent \u2713 \u00B7 ' + failureLabels.length + ' failed (still queued: ' + failedItems.length + ' item(s))', 'error');
       }
       clearBatchInFlight(editor);
+      if (typeof Fb !== 'undefined' && Fb.uploadNow) Fb.uploadNow();
       render();
     }); // close Promise.all().then
   }); // close claimSendSlot().then
@@ -9786,8 +9792,8 @@ function resendSentNotification(idx) {
     // Same no-cors fallback as sendPendingBatch
     fetch(url, {
       method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: n.body })
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'payload=' + encodeURIComponent(JSON.stringify({ text: n.body, unfurl_links: false, unfurl_media: false }))
     }).then(function() {
       toast('Re-sent blind (couldn\'t read Slack\'s response \u2014 check the channel to confirm)', 'success');
       logAction('notified', n.editor + ' \u2014 re-sent blind (no confirmation)');
@@ -12105,7 +12111,7 @@ var App = {
       }
     }).catch(function() {
       // CORS-blocked \u2014 fall back to no-cors blind send
-      fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text }) })
+      fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'payload=' + encodeURIComponent(JSON.stringify({ text: text, unfurl_links: false, unfurl_media: false })) })
         .then(function() {
           toast(code + ' ping sent blind (could not read Slack\u2019s response \u2014 check the channel)', 'success');
           logAction('notified', code + ' webhook test ping sent (blind, no-cors fallback)');
