@@ -1456,26 +1456,57 @@ var HubSync = {
   push: function() {
     HubSync._pushTimer = null;
 
-    // Build the set of tasks to push — only assets that have a date.
-    var tasks = {};
+    // Group assets by campaign — one doc per campaign in Millie's app.
+    var campaigns = {};
     STATE.assets.forEach(function(a) {
       var date = a.scheduledFor || a.estDelivery;
       if (!date) return;
       var camp = (typeof findCampaignById === 'function') ? findCampaignById(a.campaignId) : null;
-      var docId = 'tracker-' + String(a.id);
-      var month = date.substring(0, 7); // YYYY-MM
-      tasks[docId] = {
-        id:        docId,
-        title:     a.name || '',
-        editor:    a.editor || '',
-        project:   camp ? camp.name : '',
-        startDate: date,
-        endDate:   date,
-        status:    HubSync._mapStatus(a.status),
-        notes:     a.notes || '',
-        category:  a.category || (camp ? camp.country : ''),
-        month:     month
-      };
+      var campId = a.campaignId || 'unknown';
+      var docId = 'tracker-camp-' + String(campId);
+
+      if (!campaigns[docId]) {
+        campaigns[docId] = {
+          id:        docId,
+          title:     camp ? camp.name : (a.campaign || 'Unknown Campaign'),
+          project:   camp ? camp.name : '',
+          category:  camp ? camp.country : '',
+          startDate: date,
+          endDate:   date,
+          month:     date.substring(0, 7),
+          status:    HubSync._mapStatus(a.status),
+          editors:   {},
+          assetCount: 0,
+          assets:    []
+        };
+      }
+
+      var c = campaigns[docId];
+      // Expand date range to cover all assets in the campaign
+      if (date < c.startDate) c.startDate = date;
+      if (date > c.endDate)   c.endDate   = date;
+      // Use earliest month
+      if (date.substring(0, 7) < c.month) c.month = date.substring(0, 7);
+      // Bubble up status: in-progress > review > complete
+      var s = HubSync._mapStatus(a.status);
+      if (s === 'in-progress') c.status = 'in-progress';
+      else if (s === 'review' && c.status !== 'in-progress') c.status = 'review';
+      // Collect editors
+      if (a.editor) c.editors[a.editor] = true;
+      c.assetCount++;
+      c.assets.push(a.name || '');
+    });
+
+    // Flatten editors list and tidy up before pushing
+    var tasks = {};
+    Object.keys(campaigns).forEach(function(docId) {
+      var c = campaigns[docId];
+      c.editor = Object.keys(c.editors).join(', ');
+      c.notes  = c.assetCount + ' asset' + (c.assetCount !== 1 ? 's' : '') + ': ' + c.assets.join(', ');
+      delete c.editors;
+      delete c.assets;
+      delete c.assetCount;
+      tasks[docId] = c;
     });
 
     var staleIds = Object.keys(HubSync._lastPushedIds).filter(function(id) { return !tasks[id]; });
@@ -1497,6 +1528,43 @@ var HubSync = {
     });
   }
 };
+
+// One-time migration: delete old per-asset docs (prefix "tracker-" but NOT "tracker-camp-")
+// left over from the previous per-video sync format. Runs once on load, guarded by localStorage.
+(function migrateHubLegacyDocs() {
+  var MIGRATION_KEY = 'hubsync_v2_cleanup_done';
+  if (localStorage.getItem(MIGRATION_KEY)) return;
+  _millieDb.collection('editingTasks')
+    .where(firebase.firestore.FieldPath.documentId(), '>=', 'tracker-')
+    .where(firebase.firestore.FieldPath.documentId(), '<', 'tracker.')
+    .get()
+    .then(function(snap) {
+      var toDelete = snap.docs.filter(function(doc) {
+        return !doc.id.startsWith('tracker-camp-');
+      });
+      if (toDelete.length === 0) {
+        localStorage.setItem(MIGRATION_KEY, '1');
+        return;
+      }
+      // Delete in batches of 500 (Firestore limit)
+      var chunks = [];
+      for (var i = 0; i < toDelete.length; i += 500) chunks.push(toDelete.slice(i, i + 500));
+      return chunks.reduce(function(p, chunk) {
+        return p.then(function() {
+          var batch = _millieDb.batch();
+          chunk.forEach(function(doc) { batch.delete(doc.ref); });
+          return batch.commit();
+        });
+      }, Promise.resolve()).then(function() {
+        console.log('[HubSync] Migrated: deleted ' + toDelete.length + ' legacy per-asset doc(s) from Millie\'s DB.');
+        localStorage.setItem(MIGRATION_KEY, '1');
+        HubSync.push(); // immediately push new campaign-grouped docs
+      });
+    })
+    .catch(function(err) {
+      console.warn('[HubSync] Migration cleanup failed:', err);
+    });
+})();
 
 function showSigninOverlay(errorMsg) {
   var overlay = document.getElementById('signin-overlay');
@@ -1610,6 +1678,8 @@ var Fb = {
   _lastUploadedAssets: {},  // map of assetId → JSON string, for subcollection diffing
   _assetsMigrated: false,   // true once legacy assets have been written to subcollection
   _firstSnapshot: true,     // first incoming snapshot triggers init/migration logic
+  _pendingAssetsData: null, // deferred assets snapshot waiting for local upload to complete
+  _assetsRetryTimer: null,  // timer handle for the assets deferral retry
   _unsub: null,             // unsubscribe handle for the state listener
   _ready: false,            // true once the first snapshot has been processed
   _syncStatus: 'idle',      // 'idle' | 'pending' | 'saving' | 'saved' | 'error'
@@ -1742,12 +1812,28 @@ var Fb = {
       // Copy known fields onto STATE. Skip metadata fields prefixed with `_` and any
       // per-user UI field (so a teammate's tab/campaign/expansion choices don't override
       // ours). This is a defense-in-depth pair with buildSnapshot's deliberate exclusion.
+      // Stale-writer guard for campaigns: nextCampaignId is a monotonically
+      // increasing counter bumped on every campaign creation. If the incoming
+      // snapshot has a lower nextCampaignId than what we already know about,
+      // the writer was behind — skip campaigns to avoid wiping campaigns that
+      // were added after that browser last synced. All other fields still apply.
+      var incomingCampId = (data.nextCampaignId !== undefined) ? Number(data.nextCampaignId) : 0;
+      var currentCampId  = (STATE.nextCampaignId !== undefined) ? Number(STATE.nextCampaignId) : 0;
+      var campaignsAreStale = incomingCampId > 0 && incomingCampId < currentCampId;
+
       Object.keys(data).forEach(function(k) {
         if (k === '_lastEditedAt' || k === '_lastEditedBy' || k === '_lastEditedByName') return;
         if (PER_USER_UI_FIELDS[k]) return;
+        if (campaignsAreStale && (k === 'campaigns' || k === 'nextCampaignId')) return;
 
         STATE[k] = data[k];
       });
+      // If we skipped stale campaigns, Firestore now has the wrong data. Push a
+      // correction upload so the next browser to load sees the correct campaigns.
+      // Deferred past the _suppressUpload window (cleared via setTimeout in finally).
+      if (campaignsAreStale) {
+        setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 50);
+      }
       // Legacy migration: if the main doc still has an assets array (old format),
       // seed STATE.assets from it and write them to the subcollection.
       if (Array.isArray(data.assets) && data.assets.length > 0 && !Fb._assetsMigrated) {
@@ -1931,6 +2017,12 @@ var Fb = {
         Fb._pendingSnapshotData = null;
         Fb._snapshotRetries = 0;
       }
+      // Discard deferred assets snapshot too — our fresh commit will trigger a new
+      // confirmed snapshot from Firestore that reflects the latest state.
+      if (Fb._pendingAssetsData) {
+        clearTimeout(Fb._assetsRetryTimer);
+        Fb._pendingAssetsData = null;
+      }
       Fb._syncStatus = 'saved';
       Fb._updateSyncDom();
       Fb._syncSavedTimer = setTimeout(function() {
@@ -1985,16 +2077,43 @@ var Fb = {
         return;
       }
 
-      Fb._suppressUpload = true;
-      STATE.assets = assets;
-      // Keep the diff map in sync so uploadNow doesn't re-write what we just received.
-      Fb._lastUploadedAssets = {};
-      assets.forEach(function(a) { Fb._lastUploadedAssets[String(a.id)] = JSON.stringify(a); });
-      if (typeof render === 'function' && Auth._booted) render();
-      setTimeout(function() { Fb._suppressUpload = false; }, 0);
+      // Defer while a local upload is pending. Applying remote assets now would
+      // overwrite local edits that are in the 600ms debounce window (not yet
+      // uploaded), silently discarding them. Retry after the upload clears.
+      if (Fb._uploadTimer) {
+        Fb._pendingAssetsData = assets;
+        clearTimeout(Fb._assetsRetryTimer);
+        Fb._assetsRetryTimer = setTimeout(Fb._retryPendingAssets, 700);
+        return;
+      }
+
+      Fb._applyAssets(assets);
     }, function(err) {
       console.warn('[Fb] assets listener error:', err);
     });
+  },
+
+  _retryPendingAssets: function() {
+    var assets = Fb._pendingAssetsData;
+    if (!assets) return;
+    if (Fb._uploadTimer) {
+      // Upload still in progress — keep waiting.
+      clearTimeout(Fb._assetsRetryTimer);
+      Fb._assetsRetryTimer = setTimeout(Fb._retryPendingAssets, 700);
+      return;
+    }
+    Fb._pendingAssetsData = null;
+    Fb._applyAssets(assets);
+  },
+
+  _applyAssets: function(assets) {
+    Fb._suppressUpload = true;
+    STATE.assets = assets;
+    // Keep the diff map in sync so uploadNow doesn't re-write what we just received.
+    Fb._lastUploadedAssets = {};
+    assets.forEach(function(a) { Fb._lastUploadedAssets[String(a.id)] = JSON.stringify(a); });
+    if (typeof render === 'function' && Auth._booted) render();
+    setTimeout(function() { Fb._suppressUpload = false; }, 0);
   },
 
   // One-time migration: batch-write all STATE.assets into the subcollection.
@@ -9544,7 +9663,8 @@ function sendPendingBatch(editor, opts) {
     var chqCategory = editor.slice(4);
     thread = resolveDailyThreadForCategory(chqCategory);
   }
-  var useThread = !!thread;
+  var token = (STATE.slackBotToken || '').trim();
+  var useThread = !!(thread && token);
 
   var url = resolveWebhookForEditor(editor, windowItems);
   if (!webhookValid(url)) {
