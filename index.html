@@ -1420,6 +1420,7 @@ var firebaseConfig = {
 var ALLOWED_EMAIL_DOMAIN = 'tilt.app';
 
 firebase.initializeApp(firebaseConfig);
+firebase.setLogLevel('error'); // suppress verbose SDK info/debug logs (backoff notices etc.)
 var fbAuth = firebase.auth();
 var fbDb = firebase.firestore();
 fbAuth.useDeviceLanguage();
@@ -2682,6 +2683,7 @@ var STATE = {
 };
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayUK() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); }
 
 // Returns { start, end } as YYYY-MM-DD ISO strings covering the current ISO week
 // (Monday \u2192 Sunday). Used by the This Week row on the Board tab to filter assets
@@ -6919,7 +6921,7 @@ function renderAutomationsView() {
   // Daily-thread + bot-token card. Shown above the legacy webhook cards because
   // it's the preferred delivery path now; webhooks are the fallback.
   function renderDailyThreadCard() {
-    var today = todayISO();
+    var today = todayUK();
     // Bot token no longer needed — thread replies now use the webhook with thread_ts.
     var rows = ['Zidni', 'Sharm', 'Patty'].map(function(ed) {
       var t = (STATE.dailyThreads && STATE.dailyThreads[ed]) || null;
@@ -6928,7 +6930,7 @@ function renderAutomationsView() {
       var dotTitle = 'No thread set — falls back to webhook';
       if (t) {
         if (t.date === today) { dot = 'ok'; dotTitle = 'Thread set for today'; }
-        else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at midnight'; }
+        else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at UK midnight'; }
       }
       var hist = (STATE.dailyThreadHistory && STATE.dailyThreadHistory[ed]) || [];
       var histHtml = hist.length === 0 ? '' :
@@ -6973,13 +6975,13 @@ function renderAutomationsView() {
   }
 
   function renderIntlDailyThreadCard() {
-    var today = todayISO();
+    var today = todayUK();
     var t = STATE.intlDailyThread || null;
     var url = t ? t.url : '';
     var dot = '', dotTitle = 'No thread set — falls back to webhook';
     if (t) {
       if (t.date === today) { dot = 'ok'; dotTitle = 'Thread set for today'; }
-      else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at midnight'; }
+      else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at UK midnight'; }
     }
     var hist = STATE.intlDailyThreadHistory || [];
     var histHtml = hist.length === 0 ? '' :
@@ -7007,7 +7009,7 @@ function renderAutomationsView() {
   }
 
   function renderCatHeadThreadCard() {
-    var today = todayISO();
+    var today = todayUK();
     var cats = Object.keys(CATEGORY_HEADS);
     var rows = cats.map(function(cat) {
       var head = CATEGORY_HEADS[cat];
@@ -9261,7 +9263,7 @@ function parseSlackThreadUrl(url) {
 function resolveDailyThreadForEditor(editor) {
   var t = STATE.dailyThreads && STATE.dailyThreads[editor];
   if (!t) return null;
-  if (t.date !== todayISO()) return null;
+  if (t.date !== todayUK()) return null;
   if (!t.channelId || !t.threadTs) return null;
   return t;
 }
@@ -9270,7 +9272,7 @@ function resolveDailyThreadForEditor(editor) {
 function resolveDailyThreadForCategory(category) {
   var t = STATE.catHeadDailyThreads && STATE.catHeadDailyThreads[category];
   if (!t) return null;
-  if (t.date !== todayISO()) return null;
+  if (t.date !== todayUK()) return null;
   if (!t.channelId || !t.threadTs) return null;
   return t;
 }
@@ -9283,7 +9285,7 @@ var INTL_COUNTRIES = ['IT', 'ES', 'PL', 'US'];
 function resolveDailyThreadForIntl(items) {
   var t = STATE.intlDailyThread;
   if (!t) return null;
-  if (t.date !== todayISO()) return null;
+  if (t.date !== todayUK()) return null;
   if (!t.channelId || !t.threadTs) return null;
   if (items && items.length > 0) {
     for (var i = 0; i < items.length; i++) {
@@ -9343,7 +9345,7 @@ function postToSlackThread(channel, threadTs, text) {
 // dailyThreadHistory (capped at 7 per editor) and clears the live slot. Returns
 // true if any change was made so the caller can persist.
 function sweepStaleDailyThreads() {
-  var today = todayISO();
+  var today = todayUK();
   var changed = false;
   if (!STATE.dailyThreads) return false;
   Object.keys(STATE.dailyThreads).forEach(function(editor) {
@@ -12027,7 +12029,7 @@ var App = {
       return;
     }
     STATE.dailyThreads[editor] = {
-      date: todayISO(),
+      date: todayUK(),
       url: url,
       channelId: parsed.channelId,
       threadTs: parsed.threadTs
@@ -12065,7 +12067,7 @@ var App = {
     }
     var parsed = parseSlackThreadUrl(url);
     if (!parsed) { toast('Not a valid Slack thread URL', 'error'); return; }
-    STATE.catHeadDailyThreads[cat] = { date: todayISO(), url: url, channelId: parsed.channelId, threadTs: parsed.threadTs };
+    STATE.catHeadDailyThreads[cat] = { date: todayUK(), url: url, channelId: parsed.channelId, threadTs: parsed.threadTs };
     saveState();
     logAction('updated', 'Category head thread set for ' + cat + ' (channel ' + parsed.channelId + ')');
     toast('✓ Thread set for ' + cat, 'success');
@@ -12101,7 +12103,7 @@ var App = {
       return;
     }
     STATE.intlDailyThread = {
-      date: todayISO(),
+      date: todayUK(),
       url: url,
       channelId: parsed.channelId,
       threadTs: parsed.threadTs
