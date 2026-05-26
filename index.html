@@ -2770,6 +2770,7 @@ function getAvailableTallyMonths() {
 function countVideosByMonthYear(monthKey, filterFn) {
   var n = 0;
   STATE.assets.forEach(function(a) {
+    if (a.status === 'Cancelled') return;
     var camp = findCampaignById(a.campaignId);
     if (!camp) return;
     if ((camp.monthYear || '') !== monthKey) return;
@@ -8897,7 +8898,7 @@ function renderContentView() {
       var assets = allActive.filter(function(a){ return String(a.campaignId) === String(camp.id); });
       var n = assets.length;
       if (!n) return '';
-      return '<tr style="border-bottom:1px solid var(--border2);">' +
+      return '<tr style="border-bottom:1px solid var(--border2);cursor:pointer;" onclick="App.selectCampaign(\'' + camp.id + '\'); App.setTab(\'campaigns\')" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' +
         '<td style="padding:10px 16px;font-size:13px;color:var(--text1);">' + escapeHtml(camp.name) + '</td>' +
         '<td style="padding:10px 16px;color:var(--text3);font-size:13px;">' + n + '</td>' +
         '<td style="padding:10px 16px;">' + pill(assets.filter(hasContent).length, n, 'var(--blue-bg)', 'var(--blue-text)') + '</td>' +
