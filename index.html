@@ -8386,16 +8386,34 @@ function renderReportingView() {
     var periodLabel = period === 'weekly' ? 'this week' : period === 'quarterly' ? 'this quarter' : 'this month';
     var periodLabelCap = period === 'weekly' ? 'This week' : period === 'quarterly' ? 'This quarter' : 'This month';
 
+    // Helper: count assets in range respecting the approval filter
+    var paceSimple = ['IT','ES','PL'];
+    function paceApprovedInRange(a, campaignCountry) {
+      if (approval === 'pm') {
+        return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
+      }
+      if (approval === 'pm_and_ch') {
+        if (paceSimple.indexOf(campaignCountry) >= 0) return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
+        return a.status === 'Approved' && a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
+      }
+      // 'all' — default country-based
+      if (paceSimple.indexOf(campaignCountry) >= 0) return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
+      return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
+    }
+
+    var paceApprovalLabel = approval === 'pm' ? 'PM-approved' : approval === 'pm_and_ch' ? 'PM + CH approved' : 'CH-approved';
+
     if (country === 'UK' && type === 'Paid Ads') {
       // UK Paid Media pace — compare against MONTHLY_APPROVAL_TARGET (pro-rated for weekly/quarterly)
+      // When approval filter is 'pm', we still show the pace bar but label it accordingly.
       var ukPaidApproved = STATE.assets.filter(function(a) {
-        if (a.categoryHeadQc !== 'Approved') return false;
-        if (!a.chDateApproved) return false;
-        if (a.chDateApproved < range.start || a.chDateApproved > range.end) return false;
         var c = findCampaignById(a.campaignId);
-        return c && c.country === 'UK' && (c.type || 'Paid Ads') === 'Paid Ads';
+        if (!c || c.country !== 'UK' || (c.type || 'Paid Ads') !== 'Paid Ads') return false;
+        return paceApprovedInRange(a, 'UK');
       }).length;
 
+      // Pace target is defined against CH approvals; only show pace pill when filter is default/ch
+      var showPace = approval === 'all' || approval === 'pm_and_ch';
       var ukTarget;
       if (period === 'monthly') {
         ukTarget = MONTHLY_APPROVAL_TARGET;
@@ -8403,7 +8421,6 @@ function renderReportingView() {
         var wWorkdays = countWorkdays(range.start, range.end);
         ukTarget = wWorkdays * DAILY_APPROVAL_TARGET;
       } else {
-        // quarterly: approximate as 3× monthly
         ukTarget = MONTHLY_APPROVAL_TARGET * 3;
       }
       var ukPct = ukTarget > 0 ? Math.min(100, Math.round(ukPaidApproved / ukTarget * 100)) : 0;
@@ -8416,46 +8433,38 @@ function renderReportingView() {
       return '<div class="report-pace-wrap">' +
         '<div class="report-pace-header">' +
           '<span class="report-pace-title">UK Paid Media · ' + periodLabelCap + '</span>' +
-          '<span class="report-pace-meta">' + ukPaidApproved + ' / ' + ukTarget + ' approved · ' +
-            '<span class="month-panel-pace ' + ukPace + '" style="font-size:11px;display:inline-flex;align-items:center;gap:4px;">' +
-              '<span class="pace-dot"></span>' + ukPaceLabel +
-            '</span>' +
+          '<span class="report-pace-meta">' + ukPaidApproved + (showPace ? ' / ' + ukTarget : '') + ' ' + paceApprovalLabel + ' · ' +
+            (showPace ? '<span class="month-panel-pace ' + ukPace + '" style="font-size:11px;display:inline-flex;align-items:center;gap:4px;"><span class="pace-dot"></span>' + ukPaceLabel + '</span>' : '') +
           '</span>' +
         '</div>' +
-        '<div class="report-pace-track"><div class="report-pace-fill" style="width:' + ukPct + '%;"></div></div>' +
+        '<div class="report-pace-track"><div class="report-pace-fill" style="width:' + (showPace ? ukPct : 0) + '%;"></div></div>' +
         '<div class="report-pace-markers">' +
           '<span class="report-pace-marker">0</span>' +
           '<span class="report-pace-marker">' + ukPct + '%</span>' +
-          '<span class="report-pace-marker">' + ukTarget + '</span>' +
+          (showPace ? '<span class="report-pace-marker">' + ukTarget + '</span>' : '') +
         '</div>' +
       '</div>';
     }
 
-    // Generic: count approved assets in range matching the current market/type filter
+    // Generic: count approved assets in range matching the current market/type/approval filter
     var filterLabel = (country !== 'all' ? country + ' ' : '') + (type !== 'all' ? type : (country !== 'all' ? '' : 'All markets'));
     if (type === 'Organic') filterLabel = (country !== 'all' ? country + ' ' : '') + 'Organic';
     if (type === 'all' && country === 'all') filterLabel = 'All campaigns';
 
-    var simpleCountries = ['IT', 'ES', 'PL'];
     var approvedCount = STATE.assets.filter(function(a) {
       var c = findCampaignById(a.campaignId);
       if (!c) return false;
       if (country !== 'all' && c.country !== country) return false;
       if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
-      if (simpleCountries.indexOf(c.country) >= 0) {
-        return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
-      }
-      return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
+      return paceApprovedInRange(a, c.country);
     }).length;
-
-    var approvedLabel = (country !== 'all' && simpleCountries.indexOf(country) >= 0) ? 'approved videos' : 'CH-approved videos';
 
     return '<div class="report-pace-wrap">' +
       '<div class="report-pace-header">' +
         '<span class="report-pace-title">' + escapeHtml(filterLabel) + ' · ' + periodLabelCap + '</span>' +
         '<span class="report-pace-meta" style="font-size:13px;font-weight:700;color:var(--text1);">' + approvedCount + '</span>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + approvedLabel + ' ' + periodLabel + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + paceApprovalLabel + ' videos ' + periodLabel + '</div>' +
     '</div>';
   })();
 
