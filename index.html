@@ -2484,13 +2484,13 @@ var COUNTRY_PMS = {
 var CATEGORY_HEADS = {
   'Sneakers':             'Anand',
   'TCG':                  'Hanyan',
-  'Stone Island':         'Nazy',
+  'Stone Island':         'Jacob',
   'Luxury':               'Cristian',
-  'Vintage':              'Nazy',
-  'Bags and Accessories': 'Nazy',
-  'Y2K':                  'Nazy',
-  'Jewellery':            'Nazy',
-  'Health and Beauty':    'Nazy',
+  'Vintage':              'Jacob',
+  'Bags and Accessories': 'Jacob',
+  'Y2K':                  'Jacob',
+  'Jewellery':            'Jacob',
+  'Health and Beauty':    'Jacob',
   'Streetwear':           'Jacob',
   'Mixed Deals':          'Anand'
 };
@@ -2594,8 +2594,8 @@ var STATE = {
   // Slack member IDs per category head. Same convention as editorSlackIds —
   // when set, asset-change notifications mention the head so they get pinged.
   // Heads are derived from category via CATEGORY_HEADS; this map is keyed by
-  // the head's display name (Anand, Hanyan, Nazy, Cristian).
-  categoryHeadSlackIds: { Anand: '', Hanyan: '', Nazy: '', Cristian: '', Jacob: '' },
+  // the head's display name (Anand, Hanyan, Jacob, Cristian).
+  categoryHeadSlackIds: { Anand: '', Hanyan: '', Jacob: '', Cristian: '' },
   // Slack member IDs per country PM — keyed by country code, values are the
   // PM's Slack member ID. When set, PM Review queue and Category Head QC
   // Approved messages @mention the PM so they get pinged. Names of the PMs
@@ -8389,7 +8389,7 @@ function renderReportingView() {
     // Helper: count assets in range respecting the approval filter
     var paceSimple = ['IT','ES','PL'];
     function paceApprovedInRange(a, campaignCountry) {
-      if (a.categoryHeadQc === 'Cancelled') return false; // CH-cancelled assets are excluded regardless of PM status
+      if (approval !== 'pm' && a.categoryHeadQc === 'Cancelled') return false; // CH-cancelled excluded except when viewing PM-only approvals
       if (approval === 'pm') {
         return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
       }
