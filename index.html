@@ -8521,8 +8521,9 @@ function renderReportingView() {
     var allAssets = campAssets(c.id);
     if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category || '') === category; });
     var activeAssets     = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
-    var total            = activeAssets.length;
-    var approvedInPeriod = activeAssets.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
+    var periodAssets     = activeAssets.filter(assetInRange);
+    var total            = periodAssets.length;
+    var approvedInPeriod = periodAssets.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
     var approvedAllTime  = activeAssets.filter(function(a) { return assetApprovedAllTime(a, c.country); }).length;
     var revisions        = activeAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
     var pct    = total > 0 ? Math.round(approvedAllTime / total * 100) : 0;
