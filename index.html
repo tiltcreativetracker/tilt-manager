@@ -2048,7 +2048,7 @@ var Fb = {
         }
         return;
       }
-      // For all other failures retry with exponential backoff (3s → 8s → 20s → 60s cap).
+      // For all other failures retry with exponential backoff (3s → 7.5s → 18.75s → 60s cap, ×2.5 each step).
       Fb._retryDelay = Math.min((Fb._retryDelay || 3000) * 2.5, 60000);
       Fb._syncStatus = 'retrying';
       Fb._updateSyncDom();
@@ -8389,6 +8389,7 @@ function renderReportingView() {
     // Helper: count assets in range respecting the approval filter
     var paceSimple = ['IT','ES','PL'];
     function paceApprovedInRange(a, campaignCountry) {
+      if (a.categoryHeadQc === 'Cancelled') return false; // CH-cancelled assets are excluded regardless of PM status
       if (approval === 'pm') {
         return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
       }
