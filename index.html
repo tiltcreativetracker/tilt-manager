@@ -8813,9 +8813,9 @@ function renderContentView() {
   // ── asset predicates ──
   // "Has content" = rawVideo link is set on the asset
   function hasContent(a) { return !!(a.rawVideo); }
-  // "Edited" = finalVideo set OR editing has started (status past Draft/Assigned)
+  // "Edited" = finalVideo link is set
   function isEdited(a) {
-    return !!(a.finalVideo) || ['In Progress','For Review','Needs Revisions','Approved'].indexOf(a.status) !== -1;
+    return !!(a.finalVideo);
   }
   // Asset is in-scope for the selected period.
   // Monthly: match campaign's monthYear field (same logic as the tally board).
