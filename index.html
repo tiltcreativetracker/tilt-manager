@@ -4742,9 +4742,10 @@ var TAB_DEFS = {
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
+  content:          { label: 'Content' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'reporting', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingCalendar', 'automations', 'reporting', 'content', 'config'];
 
 // Role-based tab visibility. Editors see the day-to-day tabs; PMs add Notifications
 // and Scheduler so they can drive comms; Admins see everything including Automations
@@ -4752,9 +4753,9 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'today', 'notifications', 'log', 'editingC
 // Tab visibility is also enforced server-side in Phase D via Firestore rules on
 // the documents these tabs touch (config/app and the users collection).
 var ROLE_TAB_VISIBILITY = {
-  editor: ['campaigns', 'today', 'editingCalendar', 'log'],
-  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'reporting'],
-  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'reporting', 'config']
+  editor: ['campaigns', 'today', 'editingCalendar', 'log', 'content'],
+  pm:     ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'reporting', 'content'],
+  admin:  ['campaigns', 'today', 'editingCalendar', 'log', 'notifications', 'automations', 'reporting', 'content', 'config']
 };
 
 // Returns the list of tab IDs the given role is allowed to see. Unknown roles
@@ -8746,6 +8747,146 @@ function renderReportingView() {
   return '<div class="report-panel">' + controls + paceHtml + mainContent + '</div>';
 }
 
+function renderContentView() {
+  var selectedCC = STATE.contentCountryFilter || 'all';
+  var countries = STATE.countries.map(function(c) { return c.code; });
+
+  var allActive = STATE.assets.filter(function(a) {
+    return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled';
+  });
+
+  // "Has content" = raw footage link (rawVideo field) is set on the asset
+  function hasContent(a) { return !!(a.rawVideo); }
+  // "Edited" = final video link is set, OR status shows editing has started/completed
+  function isEdited(a) {
+    return !!(a.finalVideo) || ['In Progress','For Review','Needs Revisions','Approved'].indexOf(a.status) !== -1;
+  }
+  // "Gone live" = placeholder (field TBD)
+  function isLive(a) { return false; }
+
+  function assetsForCountry(cc) {
+    if (cc === 'all') return allActive;
+    return allActive.filter(function(a) {
+      var camp = findCampaignById(a.campaignId);
+      return camp && camp.country === cc;
+    });
+  }
+
+  var scopedAssets = assetsForCountry(selectedCC);
+  var totalAll     = scopedAssets.length;
+  var totalContent = scopedAssets.filter(hasContent).length;
+  var totalEdited  = scopedAssets.filter(isEdited).length;
+
+  function statBar(value, total, color) {
+    if (!total) return '';
+    var pct = Math.round(value / total * 100);
+    return '<div style="background:#1e2130;border-radius:4px;height:6px;margin-top:6px;overflow:hidden;">' +
+      '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;transition:width .3s;"></div></div>';
+  }
+
+  function statCard(label, value, total, color, note) {
+    var pct = total ? Math.round(value / total * 100) : 0;
+    return '<div style="background:#161b2e;border:1px solid #2a3050;border-radius:10px;padding:20px 24px;min-width:180px;flex:1;">' +
+      '<div style="font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">' + label + '</div>' +
+      '<div style="font-size:36px;font-weight:700;color:#e6eaf4;line-height:1;">' + value + '</div>' +
+      '<div style="font-size:12px;color:#8892b0;margin-top:4px;">' + pct + '% of ' + total + ' active videos' + (note ? ' · ' + note : '') + '</div>' +
+      statBar(value, total, color) +
+      '</div>';
+  }
+
+  function pill(v, tot, color) {
+    var pct = tot ? Math.round(v/tot*100) : 0;
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:12px;background:' + color + '22;color:' + color + ';font-size:12px;font-weight:600;">' + v + ' <span style="font-weight:400;opacity:.7;">(' + pct + '%)</span></span>';
+  }
+
+  // Country filter buttons
+  var filterBtns = ['all'].concat(countries).map(function(cc) {
+    var active = cc === selectedCC;
+    var countryObj = STATE.countries.find(function(c){ return c.code === cc; }) || {};
+    var label = cc === 'all' ? 'All' : ((countryObj.flag || '') + ' ' + cc);
+    return '<button onclick="App.setContentFilter(\'' + cc + '\')" style="padding:5px 14px;border-radius:6px;border:1px solid ' + (active ? '#4fc3f7' : '#2a3050') + ';background:' + (active ? '#4fc3f722' : 'transparent') + ';color:' + (active ? '#4fc3f7' : '#8892b0') + ';font-size:13px;cursor:pointer;font-weight:' + (active ? '600' : '400') + ';">' + label + '</button>';
+  }).join('');
+
+  // Table: by country when "All", by campaign when a country is selected
+  var tableHtml;
+  if (selectedCC === 'all') {
+    var countryRows = countries.map(function(cc) {
+      var countryObj = STATE.countries.find(function(c){ return c.code === cc; }) || {};
+      var assets = assetsForCountry(cc);
+      var n = assets.length;
+      return '<tr style="border-bottom:1px solid #1e2130;">' +
+        '<td style="padding:10px 16px;font-size:14px;font-weight:600;color:#e6eaf4;">' + (countryObj.flag||'') + ' ' + cc + '</td>' +
+        '<td style="padding:10px 16px;color:#8892b0;font-size:13px;">' + n + '</td>' +
+        '<td style="padding:10px 16px;">' + pill(assets.filter(hasContent).length, n, '#4fc3f7') + '</td>' +
+        '<td style="padding:10px 16px;">' + pill(assets.filter(isEdited).length, n, '#81c784') + '</td>' +
+        '<td style="padding:10px 16px;color:#8892b0;font-size:12px;font-style:italic;">—</td>' +
+        '</tr>';
+    }).join('');
+    tableHtml = '<thead><tr style="background:#1a2040;border-bottom:1px solid #2a3050;">' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Country</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Total</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#4fc3f7;text-transform:uppercase;letter-spacing:.08em;">Has Content</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#81c784;text-transform:uppercase;letter-spacing:.08em;">Edited</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Gone Live</th>' +
+      '</tr></thead><tbody>' + countryRows + '</tbody>';
+  } else {
+    var campaigns = STATE.campaigns.filter(function(c){ return c.country === selectedCC; });
+    var campRows = campaigns.map(function(camp) {
+      var assets = allActive.filter(function(a){ return String(a.campaignId) === String(camp.id); });
+      var n = assets.length;
+      if (!n) return '';
+      return '<tr style="border-bottom:1px solid #1e2130;">' +
+        '<td style="padding:10px 16px;font-size:13px;color:#e6eaf4;">' + esc(camp.name) + '</td>' +
+        '<td style="padding:10px 16px;color:#8892b0;font-size:13px;">' + n + '</td>' +
+        '<td style="padding:10px 16px;">' + pill(assets.filter(hasContent).length, n, '#4fc3f7') + '</td>' +
+        '<td style="padding:10px 16px;">' + pill(assets.filter(isEdited).length, n, '#81c784') + '</td>' +
+        '<td style="padding:10px 16px;color:#8892b0;font-size:12px;font-style:italic;">—</td>' +
+        '</tr>';
+    }).join('');
+    tableHtml = '<thead><tr style="background:#1a2040;border-bottom:1px solid #2a3050;">' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Campaign</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Total</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#4fc3f7;text-transform:uppercase;letter-spacing:.08em;">Has Content</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#81c784;text-transform:uppercase;letter-spacing:.08em;">Edited</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Gone Live</th>' +
+      '</tr></thead><tbody>' + (campRows || '<tr><td colspan="5" style="padding:20px;color:#8892b0;text-align:center;">No campaigns for this country</td></tr>') + '</tbody>';
+  }
+
+  var subtitle = selectedCC === 'all'
+    ? 'All countries · non-cancelled videos only'
+    : ((STATE.countries.find(function(c){return c.code===selectedCC;})||{}).flag||'') + ' ' + selectedCC + ' · non-cancelled videos only';
+
+  return '<div style="padding:32px 40px;max-width:1000px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
+      '<div style="font-size:22px;font-weight:700;color:#e6eaf4;">Content Overview</div>' +
+    '</div>' +
+    '<div style="font-size:13px;color:#8892b0;margin-bottom:20px;">' + subtitle + '</div>' +
+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:28px;">' + filterBtns + '</div>' +
+
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:36px;">' +
+      statCard('Has Raw Content', totalContent, totalAll, '#4fc3f7', 'rawVideo link set') +
+      statCard('Edited', totalEdited, totalAll, '#81c784', 'finalVideo set or in progress') +
+      '<div style="background:#161b2e;border:1px solid #2a3050;border-radius:10px;padding:20px 24px;min-width:160px;flex:1;opacity:.45;">' +
+        '<div style="font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Gone Live</div>' +
+        '<div style="font-size:36px;font-weight:700;color:#e6eaf4;line-height:1;">—</div>' +
+        '<div style="font-size:12px;color:#8892b0;margin-top:4px;">coming soon</div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div style="background:#161b2e;border:1px solid #2a3050;border-radius:10px;overflow:hidden;">' +
+      '<table style="width:100%;border-collapse:collapse;">' + tableHtml + '</table>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderConfigView() {
+        '<tbody>' + countryRows + '</tbody>' +
+      '</table>' +
+    '</div>' +
+  '</div>';
+}
+
 function renderConfigView() {
   var counts = {};
   EDITORS.forEach(function(e) { counts[e] = STATE.assets.filter(function(a) { return a.editor === e; }).length; });
@@ -10248,6 +10389,7 @@ function render() {
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
   else if (STATE.tab === 'reporting') body = renderReportingView();
+  else if (STATE.tab === 'content') body = renderContentView();
   else body = renderConfigView();
   document.getElementById('app').innerHTML = renderTopbar() + '<div class="main">' + body + '</div>';
   // Context menu layer \u2014 empty if nothing is open; a positioned popup if ContextMenuState is set
@@ -10548,6 +10690,10 @@ var App = {
     if (key === 'category')   STATE.reportingCategory   = val;
     if (key === 'view')       STATE.reportingView       = val;
     if (key === 'approval')   STATE.reportingApproval   = val;
+    render();
+  },
+  setContentFilter: function(cc) {
+    STATE.contentCountryFilter = cc;
     render();
   },
   setLogEditor: function(name) {
