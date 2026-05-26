@@ -8748,21 +8748,83 @@ function renderReportingView() {
 }
 
 function renderContentView() {
+  var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  function isoDate(d) { var mm=d.getMonth()+1,dd=d.getDate(); return d.getFullYear()+'-'+(mm<10?'0':'')+mm+'-'+(dd<10?'0':'')+dd; }
+
   var selectedCC = STATE.contentCountryFilter || 'all';
-  var countries = STATE.countries.map(function(c) { return c.code; });
+  var period     = STATE.contentPeriod || 'monthly';
+  var countries  = STATE.countries.map(function(c) { return c.code; });
+  var now = new Date(); var cy = now.getFullYear(); var cm = now.getMonth();
 
-  var allActive = STATE.assets.filter(function(a) {
-    return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled';
-  });
+  // ── build date range (identical logic to Reporting tab) ──
+  var range, periodPickerHtml;
+  if (period === 'weekly') {
+    var weekOffset = typeof STATE.contentWeekOffset === 'number' ? STATE.contentWeekOffset : 0;
+    var dow = now.getDay(); var daysToMon = dow === 0 ? -6 : 1 - dow;
+    var monday = new Date(now); monday.setDate(now.getDate() + daysToMon + weekOffset * 7);
+    var sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    range = { start: isoDate(monday), end: isoDate(sunday) };
+    var weekOptHtml = '';
+    for (var wo = 0; wo >= -12; wo--) {
+      var wMon = new Date(now); wMon.setDate(now.getDate() + daysToMon + wo * 7);
+      var wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
+      var wLabel = wo === 0 ? 'This week' : (wo === -1 ? 'Last week' : Math.abs(wo) + ' weeks ago');
+      wLabel += ' (' + isoDate(wMon).slice(5) + ' – ' + isoDate(wSun).slice(5) + ')';
+      weekOptHtml += '<option value="' + wo + '"' + (wo === weekOffset ? ' selected' : '') + '>' + wLabel + '</option>';
+    }
+    periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setContent(\'weekOffset\',this.value)">' + weekOptHtml + '</select>';
+  } else if (period === 'quarterly') {
+    var curQIdx = cy * 4 + Math.floor(cm / 3);
+    var selQ = STATE.contentQuarter || (cy + '-Q' + (Math.floor(cm / 3) + 1));
+    var qYear = parseInt(selQ.slice(0, 4)); var qNum = parseInt(selQ.slice(6)) - 1;
+    var qStart = new Date(qYear, qNum * 3, 1); var qEnd = new Date(qYear, qNum * 3 + 3, 0);
+    range = { start: isoDate(qStart), end: isoDate(qEnd) };
+    var qOptions = [];
+    for (var qi = 0; qi < 8; qi++) {
+      var absQ = curQIdx - qi; var qy = Math.floor(absQ / 4); var qm = absQ % 4;
+      qOptions.push({ key: qy + '-Q' + (qm + 1), lbl: 'Q' + (qm + 1) + ' ' + qy, absQ: absQ });
+    }
+    qOptions.sort(function(a, b) {
+      var ay = Math.floor(a.absQ / 4), by = Math.floor(b.absQ / 4);
+      if (by !== ay) return by - ay; return a.absQ - b.absQ;
+    });
+    var qOptHtml = qOptions.map(function(q) {
+      return '<option value="' + q.key + '"' + (q.key === selQ ? ' selected' : '') + '>' + q.lbl + '</option>';
+    }).join('');
+    periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setContent(\'quarter\',this.value)">' + qOptHtml + '</select>';
+  } else {
+    // monthly (default)
+    var monthOpts = [];
+    for (var mo = 0; mo < 12; mo++) {
+      var my = cm - mo, yr = cy; if (my < 0) { my += 12; yr -= 1; }
+      var key = yr + '-' + (my < 9 ? '0' : '') + (my + 1);
+      monthOpts.push({ key: key, label: MONTH_LONG[my] + ' ' + yr });
+    }
+    var selMonth = STATE.contentMonth || monthOpts[0].key;
+    var mYear = parseInt(selMonth.slice(0, 4)); var mMon = parseInt(selMonth.slice(5, 7)) - 1;
+    range = getMonthRange(mYear, mMon);
+    var monthOptsHtml = monthOpts.map(function(o) {
+      return '<option value="' + o.key + '"' + (o.key === selMonth ? ' selected' : '') + '>' + o.label + '</option>';
+    }).join('');
+    periodPickerHtml = '<select class="report-ctrl-select" onchange="App.setContent(\'month\',this.value)">' + monthOptsHtml + '</select>';
+  }
 
-  // "Has content" = raw footage link (rawVideo field) is set on the asset
+  // ── asset predicates ──
+  // "Has content" = rawVideo link is set on the asset
   function hasContent(a) { return !!(a.rawVideo); }
-  // "Edited" = final video link is set, OR status shows editing has started/completed
+  // "Edited" = finalVideo set OR editing has started (status past Draft/Assigned)
   function isEdited(a) {
     return !!(a.finalVideo) || ['In Progress','For Review','Needs Revisions','Approved'].indexOf(a.status) !== -1;
   }
-  // "Gone live" = placeholder (field TBD)
-  function isLive(a) { return false; }
+  // Asset is in-scope for the selected period: estDelivery, dateApproved, or chDateApproved falls in range
+  function inRange(a) {
+    var d = a.estDelivery || a.dateApproved || a.chDateApproved || '';
+    return d >= range.start && d <= range.end;
+  }
+
+  var allActive = STATE.assets.filter(function(a) {
+    return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled' && inRange(a);
+  });
 
   function assetsForCountry(cc) {
     if (cc === 'all') return allActive;
@@ -8780,16 +8842,16 @@ function renderContentView() {
   function statBar(value, total, color) {
     if (!total) return '';
     var pct = Math.round(value / total * 100);
-    return '<div style="background:#1e2130;border-radius:4px;height:6px;margin-top:6px;overflow:hidden;">' +
+    return '<div style="background:var(--bg4);border-radius:4px;height:6px;margin-top:6px;overflow:hidden;">' +
       '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;transition:width .3s;"></div></div>';
   }
 
   function statCard(label, value, total, color, note) {
     var pct = total ? Math.round(value / total * 100) : 0;
-    return '<div style="background:#161b2e;border:1px solid #2a3050;border-radius:10px;padding:20px 24px;min-width:180px;flex:1;">' +
-      '<div style="font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">' + label + '</div>' +
-      '<div style="font-size:36px;font-weight:700;color:#e6eaf4;line-height:1;">' + value + '</div>' +
-      '<div style="font-size:12px;color:#8892b0;margin-top:4px;">' + pct + '% of ' + total + ' active videos' + (note ? ' · ' + note : '') + '</div>' +
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;min-width:180px;flex:1;">' +
+      '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">' + label + '</div>' +
+      '<div style="font-size:36px;font-weight:700;color:var(--text1);line-height:1;">' + value + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px;">' + pct + '% of ' + total + ' videos in period' + (note ? ' · ' + note : '') + '</div>' +
       statBar(value, total, color) +
       '</div>';
   }
@@ -8799,35 +8861,35 @@ function renderContentView() {
     return '<span style="display:inline-block;padding:2px 8px;border-radius:12px;background:' + color + '22;color:' + color + ';font-size:12px;font-weight:600;">' + v + ' <span style="font-weight:400;opacity:.7;">(' + pct + '%)</span></span>';
   }
 
-  // Country filter buttons
+  // Country filter seg-buttons
   var filterBtns = ['all'].concat(countries).map(function(cc) {
     var active = cc === selectedCC;
     var countryObj = STATE.countries.find(function(c){ return c.code === cc; }) || {};
     var label = cc === 'all' ? 'All' : ((countryObj.flag || '') + ' ' + cc);
-    return '<button onclick="App.setContentFilter(\'' + cc + '\')" style="padding:5px 14px;border-radius:6px;border:1px solid ' + (active ? '#4fc3f7' : '#2a3050') + ';background:' + (active ? '#4fc3f722' : 'transparent') + ';color:' + (active ? '#4fc3f7' : '#8892b0') + ';font-size:13px;cursor:pointer;font-weight:' + (active ? '600' : '400') + ';">' + label + '</button>';
+    return '<button class="report-seg-btn' + (active ? ' active' : '') + '" onclick="App.setContentFilter(\'' + cc + '\')">' + label + '</button>';
   }).join('');
 
-  // Table: by country when "All", by campaign when a country is selected
+  // Table rows
   var tableHtml;
   if (selectedCC === 'all') {
     var countryRows = countries.map(function(cc) {
       var countryObj = STATE.countries.find(function(c){ return c.code === cc; }) || {};
       var assets = assetsForCountry(cc);
       var n = assets.length;
-      return '<tr style="border-bottom:1px solid #1e2130;">' +
-        '<td style="padding:10px 16px;font-size:14px;font-weight:600;color:#e6eaf4;">' + (countryObj.flag||'') + ' ' + cc + '</td>' +
-        '<td style="padding:10px 16px;color:#8892b0;font-size:13px;">' + n + '</td>' +
+      return '<tr style="border-bottom:1px solid var(--border2);">' +
+        '<td style="padding:10px 16px;font-size:14px;font-weight:600;color:var(--text1);">' + (countryObj.flag||'') + ' ' + cc + '</td>' +
+        '<td style="padding:10px 16px;color:var(--text3);font-size:13px;">' + n + '</td>' +
         '<td style="padding:10px 16px;">' + pill(assets.filter(hasContent).length, n, '#4fc3f7') + '</td>' +
         '<td style="padding:10px 16px;">' + pill(assets.filter(isEdited).length, n, '#81c784') + '</td>' +
-        '<td style="padding:10px 16px;color:#8892b0;font-size:12px;font-style:italic;">—</td>' +
+        '<td style="padding:10px 16px;color:var(--text3);font-size:12px;font-style:italic;">—</td>' +
         '</tr>';
     }).join('');
-    tableHtml = '<thead><tr style="background:#1a2040;border-bottom:1px solid #2a3050;">' +
-      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Country</th>' +
-      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Total</th>' +
+    tableHtml = '<thead><tr style="background:var(--bg3);border-bottom:1px solid var(--border);">' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">Country</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">Total</th>' +
       '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#4fc3f7;text-transform:uppercase;letter-spacing:.08em;">Has Content</th>' +
       '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#81c784;text-transform:uppercase;letter-spacing:.08em;">Edited</th>' +
-      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Gone Live</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">Gone Live</th>' +
       '</tr></thead><tbody>' + countryRows + '</tbody>';
   } else {
     var campaigns = STATE.campaigns.filter(function(c){ return c.country === selectedCC; });
@@ -8835,54 +8897,51 @@ function renderContentView() {
       var assets = allActive.filter(function(a){ return String(a.campaignId) === String(camp.id); });
       var n = assets.length;
       if (!n) return '';
-      return '<tr style="border-bottom:1px solid #1e2130;">' +
-        '<td style="padding:10px 16px;font-size:13px;color:#e6eaf4;">' + esc(camp.name) + '</td>' +
-        '<td style="padding:10px 16px;color:#8892b0;font-size:13px;">' + n + '</td>' +
+      return '<tr style="border-bottom:1px solid var(--border2);">' +
+        '<td style="padding:10px 16px;font-size:13px;color:var(--text1);">' + esc(camp.name) + '</td>' +
+        '<td style="padding:10px 16px;color:var(--text3);font-size:13px;">' + n + '</td>' +
         '<td style="padding:10px 16px;">' + pill(assets.filter(hasContent).length, n, '#4fc3f7') + '</td>' +
         '<td style="padding:10px 16px;">' + pill(assets.filter(isEdited).length, n, '#81c784') + '</td>' +
-        '<td style="padding:10px 16px;color:#8892b0;font-size:12px;font-style:italic;">—</td>' +
+        '<td style="padding:10px 16px;color:var(--text3);font-size:12px;font-style:italic;">—</td>' +
         '</tr>';
     }).join('');
-    tableHtml = '<thead><tr style="background:#1a2040;border-bottom:1px solid #2a3050;">' +
-      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Campaign</th>' +
-      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Total</th>' +
+    tableHtml = '<thead><tr style="background:var(--bg3);border-bottom:1px solid var(--border);">' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">Campaign</th>' +
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">Total</th>' +
       '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#4fc3f7;text-transform:uppercase;letter-spacing:.08em;">Has Content</th>' +
       '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#81c784;text-transform:uppercase;letter-spacing:.08em;">Edited</th>' +
-      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;">Gone Live</th>' +
-      '</tr></thead><tbody>' + (campRows || '<tr><td colspan="5" style="padding:20px;color:#8892b0;text-align:center;">No campaigns for this country</td></tr>') + '</tbody>';
+      '<th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">Gone Live</th>' +
+      '</tr></thead><tbody>' + (campRows || '<tr><td colspan="5" style="padding:20px;color:var(--text3);text-align:center;">No campaigns with videos in this period</td></tr>') + '</tbody>';
   }
 
-  var subtitle = selectedCC === 'all'
-    ? 'All countries · non-cancelled videos only'
-    : ((STATE.countries.find(function(c){return c.code===selectedCC;})||{}).flag||'') + ' ' + selectedCC + ' · non-cancelled videos only';
-
   return '<div style="padding:32px 40px;max-width:1000px;">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
-      '<div style="font-size:22px;font-weight:700;color:#e6eaf4;">Content Overview</div>' +
+    '<div class="report-controls">' +
+      '<h2>Content</h2>' +
+      '<div class="report-ctrl-divider"></div>' +
+      '<div class="report-seg-group">' +
+        '<button class="report-seg-btn' + (period === 'weekly'    ? ' active' : '') + '" onclick="App.setContent(\'period\',\'weekly\')">Weekly</button>' +
+        '<button class="report-seg-btn' + (period === 'monthly'   ? ' active' : '') + '" onclick="App.setContent(\'period\',\'monthly\')">Monthly</button>' +
+        '<button class="report-seg-btn' + (period === 'quarterly' ? ' active' : '') + '" onclick="App.setContent(\'period\',\'quarterly\')">Quarterly</button>' +
+      '</div>' +
+      '<div class="report-ctrl-divider"></div>' +
+      periodPickerHtml +
+      '<div class="report-ctrl-divider"></div>' +
+      '<span class="report-ctrl-label">Country</span>' +
+      '<div class="report-seg-group">' + filterBtns + '</div>' +
     '</div>' +
-    '<div style="font-size:13px;color:#8892b0;margin-bottom:20px;">' + subtitle + '</div>' +
-
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:28px;">' + filterBtns + '</div>' +
 
     '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:36px;">' +
       statCard('Has Raw Content', totalContent, totalAll, '#4fc3f7', 'rawVideo link set') +
       statCard('Edited', totalEdited, totalAll, '#81c784', 'finalVideo set or in progress') +
-      '<div style="background:#161b2e;border:1px solid #2a3050;border-radius:10px;padding:20px 24px;min-width:160px;flex:1;opacity:.45;">' +
-        '<div style="font-size:11px;color:#8892b0;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Gone Live</div>' +
-        '<div style="font-size:36px;font-weight:700;color:#e6eaf4;line-height:1;">—</div>' +
-        '<div style="font-size:12px;color:#8892b0;margin-top:4px;">coming soon</div>' +
+      '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;min-width:160px;flex:1;opacity:.45;">' +
+        '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Gone Live</div>' +
+        '<div style="font-size:36px;font-weight:700;color:var(--text1);line-height:1;">—</div>' +
+        '<div style="font-size:12px;color:var(--text3);margin-top:4px;">coming soon</div>' +
       '</div>' +
     '</div>' +
 
-    '<div style="background:#161b2e;border:1px solid #2a3050;border-radius:10px;overflow:hidden;">' +
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;">' +
       '<table style="width:100%;border-collapse:collapse;">' + tableHtml + '</table>' +
-    '</div>' +
-  '</div>';
-}
-
-function renderConfigView() {
-        '<tbody>' + countryRows + '</tbody>' +
-      '</table>' +
     '</div>' +
   '</div>';
 }
@@ -10694,6 +10753,13 @@ var App = {
   },
   setContentFilter: function(cc) {
     STATE.contentCountryFilter = cc;
+    render();
+  },
+  setContent: function(key, val) {
+    if (key === 'period')     STATE.contentPeriod     = val;
+    if (key === 'weekOffset') STATE.contentWeekOffset = parseInt(val, 10);
+    if (key === 'month')      STATE.contentMonth      = val;
+    if (key === 'quarter')    STATE.contentQuarter    = val;
     render();
   },
   setLogEditor: function(name) {
