@@ -10576,7 +10576,7 @@ var App = {
     targets.forEach(function(a) {
       var oldStatus = a.status;
       a.status = 'Approved';
-      if (!a.dateApproved) a.dateApproved = today;
+      a.dateApproved = today;
       a.dragLocked = false;
       logAction('updated', 'Asset "' + a.name + '" bulk approved (Assigned → Approved)');
       emitAssetChangeNotifications(a, { oldEditor: a.editor, oldStatus: oldStatus });
@@ -10663,7 +10663,7 @@ var App = {
     // Stamp dateApproved on the transition INTO Approved (only if not already set, so
     // manually-set approval dates from the editor aren't overwritten). Needed for the
     // daily / weekly / monthly tally math.
-    if (newStatus === 'Approved' && oldStatus !== 'Approved' && !a.dateApproved) {
+    if (newStatus === 'Approved' && oldStatus !== 'Approved') {
       a.dateApproved = todayISO();
     }
     // Card leaving the To Do column \u2014 clear drag-lock so it doesn't follow the card to
