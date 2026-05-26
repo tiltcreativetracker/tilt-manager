@@ -8477,14 +8477,30 @@ function renderReportingView() {
   function isSimpleCountry(c) { return SIMPLE_APPROVAL_COUNTRIES.indexOf(c.country) >= 0; }
 
   function assetApprovedInPeriod(a, campaignCountry) {
-    if (SIMPLE_APPROVAL_COUNTRIES.indexOf(campaignCountry) >= 0) {
+    var isSimple = SIMPLE_APPROVAL_COUNTRIES.indexOf(campaignCountry) >= 0;
+    if (approval === 'pm') {
+      // PM-only: use status + dateApproved regardless of country
       return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
     }
+    if (approval === 'pm_and_ch') {
+      // Both PM and cat head must be approved; date keyed off cat head approval
+      if (isSimple) return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
+      return a.status === 'Approved' && a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
+    }
+    // 'all' — default country-based logic
+    if (isSimple) return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
     return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
   }
 
   function assetApprovedAllTime(a, campaignCountry) {
-    if (SIMPLE_APPROVAL_COUNTRIES.indexOf(campaignCountry) >= 0) return a.status === 'Approved';
+    var isSimple = SIMPLE_APPROVAL_COUNTRIES.indexOf(campaignCountry) >= 0;
+    if (approval === 'pm') return a.status === 'Approved';
+    if (approval === 'pm_and_ch') {
+      if (isSimple) return a.status === 'Approved';
+      return a.status === 'Approved' && a.categoryHeadQc === 'Approved';
+    }
+    // 'all' — default
+    if (isSimple) return a.status === 'Approved';
     return a.categoryHeadQc === 'Approved';
   }
 
@@ -8711,6 +8727,7 @@ function renderReportingView() {
       '</div>' +
       '<div class="report-ctrl-divider"></div>' +
       '<button class="report-slack-copy-btn" onclick="App.copyReportingSlack()" title="Copy a Slack-formatted summary of this report to clipboard">📋 Copy for Slack</button>' +
+      '<button class="report-slack-copy-btn" onclick="App.copyManagerReport()" title="Copy a plain-English report with filter explanations for management" style="margin-left:6px;">📊 Copy for Manager</button>' +
     '</div>';
 
   var mainContent = view === 'kanban' ? kanbanHtml() : tableHtml();
@@ -10701,10 +10718,12 @@ var App = {
 
   // --- Reporting Slack copy ---
   copyReportingSlack: function() {
-    var period  = STATE.reportingPeriod  || 'monthly';
-    var country = STATE.reportingCountry || 'all';
-    var type    = STATE.reportingType    || 'all';
+    var period   = STATE.reportingPeriod    || 'monthly';
+    var country  = STATE.reportingCountry  || 'all';
+    var type     = STATE.reportingType     || 'all';
     var category = STATE.reportingCategory || 'all';
+    var approval = STATE.reportingApproval || 'all';
+    var SIMPLE   = ['IT','ES','PL'];
     var now = new Date();
     var cy = now.getFullYear(), cm = now.getMonth();
     var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -10733,11 +10752,29 @@ var App = {
       periodLabel = MONTH_LONG[mMon]+' '+mYear;
     }
 
-    var filterParts = [];
-    if (country !== 'all') filterParts.push(country);
-    if (type !== 'all') filterParts.push(type);
-    if (category !== 'all') filterParts.push(category);
-    var filterStr = filterParts.length ? ' · '+filterParts.join(' · ') : '';
+    function assetInRange(a) {
+      var dEst=a.estDelivery||'', dAp=a.dateApproved||'', dCh=a.chDateApproved||'';
+      return (dEst&&dEst>=range.start&&dEst<=range.end)||(dAp&&dAp>=range.start&&dAp<=range.end)||(dCh&&dCh>=range.start&&dCh<=range.end);
+    }
+
+    function assetApprovedInPeriod(a, cc) {
+      var isSimple = SIMPLE.indexOf(cc) >= 0;
+      if (approval === 'pm') return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
+      if (approval === 'pm_and_ch') {
+        if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
+        return a.status==='Approved' && a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
+      }
+      if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
+      return a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
+    }
+
+    function assetApprovedAllTime(a, cc) {
+      var isSimple = SIMPLE.indexOf(cc) >= 0;
+      if (approval === 'pm') return a.status==='Approved';
+      if (approval === 'pm_and_ch') { if (isSimple) return a.status==='Approved'; return a.status==='Approved' && a.categoryHeadQc==='Approved'; }
+      if (isSimple) return a.status==='Approved';
+      return a.categoryHeadQc==='Approved';
+    }
 
     var camps = STATE.campaigns.filter(function(c) {
       if (country !== 'all' && c.country !== country) return false;
@@ -10745,14 +10782,15 @@ var App = {
       return true;
     });
 
-    function assetInRange(a) {
-      var d = a.dateApproved || a.estDelivery || '';
-      return d >= range.start && d <= range.end;
-    }
-
     camps = camps.filter(function(c) {
       var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
+      if (approval !== 'all') assets = assets.filter(function(a) {
+        var pmOk = a.status==='Approved';
+        if (approval === 'pm') return pmOk;
+        var chOk = SIMPLE.indexOf(c.country)>=0 ? pmOk : a.categoryHeadQc==='Approved';
+        return pmOk && chOk;
+      });
       return assets.some(assetInRange);
     });
 
@@ -10766,21 +10804,160 @@ var App = {
       var allAssets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category||'')===category; });
       var active = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
-      var approvedInPeriod = active.filter(function(a) { return assetInRange(a) && (a.status==='Approved'); }).length;
-      var approvedAllTime = active.filter(function(a) { return a.status==='Approved'; }).length;
+      var approvedInPeriod = active.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
+      var approvedAllTime  = active.filter(function(a) { return assetApprovedAllTime(a, c.country); }).length;
       var total = active.length;
       var pct = total > 0 ? Math.round(approvedAllTime/total*100) : 0;
+      var isDone = c.done || (total > 0 && approvedAllTime === total);
       totalApproved += approvedInPeriod;
       var finishDate = '';
-      active.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
+      if (!isDone) active.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
       var cat = c.category || 'Uncategorised';
-      lines.push('*' + cat + ' - ' + c.name + ' - (' + c.country + ')*');
+      lines.push('*' + cat + ' - ' + c.name + ' (' + c.country + ')' + (isDone ? ' ✓' : '') + '*');
       lines.push('• ' + approvedInPeriod + ' approved ' + periodWord + ' · ' + approvedAllTime + '/' + total + ' total videos (' + pct + '%)');
       if (finishDate) lines.push('• Will be finished on ' + formatDate(finishDate));
       lines.push('');
     });
     lines.push('*Total approved this period:* ' + totalApproved + ' videos across ' + camps.length + ' campaign' + (camps.length !== 1 ? 's' : ''));
     copyToClipboard(lines.join('\n'), 'Slack message copied');
+  },
+
+  copyManagerReport: function() {
+    var period   = STATE.reportingPeriod    || 'monthly';
+    var country  = STATE.reportingCountry  || 'all';
+    var type     = STATE.reportingType     || 'all';
+    var category = STATE.reportingCategory || 'all';
+    var approval = STATE.reportingApproval || 'all';
+    var SIMPLE   = ['IT','ES','PL'];
+    var now = new Date();
+    var cy = now.getFullYear(), cm = now.getMonth();
+    var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    function isoDate(d) { var mm=d.getMonth()+1,dd=d.getDate(); return d.getFullYear()+'-'+(mm<10?'0':'')+mm+'-'+(dd<10?'0':'')+dd; }
+
+    var range, periodLabel;
+    if (period === 'weekly') {
+      var weekOffset = typeof STATE.reportingWeekOffset === 'number' ? STATE.reportingWeekOffset : 0;
+      var dow = now.getDay(), daysToMon = dow===0?-6:1-dow;
+      var monday = new Date(now); monday.setDate(now.getDate()+daysToMon+weekOffset*7);
+      var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+      range = { start: isoDate(monday), end: isoDate(sunday) };
+      var wLabel = weekOffset===0?'This week':weekOffset===-1?'Last week':Math.abs(weekOffset)+' weeks ago';
+      periodLabel = wLabel+' ('+isoDate(monday).slice(5)+' – '+isoDate(sunday).slice(5)+')';
+    } else if (period === 'quarterly') {
+      var selQ = STATE.reportingQuarter || (cy+'-Q'+(Math.floor(cm/3)+1));
+      var qYear=parseInt(selQ.slice(0,4)), qNum=parseInt(selQ.slice(6))-1;
+      var qStart=new Date(qYear,qNum*3,1), qEnd=new Date(qYear,qNum*3+3,0);
+      range = { start: isoDate(qStart), end: isoDate(qEnd) };
+      periodLabel = selQ;
+    } else {
+      var selMonth = STATE.reportingMonth || (cy+'-'+(cm<9?'0':'')+(cm+1));
+      var mYear=parseInt(selMonth.slice(0,4)), mMon=parseInt(selMonth.slice(5,7))-1;
+      range = getMonthRange(mYear, mMon);
+      periodLabel = MONTH_LONG[mMon]+' '+mYear;
+    }
+
+    function assetInRange(a) {
+      var dEst=a.estDelivery||'', dAp=a.dateApproved||'', dCh=a.chDateApproved||'';
+      return (dEst&&dEst>=range.start&&dEst<=range.end)||(dAp&&dAp>=range.start&&dAp<=range.end)||(dCh&&dCh>=range.start&&dCh<=range.end);
+    }
+
+    function assetApprovedInPeriod(a, cc) {
+      var isSimple = SIMPLE.indexOf(cc) >= 0;
+      if (approval === 'pm') return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
+      if (approval === 'pm_and_ch') {
+        if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
+        return a.status==='Approved' && a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
+      }
+      if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
+      return a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
+    }
+
+    function assetApprovedAllTime(a, cc) {
+      var isSimple = SIMPLE.indexOf(cc) >= 0;
+      if (approval === 'pm') return a.status==='Approved';
+      if (approval === 'pm_and_ch') { if (isSimple) return a.status==='Approved'; return a.status==='Approved' && a.categoryHeadQc==='Approved'; }
+      if (isSimple) return a.status==='Approved';
+      return a.categoryHeadQc==='Approved';
+    }
+
+    var camps = STATE.campaigns.filter(function(c) {
+      if (country !== 'all' && c.country !== country) return false;
+      if (type !== 'all' && (c.type||'Paid Ads') !== type) return false;
+      return true;
+    });
+
+    camps = camps.filter(function(c) {
+      var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
+      if (approval !== 'all') assets = assets.filter(function(a) {
+        var pmOk = a.status==='Approved';
+        if (approval === 'pm') return pmOk;
+        var chOk = SIMPLE.indexOf(c.country)>=0 ? pmOk : a.categoryHeadQc==='Approved';
+        return pmOk && chOk;
+      });
+      return assets.some(assetInRange);
+    });
+
+    if (!camps.length) { copyToClipboard('No campaigns match current filters.', 'Copied'); return; }
+
+    var periodWord = period === 'weekly' ? 'this week' : period === 'quarterly' ? 'this quarter' : 'this month';
+
+    // Plain-English approval filter explanation
+    var approvalExplain;
+    if (approval === 'pm') {
+      approvalExplain = 'Approval filter: Approved by PM — these videos have received PM sign-off. Category head review may still be pending for some.';
+    } else if (approval === 'pm_and_ch') {
+      approvalExplain = 'Approval filter: Approved by PM + Category Heads — these videos have received full sign-off from both the PM and the assigned category head. This represents final, fully-cleared creative.';
+    } else {
+      approvalExplain = 'Approval filter: All statuses — counts reflect the full standard approval pipeline (category head sign-off for UK/US; PM approval for IT/ES/PL).';
+    }
+
+    // Build filter context line
+    var filterBits = [];
+    filterBits.push('Period: ' + periodLabel);
+    filterBits.push('Market: ' + (country === 'all' ? 'All markets' : country));
+    filterBits.push('Type: ' + (type === 'all' ? 'All types' : type));
+    if (category !== 'all') filterBits.push('Category: ' + category);
+
+    var totalApproved = 0, totalPending = 0, totalCamps = camps.length;
+    var lines = [];
+    lines.push('Creative Production Report — ' + periodLabel);
+    lines.push('');
+    lines.push('FILTERS APPLIED');
+    filterBits.forEach(function(b) { lines.push('  ' + b); });
+    lines.push('  ' + approvalExplain);
+    lines.push('');
+    lines.push('CAMPAIGN BREAKDOWN');
+
+    camps.forEach(function(c) {
+      var allAssets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category||'')===category; });
+      var active = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
+      var approvedInPeriod = active.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
+      var approvedAllTime  = active.filter(function(a) { return assetApprovedAllTime(a, c.country); }).length;
+      var total = active.length;
+      var pct = total > 0 ? Math.round(approvedAllTime/total*100) : 0;
+      var isDone = c.done || (total > 0 && approvedAllTime === total);
+      var pendingCH = SIMPLE.indexOf(c.country) >= 0 ? 0
+        : active.filter(function(a) { return a.status==='Approved' && a.categoryHeadQc !== 'Approved'; }).length;
+      totalApproved += approvedInPeriod;
+      totalPending  += pendingCH;
+      var finishDate = '';
+      if (!isDone) active.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
+      lines.push('');
+      lines.push('  ' + (c.category||'Uncategorised') + ' — ' + c.name + ' (' + c.country + ')' + (isDone ? '  [DONE]' : ''));
+      lines.push('    Approved ' + periodWord + ': ' + approvedInPeriod + ' video' + (approvedInPeriod!==1?'s':''));
+      lines.push('    Overall progress: ' + approvedAllTime + ' / ' + total + ' videos (' + pct + '%)');
+      if (pendingCH > 0) lines.push('    Pending category head sign-off: ' + pendingCH + ' video' + (pendingCH!==1?'s':'') + ' (PM-approved, awaiting cat head review)');
+      if (finishDate) lines.push('    Estimated finish: ' + formatDate(finishDate));
+    });
+
+    lines.push('');
+    lines.push('SUMMARY');
+    lines.push('  Total approved ' + periodWord + ': ' + totalApproved + ' video' + (totalApproved!==1?'s':'') + ' across ' + totalCamps + ' campaign' + (totalCamps!==1?'s':''));
+    if (totalPending > 0) lines.push('  Total pending category head sign-off: ' + totalPending + ' video' + (totalPending!==1?'s':''));
+    copyToClipboard(lines.join('\n'), 'Report copied');
   },
 
   // --- Topbar tab drag-to-reorder ---
