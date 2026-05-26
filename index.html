@@ -1808,7 +1808,8 @@ var Fb = {
         reportingCountry: true,
         reportingType: true,
         reportingCategory: true,
-        reportingView: true
+        reportingView: true,
+        reportingApproval: true
       };
       // Copy known fields onto STATE. Skip metadata fields prefixed with `_` and any
       // per-user UI field (so a teammate's tab/campaign/expansion choices don't override
@@ -2637,6 +2638,7 @@ var STATE = {
   reportingCategory:    'all',
   reportingCollapsed:   {},
   reportingView:        'table',
+  reportingApproval:    'all',
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -8266,10 +8268,11 @@ function executeItalyImport() {
 
 function renderReportingView() {
   // ── read/default UI state ──
-  var period  = STATE.reportingPeriod  || 'monthly';
-  var country = STATE.reportingCountry || 'all';
-  var type    = STATE.reportingType    || 'all';
-  var view    = STATE.reportingView    || 'table';
+  var period   = STATE.reportingPeriod    || 'monthly';
+  var country  = STATE.reportingCountry  || 'all';
+  var type     = STATE.reportingType     || 'all';
+  var view     = STATE.reportingView     || 'table';
+  var approval = STATE.reportingApproval || 'all';
 
   var now = new Date();
   var cy = now.getFullYear(), cm = now.getMonth();
@@ -8503,13 +8506,29 @@ function renderReportingView() {
     allAssets.forEach(function(a) { if (a.editor && editors.indexOf(a.editor) < 0) editors.push(a.editor); });
     var finishDate = '';
     activeAssets.forEach(function(a) { if (a.estDelivery && a.estDelivery > finishDate) finishDate = a.estDelivery; });
-    return { c: c, total: total, approved: approvedInPeriod, revisions: revisions, pct: pct, isFull: isFull, editors: editors, finishDate: finishDate };
+    // pendingCatHead: PM-approved but category head not yet approved (only meaningful for non-simple countries)
+    var pendingCatHead = SIMPLE_APPROVAL_COUNTRIES.indexOf(c.country) >= 0 ? 0
+      : activeAssets.filter(function(a) { return a.status === 'Approved' && a.categoryHeadQc !== 'Approved'; }).length;
+    return { c: c, total: total, approved: approvedInPeriod, revisions: revisions, pct: pct, isFull: isFull, editors: editors, finishDate: finishDate, pendingCatHead: pendingCatHead };
   }
 
-  // Only show campaigns that have at least one asset in the selected range (and matching category)
+  // Returns true if asset matches the approval filter
+  function assetMatchesApproval(a, campaignCountry) {
+    if (approval === 'all') return true;
+    var pmApproved = a.status === 'Approved';
+    if (approval === 'pm') return pmApproved;
+    // pm_and_ch: PM approved AND category head approved
+    var chApproved = SIMPLE_APPROVAL_COUNTRIES.indexOf(campaignCountry) >= 0
+      ? pmApproved  // simple countries don't have cat heads — treat as same
+      : a.categoryHeadQc === 'Approved';
+    return pmApproved && chApproved;
+  }
+
+  // Only show campaigns that have at least one asset in the selected range (and matching category + approval filter)
   camps = camps.filter(function(c) {
     var assets = campAssets(c.id);
     if (category !== 'all') assets = assets.filter(function(a) { return (a.category || '') === category; });
+    if (approval !== 'all') assets = assets.filter(function(a) { return assetMatchesApproval(a, c.country); });
     return assets.some(assetInRange);
   });
 
@@ -8527,11 +8546,12 @@ function renderReportingView() {
   // ── TABLE VIEW — grouped by category ──
   var approvedColLabel = period === 'weekly' ? 'Approved This Week' : period === 'quarterly' ? 'Approved This Quarter' : 'Approved This Month';
   function tableHtml() {
-    var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>' + approvedColLabel + '</th><th>Total</th><th>Progress</th><th>Revisions</th><th>Editors</th><th>Finish Date</th><th>Status</th></tr></thead>';
+    var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>' + approvedColLabel + '</th><th>Total</th><th>Progress</th><th>Revisions</th><th title="PM-approved but category head not yet signed off">Pending Cat Head</th><th>Editors</th><th>Finish Date</th><th>Status</th></tr></thead>';
 
     function campTr(r) {
-      var statusChip = (r.c.done || r.isFull) ? '<span class="report-done-chip">Done</span>' : '<span class="report-active-chip">Active</span>';
-      var finishCell = r.finishDate ? '<span style="font-size:10px;color:var(--text3)">will be finished on</span> <span class="td-mono" style="font-size:12px">' + escapeHtml(formatDate(r.finishDate)) + '</span>' : '<span style="color:var(--text3)">—</span>';
+      var isDone = r.c.done || r.isFull;
+      var statusChip = isDone ? '<span class="report-done-chip">Done</span>' : '<span class="report-active-chip">Active</span>';
+      var finishCell = (!isDone && r.finishDate) ? '<span style="font-size:10px;color:var(--text3)">will be finished on</span> <span class="td-mono" style="font-size:12px">' + escapeHtml(formatDate(r.finishDate)) + '</span>' : '<span style="color:var(--text3)">—</span>';
       return '<tr onclick="App.selectCampaign(\'' + r.c.id + '\'); App.setTab(\'campaigns\')">' +
         '<td class="td-name">' + escapeHtml(r.c.name) + '</td>' +
         '<td>' + flagHtml(r.c.country) + '</td>' +
@@ -8539,6 +8559,7 @@ function renderReportingView() {
         '<td class="td-mono">' + r.total + '</td>' +
         '<td><div class="report-prog-cell"><div class="report-mini-track"><div class="report-mini-fill' + (r.isFull ? ' full' : '') + '" style="width:' + r.pct + '%"></div></div><span class="report-pct">' + r.pct + '%</span></div></td>' +
         '<td class="' + (r.revisions > 0 ? 'td-amber' : 'td-mono') + '">' + r.revisions + '</td>' +
+        '<td>' + (r.pendingCatHead > 0 ? '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:3px;font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;background:#042c53;color:#85b7eb;">' + r.pendingCatHead + ' pending</span>' : '<span style="color:var(--text3)">—</span>') + '</td>' +
         '<td style="color:var(--text2);font-size:11px">' + escapeHtml(r.editors.join(', ') || '—') + '</td>' +
         '<td style="white-space:nowrap">' + finishCell + '</td>' +
         '<td>' + statusChip + '</td>' +
@@ -8677,6 +8698,13 @@ function renderReportingView() {
       '<div class="report-ctrl-divider"></div>' +
       '<span class="report-ctrl-label">Category</span>' +
       '<select class="report-ctrl-select" onchange="App.setReporting(\'category\',this.value)">' + categoryOptsHtml + '</select>' +
+      '<div class="report-ctrl-divider"></div>' +
+      '<span class="report-ctrl-label">Approval</span>' +
+      '<select class="report-ctrl-select" onchange="App.setReporting(\'approval\',this.value)">' +
+        '<option value="all"' + (approval === 'all' ? ' selected' : '') + '>All</option>' +
+        '<option value="pm"' + (approval === 'pm' ? ' selected' : '') + '>Approved by PM</option>' +
+        '<option value="pm_and_ch"' + (approval === 'pm_and_ch' ? ' selected' : '') + '>Approved by PM + Cat Heads</option>' +
+      '</select>' +
       '<div class="report-view-toggle">' +
         '<button class="report-view-btn' + (view === 'table' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'table\')">' + tableIcon + ' Table</button>' +
         '<button class="report-view-btn' + (view === 'kanban' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'kanban\')">' + kanbanIcon + ' Kanban</button>' +
@@ -10491,6 +10519,7 @@ var App = {
     if (key === 'type')       STATE.reportingType       = val;
     if (key === 'category')   STATE.reportingCategory   = val;
     if (key === 'view')       STATE.reportingView       = val;
+    if (key === 'approval')   STATE.reportingApproval   = val;
     render();
   },
   setLogEditor: function(name) {
