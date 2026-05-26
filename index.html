@@ -2771,6 +2771,7 @@ function countVideosByMonthYear(monthKey, filterFn) {
   var n = 0;
   STATE.assets.forEach(function(a) {
     if (a.status === 'Cancelled') return;
+    if (a.status !== 'Approved') return;
     var camp = findCampaignById(a.campaignId);
     if (!camp) return;
     if ((camp.monthYear || '') !== monthKey) return;
