@@ -8818,8 +8818,14 @@ function renderContentView() {
   function isEdited(a) {
     return !!(a.finalVideo) || ['In Progress','For Review','Needs Revisions','Approved'].indexOf(a.status) !== -1;
   }
-  // Asset is in-scope for the selected period: estDelivery, dateApproved, or chDateApproved falls in range
+  // Asset is in-scope for the selected period.
+  // Monthly: match campaign's monthYear field (same logic as the tally board).
+  // Weekly/quarterly: fall back to asset-level dates.
   function inRange(a) {
+    if (period === 'monthly') {
+      var camp = findCampaignById(a.campaignId);
+      return camp && (camp.monthYear || '') === selMonth;
+    }
     var d = a.estDelivery || a.dateApproved || a.chDateApproved || '';
     return d >= range.start && d <= range.end;
   }
