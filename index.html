@@ -139,6 +139,7 @@
   .subcamp-item.done .subcamp-name { color: var(--text3); }
   .subcamp-item.done .rank-badge { background: color-mix(in srgb, #22c55e 20%, var(--bg4)); color: #22c55e; }
   .subcamp-item.done:hover { background: color-mix(in srgb, #22c55e 10%, var(--bg3)); }
+  .live-badge { font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: var(--green-bg); color: var(--green-text); letter-spacing: 0.07em; text-transform: uppercase; flex-shrink: 0; border: 1px solid rgba(29,158,117,0.3); font-family: 'JetBrains Mono', monospace; }
   .drag-handle { flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text3); cursor: grab; padding: 2px 2px; user-select: none; line-height: 0.7; }
   .drag-handle:active { cursor: grabbing; }
   .drag-handle:hover { color: var(--text1); }
@@ -1715,6 +1716,8 @@ var Fb = {
       categoryHeadSlackIds: STATE.categoryHeadSlackIds,
       pmSlackIds: STATE.pmSlackIds,
       slackBotToken: STATE.slackBotToken,
+      metaAccessToken: STATE.metaAccessToken,
+      metaAdAccountId: STATE.metaAdAccountId,
       dailyThreads: STATE.dailyThreads,
       dailyThreadHistory: STATE.dailyThreadHistory,
       catHeadDailyThreads: STATE.catHeadDailyThreads,
@@ -2605,6 +2608,8 @@ var STATE = {
   // to a daily editor thread. Webhook fallback is still used when this is blank
   // or when an editor has no daily thread set for today.
   slackBotToken: '',
+  metaAccessToken: '',
+  metaAdAccountId: '',
   // One daily Slack thread per editor (Zidni/Sharm/Patty). Each entry: { date,
   // url, channelId, threadTs }. Cleared at midnight rollover. Notifications
   // routed to that editor land in the thread when set; otherwise webhook.
@@ -4358,6 +4363,10 @@ function showEditCampaignModal() {
           '</div>'
         );
       })() +
+      '<div class="form-row">' +
+        '<label class="form-label">Gone Live Date <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
+        '<input id="f-cgonelive" type="date" class="form-input" value="' + escapeHtml(c.goneLive || '') + '" title="Date this campaign went live on-platform">' +
+      '</div>' +
       '<div class="form-row full">' +
         '<label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
           '<input type="checkbox" id="f-chideLinks" style="width:auto; margin:0;"' + (c.hideAssetLinkCols ? ' checked' : '') + '>' +
@@ -4383,6 +4392,7 @@ function showEditCampaignModal() {
     c.finalVideos = document.getElementById('f-cfinalvideos').value;
     c.slackOverride = document.getElementById('f-cslack').value;
     c.monthYear = document.getElementById('f-cmonth').value || '';
+    c.goneLive = document.getElementById('f-cgonelive').value || '';
     c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
     reorderCampaigns(true);
     STATE.expandedCountries[c.country] = true;
@@ -4991,6 +5001,7 @@ function renderSidebar() {
               '<div class="rank-badge">' + s.rank + '</div>' +
               nameHtml +
               (isRenaming ? '' : categoryBadgeHtml(s.category)) +
+              (s.goneLive ? '<span class="live-badge" title="Gone live: ' + escapeHtml(formatDate(s.goneLive)) + '">live</span>' : '') +
             '</div>';
         }
       }
@@ -5190,6 +5201,7 @@ function renderCampaignsView() {
       var m = parseInt(my.slice(5, 7), 10) - 1;
       return '<span class="meta-chip"><span class="meta-chip-label">month</span>' + MONTH_SHORT[m] + ' ' + y + '</span>';
     })() +
+    (camp.goneLive ? '<span class="meta-chip" style="color:var(--green-text);border-color:rgba(29,158,117,0.3);background:rgba(29,158,117,0.07);"><span class="meta-chip-label">live</span>' + escapeHtml(formatDate(camp.goneLive)) + '</span>' : '') +
     drivePill +
     briefPill +
     finalVideosPill +
@@ -7057,6 +7069,40 @@ function renderAutomationsView() {
     renderDailyThreadCard() +
     renderIntlDailyThreadCard() +
     renderCatHeadThreadCard() +
+
+    (function() {
+      var token = STATE.metaAccessToken || '';
+      var accountId = STATE.metaAdAccountId || '';
+      var tokenDot = token ? 'ok' : '';
+      var accountDot = accountId ? 'ok' : '';
+      var bothSet = token && accountId;
+      return '<div class="auto-card">' +
+        '<div class="auto-header"><div class="auto-icon">📡</div><div><div class="auto-title">Meta Ads — Gone Live Sync</div><div class="auto-sub">matches video filenames to Meta ad creatives → stamps gone-live date</div></div></div>' +
+        '<div class="auto-desc">Fetches all active campaigns from your Meta ad account. When a video name in this tracker matches a creative in an <strong style="color:var(--text1);">ACTIVE</strong> campaign, the campaign\'s <strong style="color:var(--text1);">Gone Live</strong> date is automatically set to that campaign\'s start date in Meta. Only campaigns without a gone-live date are updated.</div>' +
+        '<div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">' +
+          '<div>' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+              '<span style="font-size:12px;font-weight:600;color:var(--text1);">Access Token</span>' +
+              '<span class="cwh-dot ' + tokenDot + '" title="' + (token ? 'Token saved' : 'No token set') + '"></span>' +
+            '</div>' +
+            '<input type="password" id="meta-token-input" class="form-input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="EAAxxxxxx..." value="' + escapeHtml(token) + '">' +
+            '<div style="font-size:11px;color:var(--text3);margin-top:3px;">Get a long-lived token from <strong>Meta Business Suite → Settings → System Users</strong> with <code>ads_read</code> permission.</div>' +
+          '</div>' +
+          '<div>' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+              '<span style="font-size:12px;font-weight:600;color:var(--text1);">Ad Account ID</span>' +
+              '<span class="cwh-dot ' + accountDot + '" title="' + (accountId ? 'Account ID saved: act_' + escapeHtml(accountId) : 'No account ID set') + '"></span>' +
+            '</div>' +
+            '<input type="text" id="meta-account-input" class="form-input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="123456789 or act_123456789" value="' + escapeHtml(accountId) + '">' +
+            '<div style="font-size:11px;color:var(--text3);margin-top:3px;">Find it in <strong>Ads Manager → Account Overview</strong> — the number in the URL or top-left dropdown.</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;margin-top:4px;">' +
+            '<button class="save-btn" onclick="App.saveMetaSettings()">Save</button>' +
+            '<button id="meta-sync-btn" class="run-btn" ' + (bothSet ? '' : 'disabled style="opacity:0.4;cursor:not-allowed;"') + ' onclick="App.syncMetaLiveDates()">↻ Sync from Meta</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    })() +
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">01</div><div><div class="auto-title">Auto-reorder Campaigns by Rank</div><div class="auto-sub">trigger: Campaigns.Rank field updated</div></div></div>' +
@@ -12573,6 +12619,112 @@ var App = {
     logAction('updated', 'Slack bot token ' + (trimmed === '' ? 'cleared' : 'updated'));
     toast(trimmed === '' ? 'Bot token cleared' : '✓ Bot token saved', 'success');
     render();
+  },
+
+  saveMetaSettings: function() {
+    var token = (document.getElementById('meta-token-input').value || '').trim();
+    var accountId = (document.getElementById('meta-account-input').value || '').trim();
+    // Normalise account ID \u2014 strip leading 'act_' if user pasted the full form
+    accountId = accountId.replace(/^act_/i, '');
+    if (STATE.metaAccessToken === token && STATE.metaAdAccountId === accountId) {
+      toast('Meta settings unchanged', '');
+      return;
+    }
+    STATE.metaAccessToken = token;
+    STATE.metaAdAccountId = accountId;
+    saveState();
+    logAction('updated', 'Meta Ads settings updated');
+    toast('\u2713 Meta settings saved', 'success');
+    render();
+  },
+
+  syncMetaLiveDates: function() {
+    var token = (STATE.metaAccessToken || '').trim();
+    var accountId = (STATE.metaAdAccountId || '').trim().replace(/^act_/i, '');
+    if (!token || !accountId) {
+      toast('Save a Meta access token and ad account ID first', 'error');
+      return;
+    }
+
+    var btn = document.getElementById('meta-sync-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Syncing\u2026'; }
+
+    function resetBtn() {
+      var b = document.getElementById('meta-sync-btn');
+      if (b) { b.disabled = false; b.textContent = '\u21bb Sync from Meta'; }
+    }
+
+    // Build a set of video names from tracker assets (lowercased, no extension) for matching
+    var assetNames = {};
+    STATE.assets.forEach(function(a) {
+      var key = (a.name || '').toLowerCase().replace(/\.[^.]+$/, '').trim();
+      if (key) assetNames[key] = a;
+    });
+
+    var apiBase = 'https://graph.facebook.com/v19.0';
+    // Fetch all ads with their creative video info in one call
+    var url = apiBase + '/act_' + accountId + '/ads' +
+      '?fields=id,name,campaign_id,status,campaign{id,name,status,start_time},creative{id,video_id,name,title}' +
+      '&limit=500' +
+      '&access_token=' + encodeURIComponent(token);
+
+    fetch(url)
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.error) {
+          toast('Meta API error: ' + data.error.message, 'error');
+          resetBtn();
+          return;
+        }
+
+        var ads = data.data || [];
+        var updated = 0;
+
+        // For each ad, try to match its video filename to a tracker asset
+        ads.forEach(function(ad) {
+          if (!ad.campaign || ad.campaign.status !== 'ACTIVE') return;
+          var startDate = ad.campaign.start_time
+            ? ad.campaign.start_time.slice(0, 10)
+            : todayISO();
+
+          // Try matching on creative name/title or video name
+          var candidateNames = [
+            (ad.creative && ad.creative.name)  || '',
+            (ad.creative && ad.creative.title) || '',
+            ad.name || ''
+          ];
+
+          var matched = false;
+          candidateNames.forEach(function(rawName) {
+            if (matched) return;
+            var key = rawName.toLowerCase().replace(/\.[^.]+$/, '').trim();
+            if (!key || !assetNames[key]) return;
+            var matchedAsset = assetNames[key];
+            var camp = STATE.campaigns.find(function(c) {
+              return String(c.id) === String(matchedAsset.campaignId);
+            });
+            if (camp && !camp.goneLive) {
+              camp.goneLive = startDate;
+              updated++;
+              matched = true;
+            }
+          });
+        });
+
+        if (updated > 0) {
+          saveState();
+          logAction('updated', 'Meta sync: ' + updated + ' campaign(s) marked live');
+          toast('\u2713 Synced \u2014 ' + updated + ' campaign' + (updated === 1 ? '' : 's') + ' marked live', 'success');
+          render();
+        } else {
+          toast('Sync complete \u2014 no new matches found', '');
+        }
+        resetBtn();
+      })
+      .catch(function(err) {
+        toast('Sync failed: ' + err.message, 'error');
+        resetBtn();
+      });
   },
 
   // Category-head webhook \u2014 single URL for ALL category-head batches. Save and test
