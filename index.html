@@ -4305,7 +4305,9 @@ function showAddSubCampaignModal(forCountry) {
       driveId: document.getElementById('f-cdrive').value,
       slackOverride: document.getElementById('f-cslack').value,
       monthYear: document.getElementById('f-cmonth').value || '',
-      hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked
+      hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked,
+      goneLive: '',
+      killedDate: ''
     };
     // Insert above any done campaigns for this country so new work sits at the top.
     var firstDoneIdx = -1;
@@ -5022,10 +5024,10 @@ function renderSidebar() {
               'ondragend="App.onSubcampDragEnd(event)">' +
               '<span class="drag-handle" title="Drag to reorder">\u205D</span>' +
               '<div class="rank-badge">' + s.rank + '</div>' +
-              '<span class="ad-status-dot ' + (s.killedDate ? 'dot-killed' : s.goneLive ? 'dot-live' : 'dot-notlive') + '" title="' + (s.killedDate ? 'Killed ' + formatDate(s.killedDate) : s.goneLive ? 'Live since ' + formatDate(s.goneLive) : 'Not yet live') + '"></span>' +
+              '<span class="ad-status-dot ' + (s.killedDate ? 'dot-killed' : s.goneLive ? 'dot-live' : 'dot-notlive') + '" title="' + (s.killedDate ? (s.goneLive ? 'Live ' + formatDate(s.goneLive) + ' → Killed ' + formatDate(s.killedDate) : 'Killed ' + formatDate(s.killedDate) + ' (no live date)') : s.goneLive ? 'Live since ' + formatDate(s.goneLive) : 'Not yet live') + '"></span>' +
               nameHtml +
               (isRenaming ? '' : categoryBadgeHtml(s.category)) +
-              (s.goneLive ? '<span class="live-badge" title="Gone live: ' + escapeHtml(formatDate(s.goneLive)) + '">live</span>' : '') +
+              (s.goneLive && !s.killedDate ? '<span class="live-badge" title="Gone live: ' + escapeHtml(formatDate(s.goneLive)) + '">live</span>' : '') +
             '</div>';
         }
       }
@@ -5232,9 +5234,15 @@ function renderCampaignsView() {
       var durationChip = '';
       if (camp.killedDate) {
         killedChip = '<span class="meta-chip" style="color:#f59e0b;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.07);"><span class="meta-chip-label" style="color:rgba(245,158,11,0.6);">killed</span>' + escapeHtml(formatDate(camp.killedDate)) + '</span>';
-        var ms = new Date(camp.killedDate) - new Date(camp.goneLive);
-        var days = Math.round(ms / 86400000);
-        durationChip = '<span class="meta-chip" style="color:var(--text2);"><span class="meta-chip-label">ran</span>' + days + 'd</span>';
+        if (camp.goneLive) {
+          var ms = new Date(camp.killedDate) - new Date(camp.goneLive);
+          var days = Math.round(ms / 86400000);
+          if (days > 0) {
+            durationChip = '<span class="meta-chip" style="color:var(--text2);"><span class="meta-chip-label">ran</span>' + days + 'd</span>';
+          } else {
+            durationChip = '<span class="meta-chip" style="color:var(--red-text);border-color:rgba(248,81,73,0.3);background:var(--red-bg);" title="Killed date is before or same as live date — check campaign dates"><span class="meta-chip-label" style="color:var(--red-text);">ran</span>invalid dates</span>';
+          }
+        }
       }
       return liveChip + durationChip + killedChip;
     })() +
@@ -5260,7 +5268,7 @@ function renderCampaignsView() {
 
   return '<div class="content"><div class="camp-header">' +
     '<div class="breadcrumb"><span class="breadcrumb-flag-inline flag-' + camp.country + '">' + camp.country + '</span><span class="breadcrumb-country">' + (country ? country.name : camp.country) + '</span><span class="breadcrumb-sep">/</span><span>Campaign #' + camp.rank + '</span></div>' +
-    '<div class="camp-title-row"><div class="camp-title" style="display:flex;align-items:center;gap:8px;"><span class="ad-status-dot ' + (camp.killedDate ? 'dot-killed' : camp.goneLive ? 'dot-live' : 'dot-notlive') + '" style="width:10px;height:10px;flex-shrink:0;" title="' + (camp.killedDate ? 'Killed ' + formatDate(camp.killedDate) : camp.goneLive ? 'Live since ' + formatDate(camp.goneLive) : 'Not yet live') + '"></span>' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>' +
+    '<div class="camp-title-row"><div class="camp-title" style="display:flex;align-items:center;gap:8px;"><span class="ad-status-dot ' + (camp.killedDate ? 'dot-killed' : camp.goneLive ? 'dot-live' : 'dot-notlive') + '" style="width:10px;height:10px;flex-shrink:0;" title="' + (camp.killedDate ? (camp.goneLive ? 'Live ' + formatDate(camp.goneLive) + ' → Killed ' + formatDate(camp.killedDate) : 'Killed ' + formatDate(camp.killedDate) + ' (no live date)') : camp.goneLive ? 'Live since ' + formatDate(camp.goneLive) : 'Not yet live') + '"></span>' + escapeHtml(camp.name) + '</div>' + typeBadgeHtml(camp.type) + categoryBadgeSelectHtml(camp) + '<button class="edit-btn ml-auto" onclick="App.toggleCampaignDone()" title="' + (camp.done ? 'Mark as active' : 'Mark as done') + '" style="' + (camp.done ? 'color:#22c55e;border-color:#22c55e;' : '') + '">' + (camp.done ? '✓ Done' : 'Mark Done') + '</button>' +
       '<button class="edit-btn" onclick="App.showEditCampaignModal()">Edit</button>' + (roleAtLeast('admin') ? '<button class="edit-btn del-camp-btn" onclick="App.deleteCampaign()">Delete</button>' : '') + '<div class="camp-actions-menu-wrap"><button class="edit-btn camp-actions-menu-btn" onclick="App.toggleCampActionsMenu(event)" title="More actions">\u22EE</button><div id="camp-actions-menu" class="camp-actions-menu" style="display:none;"><button class="camp-actions-menu-item" onclick="App.copyCampaignLink(\'' + camp.id + '\')">\u{1F517} Copy link</button><button class="camp-actions-menu-item" onclick="App.exportCampaignPdf(\'' + camp.id + '\')">\u{1F4C4} Export as PDF</button><button class="camp-actions-menu-item" onclick="App.exportCampaignSlack(\'' + camp.id + '\')">\u{1F4AC} Export for Slack</button></div></div></div>' +
     (briefUrl
       ? '' // Brief is a URL \u2014 the pill above covers it, skip the text row to avoid duplication
@@ -12712,9 +12720,12 @@ var App = {
     });
 
     var apiBase = 'https://graph.facebook.com/v19.0';
-    var fields = 'id,name,campaign_id,status,campaign{id,name,status,start_time},creative{id,video_id,name,title}';
+    // effective_status reflects paused/archived/deleted state; stop_time is when the campaign ended
+    var fields = 'id,name,campaign_id,status,effective_status,campaign{id,name,status,effective_status,start_time,stop_time},creative{id,video_id,name,title}';
     var totalUpdated = 0;
     var errors = [];
+
+    var KILLED_STATUSES = ['PAUSED', 'DELETED', 'ARCHIVED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED'];
 
     // Fetch all accounts in parallel, then process results together
     var fetches = accountIds.map(function(accountId) {
@@ -12738,10 +12749,16 @@ var App = {
         results.forEach(function(ads) { allAds = allAds.concat(ads); });
 
         allAds.forEach(function(ad) {
-          if (!ad.campaign || ad.campaign.status !== 'ACTIVE') return;
-          var startDate = ad.campaign.start_time
-            ? ad.campaign.start_time.slice(0, 10)
-            : todayISO();
+          if (!ad.campaign) return;
+          var campStatus = ad.campaign.effective_status || ad.campaign.status || '';
+          var isActive = campStatus === 'ACTIVE';
+          var isKilled = KILLED_STATUSES.indexOf(campStatus) !== -1;
+          if (!isActive && !isKilled) return;
+
+          // Don't fall back to today if Meta has no start_time — stamping today would be wrong
+          var startDate = ad.campaign.start_time ? ad.campaign.start_time.slice(0, 10) : null;
+          // stop_time is a scheduled end date, not when manually paused; only use if present
+          var stopDate  = ad.campaign.stop_time  ? ad.campaign.stop_time.slice(0, 10)  : null;
 
           var candidateNames = [
             (ad.creative && ad.creative.name)  || '',
@@ -12758,11 +12775,12 @@ var App = {
             var camp = STATE.campaigns.find(function(c) {
               return String(c.id) === String(matchedAsset.campaignId);
             });
-            if (camp && !camp.goneLive) {
-              camp.goneLive = startDate;
-              totalUpdated++;
-              matched = true;
-            }
+            if (!camp) return;
+            var changed = false;
+            if (!camp.goneLive && startDate) { camp.goneLive = startDate; changed = true; }
+            // Only write killedDate if Meta actually returned a stop_time
+            if (isKilled && !camp.killedDate && stopDate) { camp.killedDate = stopDate; changed = true; }
+            if (changed && !matched) { totalUpdated++; matched = true; }
           });
         });
 
@@ -12770,8 +12788,8 @@ var App = {
 
         if (totalUpdated > 0) {
           saveState();
-          logAction('updated', 'Meta sync: ' + totalUpdated + ' campaign(s) marked live');
-          toast('\u2713 Synced \u2014 ' + totalUpdated + ' campaign' + (totalUpdated === 1 ? '' : 's') + ' marked live', 'success');
+          logAction('updated', 'Meta sync: ' + totalUpdated + ' campaign(s) updated (live + killed dates)');
+          toast('\u2713 Synced \u2014 ' + totalUpdated + ' campaign' + (totalUpdated === 1 ? '' : 's') + ' updated', 'success');
           render();
         } else if (!errors.length) {
           toast('Sync complete \u2014 no new matches found', '');
