@@ -8059,22 +8059,27 @@ function executeSheetImport() {
   var importedCampaigns = 0;
   var skippedCampaigns = 0;
   var importedAssets = 0;
+  var skippedAssets = 0;
   var errors = [];
 
   // Process each sheet as a campaign
   window._importData.sheets.forEach(function(sheet) {
     var campaignInfo = sheet.campaignInfo;
 
-    // Check for duplicate campaign
+    // Check for duplicate campaign — match on name + category so e.g. "[Beauty] Beck" and "[Perfume] Beck" are separate
     var isDupCampaign = STATE.campaigns.some(function(c) {
-      return c.country === 'UK' && c.name.toLowerCase() === campaignInfo.campaignName.toLowerCase();
+      return c.country === 'UK' &&
+        c.name.toLowerCase() === campaignInfo.campaignName.toLowerCase() &&
+        (c.category || '').toLowerCase() === (campaignInfo.category || '').toLowerCase();
     });
 
     var campaignId;
     if (isDupCampaign) {
       skippedCampaigns++;
       campaignId = STATE.campaigns.find(function(c) {
-        return c.country === 'UK' && c.name.toLowerCase() === campaignInfo.campaignName.toLowerCase();
+        return c.country === 'UK' &&
+          c.name.toLowerCase() === campaignInfo.campaignName.toLowerCase() &&
+          (c.category || '').toLowerCase() === (campaignInfo.category || '').toLowerCase();
       }).id;
     } else {
       campaignId = 'c' + (++STATE.nextCampaignId);
@@ -8109,6 +8114,7 @@ function executeSheetImport() {
       });
 
       if (isDupAsset) {
+        skippedAssets++;
         var existingAsset = STATE.assets.find(function(a) {
           return a.campaignId === campaignId && a.name.toLowerCase() === row['Video Name'].toLowerCase();
         });
@@ -8155,7 +8161,7 @@ function executeSheetImport() {
 
   saveState();
   toast('Imported ' + importedCampaigns + ' campaigns (' + skippedCampaigns + ' skipped), ' +
-        importedAssets + ' assets', 'success');
+        importedAssets + ' assets' + (skippedAssets > 0 ? ' (' + skippedAssets + ' already existed, skipped)' : ''), 'success');
   closeAllModals();
   render();
   // Force an immediate Firestore write instead of waiting for the 600ms debounce.
