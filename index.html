@@ -140,6 +140,10 @@
   .subcamp-item.done .rank-badge { background: color-mix(in srgb, #22c55e 20%, var(--bg4)); color: #22c55e; }
   .subcamp-item.done:hover { background: color-mix(in srgb, #22c55e 10%, var(--bg3)); }
   .live-badge { font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: var(--green-bg); color: var(--green-text); letter-spacing: 0.07em; text-transform: uppercase; flex-shrink: 0; border: 1px solid rgba(29,158,117,0.3); font-family: 'JetBrains Mono', monospace; }
+  .ad-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .ad-status-dot.dot-live   { background: #22c55e; box-shadow: 0 0 5px rgba(34,197,94,0.7); }
+  .ad-status-dot.dot-killed { background: #f59e0b; box-shadow: 0 0 5px rgba(245,158,11,0.7); }
+  .ad-status-dot.dot-notlive{ background: #ef4444; box-shadow: 0 0 5px rgba(239,68,68,0.5); }
   .drag-handle { flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text3); cursor: grab; padding: 2px 2px; user-select: none; line-height: 0.7; }
   .drag-handle:active { cursor: grabbing; }
   .drag-handle:hover { color: var(--text1); }
@@ -4381,6 +4385,10 @@ function showEditCampaignModal() {
         '<label class="form-label">Gone Live Date <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
         '<input id="f-cgonelive" type="date" class="form-input" value="' + escapeHtml(toISODate(c.goneLive || '')) + '" title="Date this campaign went live on-platform">' +
       '</div>' +
+      '<div class="form-row">' +
+        '<label class="form-label">Killed Date <span style="color:var(--text3); font-weight:400;">(optional — date ad was turned off)</span></label>' +
+        '<input id="f-ckilleddate" type="date" class="form-input" value="' + escapeHtml(toISODate(c.killedDate || '')) + '" title="Date this campaign was killed/turned off">' +
+      '</div>' +
       '<div class="form-row full">' +
         '<label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
           '<input type="checkbox" id="f-chideLinks" style="width:auto; margin:0;"' + (c.hideAssetLinkCols ? ' checked' : '') + '>' +
@@ -4407,6 +4415,7 @@ function showEditCampaignModal() {
     c.slackOverride = document.getElementById('f-cslack').value;
     c.monthYear = document.getElementById('f-cmonth').value || '';
     c.goneLive = document.getElementById('f-cgonelive').value || '';
+    c.killedDate = document.getElementById('f-ckilleddate').value || '';
     c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
     reorderCampaigns(true);
     STATE.expandedCountries[c.country] = true;
@@ -5013,6 +5022,7 @@ function renderSidebar() {
               'ondragend="App.onSubcampDragEnd(event)">' +
               '<span class="drag-handle" title="Drag to reorder">\u205D</span>' +
               '<div class="rank-badge">' + s.rank + '</div>' +
+              '<span class="ad-status-dot ' + (s.killedDate ? 'dot-killed' : s.goneLive ? 'dot-live' : 'dot-notlive') + '" title="' + (s.killedDate ? 'Killed ' + formatDate(s.killedDate) : s.goneLive ? 'Live since ' + formatDate(s.goneLive) : 'Not yet live') + '"></span>' +
               nameHtml +
               (isRenaming ? '' : categoryBadgeHtml(s.category)) +
               (s.goneLive ? '<span class="live-badge" title="Gone live: ' + escapeHtml(formatDate(s.goneLive)) + '">live</span>' : '') +
@@ -5215,7 +5225,19 @@ function renderCampaignsView() {
       var m = parseInt(my.slice(5, 7), 10) - 1;
       return '<span class="meta-chip"><span class="meta-chip-label">month</span>' + MONTH_SHORT[m] + ' ' + y + '</span>';
     })() +
-    (camp.goneLive ? '<span class="meta-chip" style="color:var(--green-text);border-color:rgba(29,158,117,0.3);background:rgba(29,158,117,0.07);"><span class="meta-chip-label">live</span>' + escapeHtml(formatDate(camp.goneLive)) + '</span>' : '') +
+    (function() {
+      if (!camp.goneLive) return '';
+      var liveChip = '<span class="meta-chip" style="color:var(--green-text);border-color:rgba(29,158,117,0.3);background:rgba(29,158,117,0.07);"><span class="meta-chip-label">live</span>' + escapeHtml(formatDate(camp.goneLive)) + '</span>';
+      var killedChip = '';
+      var durationChip = '';
+      if (camp.killedDate) {
+        killedChip = '<span class="meta-chip" style="color:#f59e0b;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.07);"><span class="meta-chip-label" style="color:rgba(245,158,11,0.6);">killed</span>' + escapeHtml(formatDate(camp.killedDate)) + '</span>';
+        var ms = new Date(camp.killedDate) - new Date(camp.goneLive);
+        var days = Math.round(ms / 86400000);
+        durationChip = '<span class="meta-chip" style="color:var(--text2);"><span class="meta-chip-label">ran</span>' + days + 'd</span>';
+      }
+      return liveChip + durationChip + killedChip;
+    })() +
     drivePill +
     briefPill +
     finalVideosPill +
