@@ -252,6 +252,10 @@
   .url-edit-pencil:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
   .url-copy-btn { background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text3); cursor: pointer; font-size: 11px; padding: 1px 4px; font-family: inherit; transition: all 0.12s; line-height: 1; }
   .url-copy-btn:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+  .date-approved-cell { display: flex; align-items: center; gap: 4px; }
+  .date-clear-btn { background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text3); cursor: pointer; font-size: 12px; padding: 0px 4px; font-family: inherit; transition: all 0.12s; line-height: 1; opacity: 0; }
+  .date-approved-cell:hover .date-clear-btn { opacity: 1; }
+  .date-clear-btn:hover { border-color: var(--red-text, #f85149); color: var(--red-text, #f85149); background: var(--red-bg, rgba(248,81,73,0.1)); }
   .no-link { font-size: 12px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
   .editor-cell { display: flex; align-items: center; gap: 7px; }
   .editor-avatar { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
@@ -1572,6 +1576,74 @@ var HubSync = {
     });
 })();
 
+// ===================== GOOGLE SHEETS SYNC =====================
+// Debounced POST to a Google Apps Script Web App deployment URL.
+// The GAS script receives campaigns + assets JSON and writes the
+// formatted sheet (section headers, colors, fonts) automatically.
+var GSheets = {
+  _timer: null,
+  _lastSyncAt: null,
+  _syncing: false,
+
+  scheduleSync: function() {
+    if (!STATE.sheetsWebhookUrl) return;
+    if (GSheets._timer) clearTimeout(GSheets._timer);
+    GSheets._timer = setTimeout(GSheets.sync, 4000);
+  },
+
+  sync: function() {
+    GSheets._timer = null;
+    var url = (STATE.sheetsWebhookUrl || '').trim();
+    if (!url) return;
+    GSheets._syncing = true;
+    GSheets._updateStatus('syncing');
+
+    var payload = {
+      campaigns: STATE.campaigns,
+      assets: STATE.assets,
+      syncedAt: new Date().toISOString()
+    };
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    }).then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function(json) {
+      GSheets._syncing = false;
+      GSheets._lastSyncAt = new Date();
+      GSheets._updateStatus('ok');
+      if (typeof toast === 'function') toast('Synced to Google Sheets ✔', 'success');
+    }).catch(function(err) {
+      GSheets._syncing = false;
+      GSheets._updateStatus('error');
+      console.warn('[GSheets] sync failed:', err);
+      if (typeof toast === 'function') toast('Google Sheets sync failed — check the URL in Config', 'error');
+    });
+  },
+
+  _updateStatus: function(state) {
+    // Update the inline status badge inside the Config section if visible
+    var el = document.getElementById('gsheets-status');
+    if (!el) return;
+    if (state === 'syncing') {
+      el.innerHTML = '<span style="color:var(--text3)">&#9696; Syncing…</span>';
+    } else if (state === 'ok') {
+      var t = GSheets._lastSyncAt;
+      var label = t ? t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'just now';
+      el.innerHTML = '<span style="color:var(--green-text)">✔ Last synced ' + label + '</span>';
+    } else if (state === 'error') {
+      el.innerHTML = '<span style="color:var(--red-text)">⚠ Sync failed — check URL</span>';
+    } else {
+      el.innerHTML = GSheets._lastSyncAt
+        ? '<span style="color:var(--text3)">Last synced ' + GSheets._lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</span>'
+        : '<span style="color:var(--text3)">Not synced yet</span>';
+    }
+  }
+};
+
 function showSigninOverlay(errorMsg) {
   var overlay = document.getElementById('signin-overlay');
   var app = document.getElementById('app');
@@ -1710,6 +1782,7 @@ var Fb = {
     var TARGET_BYTES = 900 * 1024;
     var snap = {
       schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
+      sheetsWebhookUrl: STATE.sheetsWebhookUrl,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
       categoryHeadWebhook: STATE.categoryHeadWebhook,
@@ -2053,6 +2126,7 @@ var Fb = {
         Fb._updateSyncDom();
       }, 2500);
       HubSync.schedulePush();
+      GSheets.scheduleSync();
     }).catch(function(err) {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
@@ -2588,6 +2662,9 @@ var STATE = {
   statusFilter: 'all',
   editorFilter: 'all',
   qcFilter: 'all',
+  // Google Sheets backup sync — Apps Script Web App URL. When set, tracker POSTs
+  // a JSON snapshot of campaigns + assets after each Firestore save (debounced).
+  sheetsWebhookUrl: '',
   webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
   countryWebhooks: { UK: '', IT: '', ES: '', US: '', PL: '' },
   // Single webhook URL for all Category Head QC batches. When set, every CHQ batch
@@ -3020,7 +3097,8 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     //   - editor is swapped to a new person while status is Assigned
     // Stays null for seeded data without an assignment event \u2014 those rows won't show up
     // in "To Do Today" by assignment date, only by ETA matching.
-    assignedAt: editor ? todayISO() : ''
+    assignedAt: editor ? todayISO() : '',
+    adStatus: ''
   };
 }
 
@@ -3398,6 +3476,14 @@ function renderEditableCell(asset, field) {
     // derived from filename, edit happens by renaming).
     if (def.readOnly) {
       return '<div class="editable-cell editable-cell-readonly">' + def.display(asset) + '</div>';
+    }
+    // Date-approved fields: show a small clear button when a date is set
+    if ((field === 'dateApproved' || field === 'chDateApproved') && def.value(asset)) {
+      var appMethod = def.appMethod;
+      return '<div class="editable-cell date-approved-cell">' +
+        '<span onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" title="Click to edit">' + def.display(asset) + '</span>' +
+        ' <button type="button" class="date-clear-btn" onclick="event.stopPropagation();App.' + appMethod + '(\'' + asset.id + '\', \'\')" title="Remove date">×</button>' +
+      '</div>';
     }
     return '<div class="editable-cell" onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" title="Click to edit ' + field + '">' +
       def.display(asset) +
@@ -7547,6 +7633,7 @@ function importCampaignsAndAssets(campaignsData, assetsData) {
         asset.editingBrief = row.editingBrief || asset.editingBrief;
         asset.finalVideo = row.finalVideo || '';
         if (row.dateApproved) asset.dateApproved = row.dateApproved;
+        if (row.adStatus) asset.adStatus = row.adStatus;
 
         STATE.assets.push(asset);
         importedAssets++;
@@ -7824,14 +7911,25 @@ function showImportModal() {
 }
 
 function extractCampaignNameFromFilename(filename) {
-  // Parse "Apr '26 Videos - [TCG] CardHalo.csv" → { monthYear: "Apr '26", category: "TCG", name: "CardHalo" }
+  // Parse "Jan '26 Ads - [Vintage] KV.csv" → { monthYear: "2026-01", category: "Vintage", campaignName: "KV" }
+  var MONTH_NAME_MAP = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
   var nameWithoutExt = filename.replace(/\.csv$/i, '');
   var match = nameWithoutExt.match(/^(.*?)\s*-\s*\[(.*?)\]\s*(.*?)$/);
   if (match) {
+    // Strip trailing label words like "Ads", "Videos", "Organic" from the month prefix
+    var monthRaw = match[1].trim().replace(/\s+(Ads|Videos?|Organic|Paid)\s*$/i, '').trim();
+    // Convert "Jan '26" or "Jan 2026" → "2026-01" (YYYY-MM as expected by the rest of the app)
+    var monthISO = '';
+    var mMatch = monthRaw.match(/^([A-Za-z]+)\s+'?(\d{2,4})$/);
+    if (mMatch) {
+      var mNum = MONTH_NAME_MAP[mMatch[1].toLowerCase().slice(0, 3)];
+      var yr = mMatch[2].length === 2 ? '20' + mMatch[2] : mMatch[2];
+      if (mNum) monthISO = yr + '-' + (mNum < 10 ? '0' + mNum : mNum);
+    }
     return {
-      monthYear: match[1].trim(),
+      monthYear: monthISO || monthRaw,
       category: match[2].trim(),
-      campaignName: '[' + match[2].trim() + '] ' + match[3].trim()
+      campaignName: match[3].trim()
     };
   }
   return { monthYear: '', category: '', campaignName: nameWithoutExt };
@@ -8037,9 +8135,17 @@ function executeSheetImport() {
         asset.editingBrief = getCol(row, ['Editing Brief', 'Brief']) || asset.editingBrief;
         asset.finalVideo = getCol(row, ['Final Video', 'Video']) || '';
         asset.rawVideo = getCol(row, ['Raw Video File', 'Drive Link', 'Drive', 'Raw Video', 'Raw Video Link', 'Raw Video URL', 'Google Drive']) || '';
-        if (row['Date Approved']) asset.dateApproved = toISODate(row['Date Approved']);
-        if (row['Status'] && row['Status'].includes('Appro')) asset.status = 'Approved';
-        if (row['Editor']) asset.status = 'Assigned';
+        if (row['Date Approved']) {
+          var approvedDate = toISODate(row['Date Approved']);
+          asset.dateApproved = approvedDate;
+          asset.status = 'Approved';
+          asset.categoryHeadQc = 'Approved';
+          asset.chDateApproved = approvedDate;
+        } else if (row['Status'] && row['Status'].includes('Appro')) {
+          asset.status = 'Approved';
+        } else if (row['Editor']) {
+          asset.status = 'Assigned';
+        }
 
         STATE.assets.push(asset);
         importedAssets++;
@@ -8346,6 +8452,7 @@ function executeItalyImport() {
       asset.igLink = igLink;
       asset.rawVideo = rawVideo;
       asset.status = status;
+      asset.adStatus = (c[m.ST_AD] || '').trim();
       if (dateApproved) asset.dateApproved = dateApproved;
       STATE.assets.push(asset);
       imported++;
@@ -9359,6 +9466,141 @@ function renderConfigView() {
       '<div class="config-row"><div class="config-label">Status</div><div class="config-value">Draft / Assigned / For Review / Needs Revisions / Approved</div></div>' +
       '<div class="config-row"><div class="config-label">Version</div><div class="config-value">V1, V2...</div></div>' +
       '<div class="config-row" style="border-bottom:none"><div class="config-label">Campaign</div><div class="config-value">Link to Campaigns</div></div>' +
+    '</div>' +
+
+    '<div class="section-title" style="margin-top:24px;">Google Sheets Backup</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-header">' +
+        '<div class="auto-icon" style="font-size:18px;">📊</div>' +
+        '<div><div class="auto-title">Auto-sync to Google Sheets</div>' +
+        '<div class="auto-sub">writes all campaigns &amp; assets to your sheet after every save</div></div>' +
+      '</div>' +
+      '<div class="auto-desc" style="margin-bottom:14px;">Paste your <strong>Google Apps Script Web App URL</strong> below. After each Firestore save the tracker POSTs a snapshot — the script writes one sheet tab per campaign, formatted with section headers, fonts, and colors matching your Tilt Ads Sheet layout.</div>' +
+      '<div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
+        '<input id="gsheets-url-input" type="text" class="form-input" style="flex:1; font-family:\'JetBrains Mono\',monospace; font-size:12px;" ' +
+          'placeholder="https://script.google.com/macros/s/AKfy.../exec" ' +
+          'value="' + escapeHtml(STATE.sheetsWebhookUrl || '') + '" ' +
+          'onblur="App.saveSheetsWebhookUrl(this.value)">' +
+        '<button class="run-btn" style="white-space:nowrap;" onclick="App.syncSheetsNow()">&#9654; Sync now</button>' +
+      '</div>' +
+      '<div id="gsheets-status" style="font-size:11px; font-family:\'JetBrains Mono\',monospace; min-height:16px; margin-bottom:14px;">' +
+        (STATE.sheetsWebhookUrl ? '<span style="color:var(--text3)">Not synced yet this session</span>' : '<span style="color:var(--text3)">No URL set</span>') +
+      '</div>' +
+      '<details style="margin-top:4px;">' +
+        '<summary style="font-size:12px; font-weight:600; color:var(--accent2); cursor:pointer; user-select:none; margin-bottom:10px;">&#9656; Show Apps Script setup instructions</summary>' +
+        '<div style="font-size:12px; color:var(--text2); line-height:1.7; margin-bottom:10px;">' +
+          '1. Open your Tilt Ads Google Sheet.<br>' +
+          '2. Click <strong>Extensions → Apps Script</strong>.<br>' +
+          '3. Delete any existing code, paste the script below, click <strong>Save</strong>.<br>' +
+          '4. Click <strong>Deploy → New deployment</strong>. Type: <em>Web app</em>. Execute as: <em>Me</em>. Who has access: <em>Anyone</em>. Click <strong>Deploy</strong> and authorise.<br>' +
+          '5. Copy the <em>Web app URL</em> and paste it into the field above.' +
+        '</div>' +
+        '<div style="position:relative;">' +
+          '<button class="edit-btn" style="position:absolute;top:8px;right:8px;z-index:1;font-size:11px;" ' +
+            'onclick="(function(){var el=document.getElementById(\'gsheets-script-code\');navigator.clipboard&&navigator.clipboard.writeText(el.innerText).then(function(){App._toast(\'Script copied\',\'success\');}).catch(function(){});})()">Copy</button>' +
+          '<pre id="gsheets-script-code" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:10.5px;font-family:\'JetBrains Mono\',monospace;color:var(--text2);overflow-x:auto;white-space:pre;line-height:1.5;max-height:320px;overflow-y:auto;">' + escapeHtml(
+'function doGet(e) {\n' +
+'  return ContentService.createTextResponse(\'Tilt Tracker — Google Sheets Sync (POST only)\')\n' +
+'    .setMimeType(ContentService.MimeType.TEXT);\n' +
+'}\n\n' +
+'function doPost(e) {\n' +
+'  try {\n' +
+'    var data = JSON.parse(e.postData.contents);\n' +
+'    var ss = SpreadsheetApp.getActiveSpreadsheet();\n' +
+'    var campaigns = data.campaigns || [];\n' +
+'    var assets = data.assets || [];\n' +
+'    campaigns.forEach(function(camp) {\n' +
+'      var my = (camp.monthYear || \'\').trim();\n' +
+'      var cat = (camp.category || \'\').trim();\n' +
+'      var name = (my ? my + \' Videos - \' : \'\') + (cat ? \'[\' + cat + \'] \' : \'\') + camp.name;\n' +
+'      var sheetName = name.substring(0, 100);\n' +
+'      var campAssets = assets.filter(function(a) { return a.campaignId === camp.id; });\n' +
+'      var sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);\n' +
+'      writeSheet(sheet, campAssets);\n' +
+'    });\n' +
+'    return ContentService.createTextResponse(JSON.stringify({ok:true}))\n' +
+'      .setMimeType(ContentService.MimeType.JSON);\n' +
+'  } catch(err) {\n' +
+'    return ContentService.createTextResponse(JSON.stringify({ok:false,error:err.message}))\n' +
+'      .setMimeType(ContentService.MimeType.JSON);\n' +
+'  }\n' +
+'}\n\n' +
+'function writeSheet(sheet, assets) {\n' +
+'  sheet.clearContents();\n' +
+'  sheet.clearFormats();\n' +
+'  sheet.clearMerges();\n' +
+'  var needed = assets.length + 3;\n' +
+'  if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());\n' +
+'  if (sheet.getMaxColumns() < 9) sheet.insertColumnsAfter(sheet.getMaxColumns(), 9 - sheet.getMaxColumns());\n\n' +
+'  // Row 1 — black bar\n' +
+'  var r1 = sheet.getRange(1,1,1,9);\n' +
+'  r1.merge(); r1.setBackground(\'#000000\'); r1.setValue(\'\');\n' +
+'  sheet.setRowHeight(1, 8);\n\n' +
+'  // Row 2 — section headers\n' +
+'  sheet.setRowHeight(2, 120);\n' +
+'  var sections = [\n' +
+'    {label:\'Overview\',      col:1, span:2, bg:\'#FFF2CC\'},\n' +
+'    {label:\'Editing Space\', col:3, span:3, bg:\'#FFE599\'},\n' +
+'    {label:\'Quality Check\', col:6, span:3, bg:\'#F9CB9C\'},\n' +
+'    {label:\'Ad Space\',      col:9, span:1, bg:\'#CFE2F3\'}\n' +
+'  ];\n' +
+'  sections.forEach(function(s) {\n' +
+'    var r = sheet.getRange(2, s.col, 1, s.span);\n' +
+'    if (s.span > 1) r.merge();\n' +
+'    r.setValue(s.label);\n' +
+'    r.setBackground(s.bg);\n' +
+'    r.setFontFamily(\'Arial\');\n' +
+'    r.setFontSize(45);\n' +
+'    r.setFontWeight(\'bold\');\n' +
+'    r.setHorizontalAlignment(\'center\');\n' +
+'    r.setVerticalAlignment(\'middle\');\n' +
+'    r.setWrap(true);\n' +
+'  });\n\n' +
+'  // Row 3 — sub-headers\n' +
+'  sheet.setRowHeight(3, 30);\n' +
+'  var headers = [\'PN #\',\'Video Name\',\'Raw Video File\',\'Editing Brief\',\'Editor\',\'Video\',\'Date Approved\',\'Status\',\'Ad Status\'];\n' +
+'  var hBgs   = [\'#FFF2CC\',\'#FFF2CC\',\'#FFE599\',\'#FFE599\',\'#FFE599\',\'#F9CB9C\',\'#F9CB9C\',\'#F9CB9C\',\'#CFE2F3\'];\n' +
+'  headers.forEach(function(h, i) {\n' +
+'    var c = sheet.getRange(3, i+1);\n' +
+'    c.setValue(h);\n' +
+'    c.setFontFamily(\'Montserrat\');\n' +
+'    c.setFontSize(10);\n' +
+'    c.setFontWeight(\'bold\');\n' +
+'    c.setHorizontalAlignment(\'center\');\n' +
+'    c.setVerticalAlignment(\'middle\');\n' +
+'    c.setBackground(hBgs[i]);\n' +
+'  });\n\n' +
+'  // Data rows\n' +
+'  var editorColors = {Zidni:\'#F6B26B\',Sharm:\'#F6B26B\',Patty:\'#93C47D\',Elsa:\'#6FA8DC\'};\n' +
+'  assets.forEach(function(a, idx) {\n' +
+'    var row = 4 + idx;\n' +
+'    sheet.setRowHeight(row, 21);\n' +
+'    function cell(c) {\n' +
+'      var r = sheet.getRange(row, c);\n' +
+'      r.setFontFamily(\'Arial\'); r.setFontSize(10); r.setFontWeight(\'normal\');\n' +
+'      return r;\n' +
+'    }\n' +
+'    cell(1).setValue(idx + 1);\n' +
+'    cell(2).setValue(a.name || \'\');\n' +
+'    if (a.rawVideo)      cell(3).setFormula(\'=HYPERLINK("\' + a.rawVideo + \'","View")\');\n' +
+'    else                 cell(3).setValue(\'\');\n' +
+'    if (a.editingBrief)  cell(4).setFormula(\'=HYPERLINK("\' + a.editingBrief + \'","View")\');\n' +
+'    else                 cell(4).setValue(\'\');\n' +
+'    var ec = cell(5); ec.setValue(a.editor || \'\');\n' +
+'    if (editorColors[a.editor]) ec.setBackground(editorColors[a.editor]);\n' +
+'    if (a.finalVideo)    cell(6).setFormula(\'=HYPERLINK("\' + a.finalVideo + \'","View")\');\n' +
+'    else                 cell(6).setValue(\'\');\n' +
+'    cell(7).setValue(a.dateApproved || \'\');\n' +
+'    cell(8).setValue(a.status || \'\');\n' +
+'    cell(9).setValue(a.adStatus || \'\');\n' +
+'  });\n\n' +
+'  // Column widths\n' +
+'  var widths = [55,220,200,200,110,140,120,120,120];\n' +
+'  widths.forEach(function(w,i){ sheet.setColumnWidth(i+1, w); });\n' +
+'}'
+          ) + '</pre>' +
+        '</div>' +
+      '</details>' +
     '</div>' +
 
     '<div class="section-title" style="color:var(--red-text); margin-top:24px;">Danger Zone</div>' +
@@ -13222,6 +13464,26 @@ var App = {
     logAction('updated', 'Slack workspace URL ' + (trimmed === '' ? 'cleared' : 'updated'));
   },
   resetAllData: resetAllData,
+
+  saveSheetsWebhookUrl: function(v) {
+    var trimmed = (v || '').trim();
+    if (STATE.sheetsWebhookUrl === trimmed) return;
+    STATE.sheetsWebhookUrl = trimmed;
+    saveState();
+    logAction('updated', 'Google Sheets webhook URL ' + (trimmed ? 'set' : 'cleared'));
+    render();
+  },
+
+  syncSheetsNow: function() {
+    var url = (STATE.sheetsWebhookUrl || '').trim();
+    if (!url) {
+      toast('Set a Google Apps Script URL first', 'error');
+      return;
+    }
+    GSheets.sync();
+  },
+
+  _toast: function(msg, type) { toast(msg, type); },
 
   // CSV Import/Export functions
   showImportModal: showImportModal,
