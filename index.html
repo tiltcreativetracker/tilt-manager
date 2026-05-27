@@ -12727,19 +12727,29 @@ var App = {
 
     var KILLED_STATUSES = ['PAUSED', 'DELETED', 'ARCHIVED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED'];
 
+    // Fetch all pages for one account, following next-page cursors
+    function fetchAllAdsForAccount(accountId) {
+      var firstUrl = apiBase + '/act_' + accountId + '/ads' +
+        '?fields=' + fields +
+        '&limit=100' +
+        '&access_token=' + encodeURIComponent(token);
+      function fetchPage(url, accumulated) {
+        return fetch(url)
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) { errors.push('act_' + accountId + ': ' + data.error.message); return accumulated; }
+            var all = accumulated.concat(data.data || []);
+            var next = data.paging && data.paging.next;
+            return next ? fetchPage(next, all) : all;
+          });
+      }
+      return fetchPage(firstUrl, [])
+        .catch(function(err) { errors.push('act_' + accountId + ': ' + err.message); return []; });
+    }
+
     // Fetch all accounts in parallel, then process results together
     var fetches = accountIds.map(function(accountId) {
-      var url = apiBase + '/act_' + accountId + '/ads' +
-        '?fields=' + fields +
-        '&limit=500' +
-        '&access_token=' + encodeURIComponent(token);
-      return fetch(url)
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) { errors.push('act_' + accountId + ': ' + data.error.message); return []; }
-          return data.data || [];
-        })
-        .catch(function(err) { errors.push('act_' + accountId + ': ' + err.message); return []; });
+      return fetchAllAdsForAccount(accountId);
     });
 
     Promise.all(fetches)
