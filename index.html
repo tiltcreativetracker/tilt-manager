@@ -12778,22 +12778,29 @@ var App = {
             ad.name || ''
           ];
 
+          // Find the first candidate name that matches a tracker campaign
+          var camp = null;
           candidateNames.forEach(function(rawName) {
+            if (camp) return;
             var key = rawName.toLowerCase().replace(/\.[^.]+$/, '').trim();
             if (!key || !assetNames[key]) return;
-            var camp = STATE.campaigns.find(function(c) {
+            camp = STATE.campaigns.find(function(c) {
               return String(c.id) === String(assetNames[key].campaignId);
-            });
-            if (!camp) return;
-            if (!camp.goneLive && startDate) { camp.goneLive = startDate; totalUpdated++; }
-            if (isKilled && !camp.killedDate) {
-              if (stopDate) { camp.killedDate = stopDate; totalUpdated++; }
-              else if (!killedNeedingDate[ad.campaign.id]) { killedNeedingDate[ad.campaign.id] = camp; }
-            }
+            }) || null;
           });
-        });
+          if (!camp) return;
 
-        if (errors.length) toast('Some accounts failed: ' + errors.join('; '), 'error');
+          // Set goneLive once per tracker campaign
+          if (!camp.goneLive && startDate) { camp.goneLive = startDate; totalUpdated++; }
+
+          // Set killedDate — use stop_time if available, otherwise queue for activities lookup
+          if (isKilled && !camp.killedDate) {
+            if (stopDate) { camp.killedDate = stopDate; totalUpdated++; }
+            else if (!killedNeedingDate[ad.campaign.id]) {
+              killedNeedingDate[ad.campaign.id] = camp;
+            }
+          }
+        });
 
         // Pass 2: batch-fetch activities for killed campaigns with no killedDate.
         // Meta Batch API: up to 50 sub-requests per HTTP call, all fired in parallel.
@@ -12801,6 +12808,7 @@ var App = {
 
         function fetchActivitiesBatch(ids) {
           if (!ids.length) return Promise.resolve();
+          var PAUSE_EVENTS = ['UPDATE_CAMPAIGN_RUN_STATUS', 'CAMPAIGN_PAUSED', 'UPDATE_AD_RUN_STATUS'];
           var batchFetches = [];
           for (var i = 0; i < ids.length; i += 50) {
             (function(batchIds) {
@@ -12816,20 +12824,22 @@ var App = {
                 })
                 .then(function(res) { return res.json(); })
                 .then(function(batchResults) {
-                  var PAUSE_EVENTS = ['UPDATE_CAMPAIGN_RUN_STATUS', 'CAMPAIGN_PAUSED', 'UPDATE_AD_RUN_STATUS'];
                   batchResults.forEach(function(result, idx) {
                     if (!result || result.code !== 200) return;
                     var body = JSON.parse(result.body);
                     var killEvent = null;
                     (body.data || []).forEach(function(ev) {
                       if (PAUSE_EVENTS.indexOf(ev.event_type) !== -1) {
-                        if (!killEvent || ev.event_time > killEvent.event_time) killEvent = ev;
+                        // Use Date parsing to compare correctly across timezones
+                        if (!killEvent || new Date(ev.event_time) > new Date(killEvent.event_time)) {
+                          killEvent = ev;
+                        }
                       }
                     });
                     if (killEvent) {
-                      var camp = killedNeedingDate[batchIds[idx]];
-                      if (camp && !camp.killedDate) {
-                        camp.killedDate = killEvent.event_time.slice(0, 10);
+                      var matchedCamp = killedNeedingDate[batchIds[idx]];
+                      if (matchedCamp && !matchedCamp.killedDate) {
+                        matchedCamp.killedDate = killEvent.event_time.slice(0, 10);
                         totalUpdated++;
                       }
                     }
@@ -12843,6 +12853,8 @@ var App = {
         }
 
         fetchActivitiesBatch(killedIds).then(function() {
+          // Show any errors that accumulated across both passes
+          if (errors.length) toast('Some requests failed: ' + errors.join('; '), 'error');
           if (totalUpdated > 0) {
             saveState();
             logAction('updated', 'Meta sync: ' + totalUpdated + ' campaign(s) updated (live + killed dates)');
