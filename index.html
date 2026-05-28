@@ -2870,7 +2870,7 @@ function getAvailableTallyMonths() {
 function countVideosByMonthYear(monthKey, filterFn) {
   var n = 0;
   STATE.assets.forEach(function(a) {
-    if (a.status === 'Cancelled') return;
+    if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return;
     var camp = findCampaignById(a.campaignId);
     if (!camp) return;
     if ((camp.monthYear || '') !== monthKey) return;
@@ -7548,9 +7548,11 @@ function importCampaignsAndAssets(campaignsData, assetsData) {
         return;
       }
 
-      // Check for duplicate
+      // Check for duplicate — match on country + name + monthYear so same-name campaigns in different months are kept separate
       var isDup = STATE.campaigns.some(function(c) {
-        return c.country === row.country && c.name.toLowerCase() === row.name.toLowerCase();
+        return c.country === row.country &&
+          c.name.toLowerCase() === row.name.toLowerCase() &&
+          (c.monthYear || '') === (row.monthYear || '');
       });
 
       if (isDup) {
@@ -9046,7 +9048,10 @@ function renderContentView() {
     if (cc === 'all') return allActive;
     return allActive.filter(function(a) {
       var camp = findCampaignById(a.campaignId);
-      return camp && camp.country === cc;
+      if (!camp || camp.country !== cc) return false;
+      // UK is scoped to Paid Ads only, matching the Board's 200/month tally
+      if (cc === 'UK' && (camp.type || 'Paid Ads') !== 'Paid Ads') return false;
+      return true;
     });
   }
 
