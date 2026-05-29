@@ -2435,6 +2435,15 @@ var Presence = {
     Presence.subscribe();
     _presenceHeartbeat = setInterval(Presence.update, 30000);
     window.addEventListener('beforeunload', Presence.leave);
+    // Warn the user if they try to reload/close while a Firestore save is still
+    // pending (debounce timer running or a failed write waiting to retry).
+    // Browsers show a generic "Changes you made may not be saved" dialog.
+    window.addEventListener('beforeunload', function(e) {
+      if (typeof Fb !== 'undefined' && (Fb._uploadTimer || Fb._pendingLocalJson)) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
   }
 };
 
