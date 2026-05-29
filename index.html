@@ -8667,10 +8667,11 @@ function renderReportingView() {
 
     var approvedCount = STATE.assets.filter(function(a) {
       var c = findCampaignById(a.campaignId);
-      if (!c) return false;
-      if (country !== 'all' && c.country !== country) return false;
-      if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
-      return paceApprovedInRange(a, c.country);
+      if (c) {
+        if (country !== 'all' && c.country !== country) return false;
+        if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
+      }
+      return paceApprovedInRange(a, c ? c.country : '');
     }).length;
 
     return '<div class="report-pace-wrap">' +
