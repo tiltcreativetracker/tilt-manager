@@ -8680,27 +8680,41 @@ function renderReportingView() {
     if (type === 'Organic') filterLabel = (country !== 'all' ? country + ' ' : '') + 'Organic';
     if (type === 'all' && country === 'all') filterLabel = 'All campaigns';
 
-    var addedCount = STATE.assets.filter(function(a) {
-      var c = findCampaignById(a.campaignId);
-      if (c) {
-        if (country !== 'all' && c.country !== country) return false;
-        if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
-      }
-      // Count any asset whose ETA, PM approval, or CH approval date falls in range
-      var dEst = a.estDelivery || '';
-      var dAp  = a.dateApproved || '';
-      var dCh  = a.chDateApproved || '';
-      return (dEst && dEst >= range.start && dEst <= range.end) ||
-             (dAp  && dAp  >= range.start && dAp  <= range.end) ||
-             (dCh  && dCh  >= range.start && dCh  <= range.end);
-    }).length;
+    var displayCount, subLabel;
+    if (approval === 'all') {
+      // "All" approval filter: count every asset in range regardless of approval status
+      displayCount = STATE.assets.filter(function(a) {
+        var c = findCampaignById(a.campaignId);
+        if (c) {
+          if (country !== 'all' && c.country !== country) return false;
+          if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
+        }
+        var dEst = a.estDelivery || '';
+        var dAp  = a.dateApproved || '';
+        var dCh  = a.chDateApproved || '';
+        return (dEst && dEst >= range.start && dEst <= range.end) ||
+               (dAp  && dAp  >= range.start && dAp  <= range.end) ||
+               (dCh  && dCh  >= range.start && dCh  <= range.end);
+      }).length;
+      subLabel = 'videos in tracker ' + periodLabel;
+    } else {
+      displayCount = STATE.assets.filter(function(a) {
+        var c = findCampaignById(a.campaignId);
+        if (c) {
+          if (country !== 'all' && c.country !== country) return false;
+          if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
+        }
+        return paceApprovedInRange(a, c ? c.country : '');
+      }).length;
+      subLabel = paceApprovalLabel + ' videos ' + periodLabel;
+    }
 
     return '<div class="report-pace-wrap">' +
       '<div class="report-pace-header">' +
         '<span class="report-pace-title">' + escapeHtml(filterLabel) + ' · ' + periodLabelCap + '</span>' +
-        '<span class="report-pace-meta" style="font-size:13px;font-weight:700;color:var(--text1);">' + addedCount + '</span>' +
+        '<span class="report-pace-meta" style="font-size:13px;font-weight:700;color:var(--text1);">' + displayCount + '</span>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">videos in tracker ' + periodLabel + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + subLabel + '</div>' +
     '</div>';
   })();
 
