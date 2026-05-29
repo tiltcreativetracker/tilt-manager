@@ -2660,6 +2660,8 @@ var STATE = {
   statusFilter: 'all',
   editorFilter: 'all',
   qcFilter: 'all',
+  dateApprovedFilter: '',
+  estDeliveryFilter: '',
   // Google Sheets backup sync — Apps Script Web App URL. When set, tracker POSTs
   // a JSON snapshot of campaigns + assets after each Firestore save (debounced).
   sheetsWebhookUrl: '',
@@ -2783,6 +2785,7 @@ var STATE = {
 };
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayLocalISO() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function todayUK() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); }
 
 // Returns { start, end } as YYYY-MM-DD ISO strings covering the current ISO week
@@ -3690,6 +3693,8 @@ function getFilteredAssets() {
   if (STATE.statusFilter !== 'all') list = list.filter(function(a) { return a.status === STATE.statusFilter; });
   if (STATE.editorFilter !== 'all') list = list.filter(function(a) { return a.editor === STATE.editorFilter; });
   if (STATE.qcFilter !== 'all') list = list.filter(function(a) { return (a.qc || 'Draft') === STATE.qcFilter; });
+  if (STATE.dateApprovedFilter) list = list.filter(function(a) { return a.dateApproved === STATE.dateApprovedFilter; });
+  if (STATE.estDeliveryFilter) list = list.filter(function(a) { return a.estDelivery === STATE.estDeliveryFilter; });
   return list.sort(function(a, b) { return a.pn - b.pn; });
 }
 
@@ -5370,6 +5375,8 @@ function renderCampaignsView() {
         QC_VALUES.map(function(v) { return '<option' + (STATE.qcFilter === v ? ' selected' : '') + '>' + v + '</option>'; }).join('') +
       '</select>' +
       '<select class="filter-select" onchange="App.onEditorFilter(this.value)">' + editorFilterOpts + '</select>' +
+      '<input type="date" class="filter-select" title="Filter by Date Approved" value="' + escapeHtml(STATE.dateApprovedFilter) + '" onchange="App.onDateApprovedFilter(this.value)" style="color:' + (STATE.dateApprovedFilter ? 'var(--text1)' : 'var(--text3)') + ';width:148px;">' +
+      '<input type="date" class="filter-select" title="Filter by Est. Delivery" value="' + escapeHtml(STATE.estDeliveryFilter) + '" onchange="App.onEstDeliveryFilter(this.value)" style="color:' + (STATE.estDeliveryFilter ? 'var(--text1)' : 'var(--text3)') + ';width:148px;">' +
       '<span class="count-chip">' + filtered.length + ' / ' + totalForCamp + ' rows</span>' +
       (function() {
         var assignedCount = STATE.assets.filter(function(a) { return String(a.campaignId) === String(camp.id) && a.status === 'Assigned'; }).length;
@@ -5690,7 +5697,7 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
     // Stamp dateApproved on the transition INTO Approved (only if not already set).
     // Needed for daily / weekly / monthly tally math.
     if (targetStatus === 'Approved' && oldStatus !== 'Approved' && !a.dateApproved) {
-      a.dateApproved = todayISO();
+      a.dateApproved = todayLocalISO();
     }
     // Card is leaving the To Do column \u2014 clear any drag-lock so it doesn't follow the
     // card around to other columns. Drag-lock only makes sense within Assigned/To Do.
@@ -11157,7 +11164,7 @@ var App = {
   bulkApproveAssigned: function() {
     var camp = getActiveCampaign();
     if (!camp) return;
-    var today = todayISO();
+    var today = todayLocalISO();
     var targets = STATE.assets.filter(function(a) {
       return String(a.campaignId) === String(camp.id) && a.status === 'Assigned';
     });
@@ -11253,7 +11260,7 @@ var App = {
     // manually-set approval dates from the editor aren't overwritten). Needed for the
     // daily / weekly / monthly tally math.
     if (newStatus === 'Approved' && oldStatus !== 'Approved') {
-      a.dateApproved = todayISO();
+      a.dateApproved = todayLocalISO();
     }
     // Card leaving the To Do column \u2014 clear drag-lock so it doesn't follow the card to
     // other status columns. Also clear when card transitions INTO Assigned from elsewhere
@@ -11999,7 +12006,7 @@ var App = {
     if (old === newVal) { render(); return; }
     a.categoryHeadQc = newVal;
     if (newVal === 'Approved') {
-      a.chDateApproved = todayISO();
+      a.chDateApproved = todayLocalISO();
     } else {
       a.chDateApproved = '';
     }
@@ -13356,6 +13363,8 @@ var App = {
   onStatusFilter: function(v) { STATE.statusFilter = v; render(); },
   onEditorFilter: function(v) { STATE.editorFilter = v; render(); },
   onQcFilter: function(v) { STATE.qcFilter = v; render(); },
+  onDateApprovedFilter: function(v) { STATE.dateApprovedFilter = v; render(); },
+  onEstDeliveryFilter: function(v) { STATE.estDeliveryFilter = v; render(); },
   setSchedulerDate: function(v) { STATE.schedulerDate = v; render(); },
   toggleWeekends: function(v) { STATE.schedulerIncludeWeekends = v; render(); },
   clearSchedule: clearSchedule,
