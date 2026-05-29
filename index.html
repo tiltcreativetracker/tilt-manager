@@ -8665,6 +8665,14 @@ function renderReportingView() {
     if (type === 'Organic') filterLabel = (country !== 'all' ? country + ' ' : '') + 'Organic';
     if (type === 'all' && country === 'all') filterLabel = 'All campaigns';
 
+    var _dbgAll = STATE.assets.filter(function(a) { return paceApprovedInRange(a, ''); });
+    var _dbgNoCamp = _dbgAll.filter(function(a) { return !findCampaignById(a.campaignId); });
+    var _dbgWrongType = _dbgAll.filter(function(a) { var c = findCampaignById(a.campaignId); return c && type !== 'all' && (c.type || 'Paid Ads') !== type; });
+    var _dbgWrongCountry = _dbgAll.filter(function(a) { var c = findCampaignById(a.campaignId); return c && country !== 'all' && c.country !== country; });
+    console.log('[pace debug] total approved in range (no filters):', _dbgAll.length, '| no campaign found:', _dbgNoCamp.length, '| wrong type:', _dbgWrongType.length, '| wrong country:', _dbgWrongCountry.length, '| type filter:', type, '| country filter:', country);
+    if (_dbgNoCamp.length > 0) console.log('[pace debug] orphaned assets:', _dbgNoCamp.map(function(a){ return {id:a.id,name:a.name,campaignId:a.campaignId,dateApproved:a.dateApproved}; }));
+    if (_dbgWrongType.length > 0) console.log('[pace debug] wrong-type assets:', _dbgWrongType.map(function(a){ var c=findCampaignById(a.campaignId); return {id:a.id,name:a.name,campName:c&&c.name,campType:c&&c.type,dateApproved:a.dateApproved}; }));
+
     var approvedCount = STATE.assets.filter(function(a) {
       var c = findCampaignById(a.campaignId);
       if (c) {
