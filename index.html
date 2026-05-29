@@ -9022,8 +9022,8 @@ function renderContentView() {
   }
 
   // ── asset predicates ──
-  // "Has content" = rawVideo link is set on the asset
-  function hasContent(a) { return !!(a.rawVideo); }
+  // "Has content" = rawVideo link is set, excluding assets tagged Missing files
+  function hasContent(a) { return !!(a.rawVideo) && a.qc !== 'Missing files'; }
   // "Edited" = finalVideo link is set
   function isEdited(a) {
     return !!(a.finalVideo);
