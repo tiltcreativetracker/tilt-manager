@@ -1604,24 +1604,39 @@ var GSheets = {
       syncedAt: new Date().toISOString()
     };
 
-    // GAS web apps redirect POSTs to a new URL that doesn't carry CORS headers,
-    // so we use no-cors. The response is opaque (unreadable) but the data gets through.
-    fetch(url, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(payload)
-    }).then(function() {
+    // fetch() loses the POST body through GAS's redirect regardless of mode.
+    // A hidden form POST bypasses CORS entirely and delivers e.parameter.data reliably.
+    try {
+      var iframe = document.getElementById('gsheets-sink');
+      if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.name = 'gsheets-sink';
+        iframe.id   = 'gsheets-sink';
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+      }
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = url;
+      form.target = 'gsheets-sink';
+      var input = document.createElement('input');
+      input.type  = 'hidden';
+      input.name  = 'data';
+      input.value = JSON.stringify(payload);
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form);
       GSheets._syncing = false;
       GSheets._lastSyncAt = new Date();
       GSheets._updateStatus('ok');
       if (typeof toast === 'function') toast('Synced to Google Sheets ✔', 'success');
-    }).catch(function(err) {
+    } catch(err) {
       GSheets._syncing = false;
       GSheets._updateStatus('error');
       console.warn('[GSheets] sync failed:', err);
       if (typeof toast === 'function') toast('Google Sheets sync failed — check the URL in Config', 'error');
-    });
+    }
   },
 
   _updateStatus: function(state) {
@@ -8665,21 +8680,27 @@ function renderReportingView() {
     if (type === 'Organic') filterLabel = (country !== 'all' ? country + ' ' : '') + 'Organic';
     if (type === 'all' && country === 'all') filterLabel = 'All campaigns';
 
-    var approvedCount = STATE.assets.filter(function(a) {
+    var addedCount = STATE.assets.filter(function(a) {
       var c = findCampaignById(a.campaignId);
       if (c) {
         if (country !== 'all' && c.country !== country) return false;
         if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
       }
-      return paceApprovedInRange(a, c ? c.country : '');
+      // Count any asset whose ETA, PM approval, or CH approval date falls in range
+      var dEst = a.estDelivery || '';
+      var dAp  = a.dateApproved || '';
+      var dCh  = a.chDateApproved || '';
+      return (dEst && dEst >= range.start && dEst <= range.end) ||
+             (dAp  && dAp  >= range.start && dAp  <= range.end) ||
+             (dCh  && dCh  >= range.start && dCh  <= range.end);
     }).length;
 
     return '<div class="report-pace-wrap">' +
       '<div class="report-pace-header">' +
         '<span class="report-pace-title">' + escapeHtml(filterLabel) + ' · ' + periodLabelCap + '</span>' +
-        '<span class="report-pace-meta" style="font-size:13px;font-weight:700;color:var(--text1);">' + approvedCount + '</span>' +
+        '<span class="report-pace-meta" style="font-size:13px;font-weight:700;color:var(--text1);">' + addedCount + '</span>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + paceApprovalLabel + ' videos ' + periodLabel + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">videos in tracker ' + periodLabel + '</div>' +
     '</div>';
   })();
 
