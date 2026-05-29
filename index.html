@@ -9512,7 +9512,7 @@ function renderConfigView() {
             'onclick="(function(){var el=document.getElementById(\'gsheets-script-code\');navigator.clipboard&&navigator.clipboard.writeText(el.innerText).then(function(){App._toast(\'Script copied\',\'success\');}).catch(function(){});})()">Copy</button>' +
           '<pre id="gsheets-script-code" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:10.5px;font-family:\'JetBrains Mono\',monospace;color:var(--text2);overflow-x:auto;white-space:pre;line-height:1.5;max-height:320px;overflow-y:auto;">' + escapeHtml(
 'function doGet(e) {\n' +
-'  return ContentService.createTextResponse(\'Tilt Tracker — Google Sheets Sync (POST only)\')\n' +
+'  return ContentService.createTextOutput(\'Tilt Tracker — Google Sheets Sync (POST only)\')\n' +
 '    .setMimeType(ContentService.MimeType.TEXT);\n' +
 '}\n\n' +
 'function doPost(e) {\n' +
@@ -9530,10 +9530,10 @@ function renderConfigView() {
 '      var sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);\n' +
 '      writeSheet(sheet, campAssets);\n' +
 '    });\n' +
-'    return ContentService.createTextResponse(JSON.stringify({ok:true}))\n' +
+'    return ContentService.createTextOutput(JSON.stringify({ok:true}))\n' +
 '      .setMimeType(ContentService.MimeType.JSON);\n' +
 '  } catch(err) {\n' +
-'    return ContentService.createTextResponse(JSON.stringify({ok:false,error:err.message}))\n' +
+'    return ContentService.createTextOutput(JSON.stringify({ok:false,error:err.message}))\n' +
 '      .setMimeType(ContentService.MimeType.JSON);\n' +
 '  }\n' +
 '}\n\n' +
