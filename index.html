@@ -1604,39 +1604,22 @@ var GSheets = {
       syncedAt: new Date().toISOString()
     };
 
-    // fetch() loses the POST body through GAS's redirect regardless of mode.
-    // A hidden form POST bypasses CORS entirely and delivers e.parameter.data reliably.
-    try {
-      var iframe = document.getElementById('gsheets-sink');
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.name = 'gsheets-sink';
-        iframe.id   = 'gsheets-sink';
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-      }
-      var form = document.createElement('form');
-      form.method = 'POST';
-      form.action = url;
-      form.target = 'gsheets-sink';
-      var input = document.createElement('input');
-      input.type  = 'hidden';
-      input.name  = 'data';
-      input.value = JSON.stringify(payload);
-      form.appendChild(input);
-      document.body.appendChild(form);
-      form.submit();
-      document.body.removeChild(form);
+    fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    }).then(function() {
       GSheets._syncing = false;
       GSheets._lastSyncAt = new Date();
       GSheets._updateStatus('ok');
       if (typeof toast === 'function') toast('Synced to Google Sheets ✔', 'success');
-    } catch(err) {
+    }).catch(function(err) {
       GSheets._syncing = false;
       GSheets._updateStatus('error');
       console.warn('[GSheets] sync failed:', err);
       if (typeof toast === 'function') toast('Google Sheets sync failed — check the URL in Config', 'error');
-    }
+    });
   },
 
   _updateStatus: function(state) {
@@ -3045,9 +3028,9 @@ function formatDate(value) {
 function toISODate(value) {
   var d = (value instanceof Date) ? value : parseDate(value);
   if (!d) return '';
-  var y = d.getUTCFullYear();
-  var m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  var dd = String(d.getUTCDate()).padStart(2, '0');
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
   return y + '-' + m + '-' + dd;
 }
 
