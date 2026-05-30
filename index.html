@@ -13007,6 +13007,50 @@ var App = {
       if (key) assetNames[key] = a;
     });
 
+    // Normalise a name into a comparable key: lowercase, strip extension, collapse separators to spaces
+    function normName(s) {
+      return (s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    // Split a normalised name into tokens, filtering out noise words and short fragments
+    var NOISE = { v1:1, v2:1, v3:1, v4:1, final:1, edit:1, cut:1, '15s':1, '30s':1, '60s':1, '9x16':1, '16x9':1, '1x1':1 };
+    function tokens(norm) {
+      return norm.split(' ').filter(function(t) { return t.length > 1 && !NOISE[t]; });
+    }
+
+    // Returns the tracker asset matched to a Meta ad name, using a 3-tier fallback:
+    // 1. Exact key match  2. Substring (one contains the other)  3. Token overlap ≥ 80%
+    function findAssetByName(rawName) {
+      var norm = normName(rawName);
+      if (!norm) return null;
+      // Tier 1: exact
+      if (assetNames[norm]) return assetNames[norm];
+      // Tier 2 & 3: scan all tracker assets
+      var bestAsset = null, bestScore = 0;
+      var metaToks = tokens(norm);
+      Object.keys(assetNames).forEach(function(assetKey) {
+        var assetNorm = normName(assetKey);
+        // Tier 2: substring
+        if (norm.indexOf(assetNorm) !== -1 || assetNorm.indexOf(norm) !== -1) {
+          // Prefer longer (more specific) substring matches
+          if (assetNorm.length > bestScore) { bestScore = assetNorm.length; bestAsset = assetNames[assetKey]; }
+          return;
+        }
+        // Tier 3: token overlap — skip if we already have a substring match
+        if (bestScore > 0) return;
+        var assetToks = tokens(assetNorm);
+        if (!assetToks.length || !metaToks.length) return;
+        var shorter = assetToks.length <= metaToks.length ? assetToks : metaToks;
+        var longer  = assetToks.length <= metaToks.length ? metaToks  : assetToks;
+        var longerSet = {};
+        longer.forEach(function(t) { longerSet[t] = 1; });
+        var matches = shorter.filter(function(t) { return longerSet[t]; }).length;
+        var score = matches / shorter.length;
+        if (score >= 0.8 && score > bestScore) { bestScore = score; bestAsset = assetNames[assetKey]; }
+      });
+      return bestAsset;
+    }
+
     var apiBase = 'https://graph.facebook.com/v19.0';
     // effective_status reflects paused/archived/deleted state; stop_time is when the campaign ended
     var fields = 'id,name,campaign_id,status,effective_status,updated_time,campaign{id,name,status,effective_status,start_time,stop_time},creative{id,video_id,name,title}';
@@ -13066,14 +13110,14 @@ var App = {
             ad.name || ''
           ];
 
-          // Find the first candidate name that matches a tracker campaign
+          // Find the first candidate name that matches a tracker campaign (exact → substring → token overlap)
           var camp = null;
           candidateNames.forEach(function(rawName) {
             if (camp) return;
-            var key = rawName.toLowerCase().replace(/\.[^.]+$/, '').trim();
-            if (!key || !assetNames[key]) return;
+            var asset = findAssetByName(rawName);
+            if (!asset) return;
             camp = STATE.campaigns.find(function(c) {
-              return String(c.id) === String(assetNames[key].campaignId);
+              return String(c.id) === String(asset.campaignId);
             }) || null;
           });
           if (!camp) return;
