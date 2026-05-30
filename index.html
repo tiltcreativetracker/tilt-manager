@@ -13020,6 +13020,7 @@ var App = {
       var firstUrl = apiBase + '/act_' + accountId + '/ads' +
         '?fields=' + fields +
         '&limit=100' +
+        '&date_preset=last_30_days' +
         '&access_token=' + encodeURIComponent(token);
       function fetchPage(url, accumulated) {
         return fetch(url)
