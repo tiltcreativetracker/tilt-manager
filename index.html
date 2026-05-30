@@ -13056,6 +13056,7 @@ var App = {
     var fields = 'id,name,campaign_id,status,effective_status,updated_time,campaign{id,name,status,effective_status,start_time,stop_time},creative{id,video_id,name,title}';
     var totalUpdated = 0;
     var errors = [];
+    var unmatchedMeta = [];
 
     var KILLED_STATUSES = ['PAUSED', 'DELETED', 'ARCHIVED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED'];
 
@@ -13120,7 +13121,16 @@ var App = {
               return String(c.id) === String(asset.campaignId);
             }) || null;
           });
-          if (!camp) return;
+          if (!camp) {
+            unmatchedMeta.push({
+              adName: ad.name || '',
+              creativeName: (ad.creative && ad.creative.name) || '',
+              creativeTitle: (ad.creative && ad.creative.title) || '',
+              campaignName: ad.campaign.name || '',
+              status: campStatus
+            });
+            return;
+          }
 
           // Set goneLive once per tracker campaign
           if (!camp.goneLive && startDate) { camp.goneLive = startDate; totalUpdated++; }
@@ -13194,6 +13204,12 @@ var App = {
             render();
           } else if (!errors.length) {
             toast('Sync complete \u2014 no new matches found', '');
+          }
+          if (unmatchedMeta.length) {
+            console.group('%c[Meta Sync] ' + unmatchedMeta.length + ' unmatched ads \u2014 open to see names', 'color:#f59e0b;font-weight:bold');
+            console.log('Tracker asset names (first 20):', Object.keys(assetNames).slice(0, 20));
+            console.table(unmatchedMeta.slice(0, 50));
+            console.groupEnd();
           }
           resetBtn();
         });
