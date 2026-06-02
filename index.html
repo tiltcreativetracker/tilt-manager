@@ -1895,7 +1895,8 @@ var Fb = {
         reportingType: true,
         reportingCategory: true,
         reportingView: true,
-        reportingApproval: true
+        reportingApproval: true,
+        editorTallyCollapsed: true
       };
       // Copy known fields onto STATE. Skip metadata fields prefixed with `_` and any
       // per-user UI field (so a teammate's tab/campaign/expansion choices don't override
@@ -2756,6 +2757,7 @@ var STATE = {
   reportingCollapsed:   {},
   reportingView:        'table',
   reportingApproval:    'all',
+  editorTallyCollapsed: false,
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -9072,12 +9074,16 @@ function renderReportingView() {
       '</div>';
     }).join('');
 
+    var collapsed = STATE.editorTallyCollapsed;
     return '<div class="editor-tally-wrap">' +
-      '<div class="report-section-header" style="margin-top:0;margin-bottom:12px;">' +
+      '<div class="report-section-header" style="margin-top:0;margin-bottom:' + (collapsed ? '0' : '12px') + ';cursor:pointer;" onclick="App.toggleEditorTally()">' +
         '<span class="report-section-title">Editor Output — ' + periodLabel + '</span>' +
-        '<span class="report-section-badge">' + totalVideos + ' video' + (totalVideos !== 1 ? 's' : '') + ' total</span>' +
+        '<span style="display:flex;align-items:center;gap:8px;">' +
+          '<span class="report-section-badge">' + totalVideos + ' video' + (totalVideos !== 1 ? 's' : '') + ' total</span>' +
+          '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + (collapsed ? '▶' : '▼') + '</span>' +
+        '</span>' +
       '</div>' +
-      '<div class="editor-tally-grid">' + cardsHtml + '</div>' +
+      (collapsed ? '' : '<div class="editor-tally-grid">' + cardsHtml + '</div>') +
     '</div>';
   })();
 
@@ -11219,6 +11225,10 @@ var App = {
   toggleReportingCategory: function(cat) {
     if (!STATE.reportingCollapsed) STATE.reportingCollapsed = {};
     STATE.reportingCollapsed[cat] = !STATE.reportingCollapsed[cat];
+    render();
+  },
+  toggleEditorTally: function() {
+    STATE.editorTallyCollapsed = !STATE.editorTallyCollapsed;
     render();
   },
   setReporting: function(key, val) {
