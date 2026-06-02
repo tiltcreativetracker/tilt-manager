@@ -9036,19 +9036,19 @@ function renderReportingView() {
   var mainContent = view === 'kanban' ? kanbanHtml() : tableHtml();
 
   // ── Editor Tally ──
-  // Count assets per editor whose estDelivery (or dateApproved as fallback) falls in range,
-  // filtered by the same country/type/category selectors as the rest of the report.
+  // Count Approved assets per editor where any of estDelivery/dateApproved/chDateApproved
+  // falls in the selected period. Respects country/type/category filters.
   var editorTallyHtml = (function() {
     var periodLabel = period === 'weekly' ? 'this week' : period === 'quarterly' ? 'this quarter' : 'this month';
-    var counts = {}; // editor -> { total, approved }
-    EDITORS.forEach(function(e) { counts[e] = { total: 0, approved: 0 }; });
+    var counts = {}; // editor -> approved video count
+    EDITORS.forEach(function(e) { counts[e] = { total: 0 }; });
 
     STATE.assets.forEach(function(a) {
       var c = findCampaignById(a.campaignId);
       if (country !== 'all' && (!c || c.country !== country)) return;
       if (type !== 'all' && (!c || (c.type || 'Paid Ads') !== type)) return;
       if (category !== 'all' && (a.category || '') !== category) return;
-      if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return;
+      if (a.status !== 'Approved') return;
       var dEst = a.estDelivery || '', dAp = a.dateApproved || '', dCh = a.chDateApproved || '';
       var inRange = (dEst && dEst >= range.start && dEst <= range.end) ||
                     (dAp  && dAp  >= range.start && dAp  <= range.end) ||
@@ -9057,21 +9057,18 @@ function renderReportingView() {
       var ed = a.editor || '';
       if (!ed || !counts[ed]) return;
       counts[ed].total++;
-      if (assetApprovedInPeriod(a, c ? c.country : '')) counts[ed].approved++;
     });
 
     var totalVideos = EDITORS.reduce(function(s, e) { return s + counts[e].total; }, 0);
-    if (totalVideos === 0) return '';
 
     var cardsHtml = EDITORS.map(function(ed) {
       var n = counts[ed];
-      var pct = n.total > 0 ? Math.round(n.approved / n.total * 100) : 0;
       var isEmpty = n.total === 0;
       return '<div class="editor-tally-card' + (isEmpty ? ' editor-tally-empty' : '') + '">' +
         '<div class="editor-tally-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(ed.slice(0,2).toUpperCase()) + '</div>' +
         '<div class="editor-tally-name">' + escapeHtml(ed) + '</div>' +
         '<div class="editor-tally-count">' + n.total + '</div>' +
-        '<div class="editor-tally-sub">' + n.approved + ' approved · ' + pct + '%</div>' +
+        '<div class="editor-tally-sub">' + (isEmpty ? 'no videos' : 'approved videos') + '</div>' +
       '</div>';
     }).join('');
 
