@@ -2911,6 +2911,21 @@ function countApprovedInRange(startISO, endISO, filterFn) {
   return n;
 }
 
+// Count approved assets whose campaign's monthYear matches the given key (YYYY-MM).
+// Matches the Content tab's "in period" logic so both views agree on the monthly total.
+function countApprovedForMonth(monthKey, filterFn) {
+  var n = 0;
+  STATE.assets.forEach(function(a) {
+    if (a.status !== 'Approved') return;
+    var camp = findCampaignById(a.campaignId);
+    if (!camp) return;
+    if ((camp.monthYear || '') !== monthKey) return;
+    if (filterFn && !filterFn(a, camp)) return;
+    n++;
+  });
+  return n;
+}
+
 // The 200/month goal is specifically UK Paid Ads. Organic and non-UK approvals
 // are tracked separately (no monthly target).
 function isPaidAdsUKApproval(asset, camp) {
@@ -5788,8 +5803,8 @@ function renderMonthPanel() {
   var mr = getMonthRange(parseInt(parts[0]), parseInt(parts[1]) - 1);
 
   var today = todayISO();
-  var approved = countApprovedInRange(mr.start, mr.end, isPaidAdsUKApproval);
-  var organicApproved = countApprovedInRange(mr.start, mr.end, isOrganicApproval);
+  var approved = countApprovedForMonth(selectedKey, isPaidAdsUKApproval);
+  var organicApproved = countApprovedForMonth(selectedKey, isOrganicApproval);
   var target = MONTHLY_APPROVAL_TARGET;
   var pct = Math.min(100, Math.round((approved / target) * 100));
   var totalWorkdays = countWorkdays(mr.start, mr.end);
@@ -9059,9 +9074,9 @@ function renderContentView() {
   // ── asset predicates ──
   // "Has content" = rawVideo link is set, excluding assets tagged Missing files
   function hasContent(a) { return !!(a.rawVideo) && a.qc !== 'Missing files'; }
-  // "Edited" = finalVideo link is set
+  // "Edited" = finalVideo link is set AND approved by PM
   function isEdited(a) {
-    return !!(a.finalVideo);
+    return !!(a.finalVideo) && a.status === 'Approved';
   }
   // Asset is in-scope for the selected period.
   // Monthly: match campaign's monthYear field (same logic as the tally board).
