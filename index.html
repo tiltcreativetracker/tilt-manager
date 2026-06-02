@@ -1313,6 +1313,11 @@
   .editor-tally-name { font-size: 12px; font-weight: 600; color: var(--text1); }
   .editor-tally-count { font-size: 26px; font-weight: 700; color: var(--text1); letter-spacing: -1px; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
   .editor-tally-sub { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .editor-tally-card-open { border-color: var(--border2); }
+  .editor-tally-video-list { width: 100%; margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 5px; text-align: left; max-height: 200px; overflow-y: auto; }
+  .editor-tally-video-item { display: flex; flex-direction: column; gap: 1px; padding: 4px 6px; border-radius: 4px; background: var(--bg3); }
+  .editor-tally-video-name { font-size: 11px; color: var(--text1); font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; min-width: 0; display: block; }
+  .editor-tally-video-camp { font-size: 10px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; min-width: 0; display: block; }
   .report-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
   .report-controls h2 { font-size: 15px; font-weight: 700; color: var(--text1); margin-right: 4px; }
   .report-ctrl-divider { width: 1px; height: 20px; background: var(--border2); margin: 0 2px; }
@@ -3906,6 +3911,7 @@ var TALLY_FIRESTORE_DOC = 'meta/dailyTally';
 // Cached value of the Firestore-shared lastSentDate. Updated by an onSnapshot listener
 // (set up on app boot, see attachTallyListener). Until the listener delivers its first
 // snapshot, this is null and we fall back to localStorage.
+var _editorTallyExpanded = {}; // transient: which editor cards are expanded in the tally
 var _tallySharedLastSent = null;
 var _tallySharedReady = false; // becomes true after the first onSnapshot landing
 var _tallySharedUnsub = null;
@@ -9068,11 +9074,38 @@ function renderReportingView() {
     }).map(function(ed) {
       var n = counts[ed];
       var isEmpty = n.total === 0;
-      return '<div class="editor-tally-card' + (isEmpty ? ' editor-tally-empty' : '') + '">' +
+      var isExpanded = !isEmpty && !!_editorTallyExpanded[ed];
+      var videoListHtml = '';
+      if (isExpanded) {
+        var editorVideos = STATE.assets.filter(function(a) {
+          if (a.editor !== ed || a.status !== 'Approved') return false;
+          var c = findCampaignById(a.campaignId);
+          if (country !== 'all' && (!c || c.country !== country)) return false;
+          if (type !== 'all' && (!c || (c.type || 'Paid Ads') !== type)) return false;
+          if (category !== 'all' && (a.category || '') !== category) return false;
+          var dEst = a.estDelivery || '', dAp = a.dateApproved || '', dCh = a.chDateApproved || '';
+          return (dEst && dEst >= range.start && dEst <= range.end) ||
+                 (dAp  && dAp  >= range.start && dAp  <= range.end) ||
+                 (dCh  && dCh  >= range.start && dCh  <= range.end);
+        });
+        videoListHtml = '<div class="editor-tally-video-list" onclick="event.stopPropagation()">' +
+          editorVideos.map(function(a) {
+            var c = findCampaignById(a.campaignId);
+            var campName = c ? c.name : '—';
+            return '<div class="editor-tally-video-item">' +
+              '<span class="editor-tally-video-name">' + escapeHtml(a.name) + '</span>' +
+              '<span class="editor-tally-video-camp">' + escapeHtml(campName) + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }
+      return '<div class="editor-tally-card' + (isEmpty ? ' editor-tally-empty' : '') + (isExpanded ? ' editor-tally-card-open' : '') + '"' +
+        (!isEmpty ? ' onclick="App.toggleEditorTallyCard(\'' + escapeHtml(ed) + '\')" style="cursor:pointer;"' : '') + '>' +
         '<div class="editor-tally-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(ed.slice(0,2).toUpperCase()) + '</div>' +
         '<div class="editor-tally-name">' + escapeHtml(ed) + '</div>' +
         '<div class="editor-tally-count">' + n.total + '</div>' +
-        '<div class="editor-tally-sub">' + (isEmpty ? 'no videos' : 'approved videos') + '</div>' +
+        '<div class="editor-tally-sub">' + (isEmpty ? 'no videos' : (isExpanded ? '▲ collapse' : '▼ approved videos')) + '</div>' +
+        videoListHtml +
       '</div>';
     }).join('');
 
@@ -11231,6 +11264,10 @@ var App = {
   },
   toggleEditorTally: function() {
     STATE.editorTallyCollapsed = !STATE.editorTallyCollapsed;
+    render();
+  },
+  toggleEditorTallyCard: function(ed) {
+    _editorTallyExpanded[ed] = !_editorTallyExpanded[ed];
     render();
   },
   setReporting: function(key, val) {
