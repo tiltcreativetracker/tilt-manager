@@ -5858,11 +5858,32 @@ function renderMonthPanel() {
     }).join('') +
   '</select>';
 
+  var cancelledQcCount = (function() {
+    var n = 0;
+    STATE.assets.forEach(function(a) {
+      if (a.status !== 'Approved') return;
+      if (a.categoryHeadQc !== 'Cancelled') return;
+      var camp = findCampaignById(a.campaignId);
+      if (!camp || camp.country !== 'UK') return;
+      if ((camp.type || 'Paid Ads') !== 'Paid Ads') return;
+      if ((camp.monthYear || '') !== selectedKey) return;
+      n++;
+    });
+    return n;
+  })();
+
   var organicAsideHtml = '<div class="month-organic-aside" title="Organic approvals \u2014 tracked separately from the ' + target + '-video UK Paid Ads goal.">' +
     '<span class="month-organic-label">Organic this month</span>' +
     '<span class="month-organic-num">' + organicApproved + '</span>' +
     '<span class="month-organic-sub">no target</span>' +
-  '</div>';
+  '</div>' +
+  (cancelledQcCount > 0
+    ? '<div class="month-organic-aside" title="These ' + cancelledQcCount + ' videos are approved but flagged as Cancelled by category head QC \u2014 included in the tally total.">' +
+        '<span class="month-organic-label">Cancelled by QC</span>' +
+        '<span class="month-organic-num">' + cancelledQcCount + '</span>' +
+        '<span class="month-organic-sub">included in tally</span>' +
+      '</div>'
+    : '');
 
   return '<div class="month-panel">' +
     '<div class="month-panel-head">' +
