@@ -1305,6 +1305,14 @@
 
   /* ── Reporting tab ── */
   .report-panel { padding: 22px 26px; overflow-y: auto; height: 100%; }
+  .editor-tally-wrap { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; }
+  .editor-tally-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .editor-tally-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+  .editor-tally-card.editor-tally-empty { opacity: 0.45; }
+  .editor-tally-avatar { width: 34px; height: 34px; border-radius: 50%; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+  .editor-tally-name { font-size: 12px; font-weight: 600; color: var(--text1); }
+  .editor-tally-count { font-size: 26px; font-weight: 700; color: var(--text1); letter-spacing: -1px; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
+  .editor-tally-sub { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
   .report-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
   .report-controls h2 { font-size: 15px; font-weight: 700; color: var(--text1); margin-right: 4px; }
   .report-ctrl-divider { width: 1px; height: 20px; background: var(--border2); margin: 0 2px; }
@@ -9027,7 +9035,56 @@ function renderReportingView() {
 
   var mainContent = view === 'kanban' ? kanbanHtml() : tableHtml();
 
-  return '<div class="report-panel">' + controls + paceHtml + mainContent + '</div>';
+  // ── Editor Tally ──
+  // Count assets per editor whose estDelivery (or dateApproved as fallback) falls in range,
+  // filtered by the same country/type/category selectors as the rest of the report.
+  var editorTallyHtml = (function() {
+    var periodLabel = period === 'weekly' ? 'this week' : period === 'quarterly' ? 'this quarter' : 'this month';
+    var counts = {}; // editor -> { total, approved }
+    EDITORS.forEach(function(e) { counts[e] = { total: 0, approved: 0 }; });
+
+    STATE.assets.forEach(function(a) {
+      var c = findCampaignById(a.campaignId);
+      if (country !== 'all' && (!c || c.country !== country)) return;
+      if (type !== 'all' && (!c || (c.type || 'Paid Ads') !== type)) return;
+      if (category !== 'all' && (a.category || '') !== category) return;
+      if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return;
+      var dEst = a.estDelivery || '', dAp = a.dateApproved || '', dCh = a.chDateApproved || '';
+      var inRange = (dEst && dEst >= range.start && dEst <= range.end) ||
+                    (dAp  && dAp  >= range.start && dAp  <= range.end) ||
+                    (dCh  && dCh  >= range.start && dCh  <= range.end);
+      if (!inRange) return;
+      var ed = a.editor || '';
+      if (!ed || !counts[ed]) return;
+      counts[ed].total++;
+      if (assetApprovedInPeriod(a, c ? c.country : '')) counts[ed].approved++;
+    });
+
+    var totalVideos = EDITORS.reduce(function(s, e) { return s + counts[e].total; }, 0);
+    if (totalVideos === 0) return '';
+
+    var cardsHtml = EDITORS.map(function(ed) {
+      var n = counts[ed];
+      var pct = n.total > 0 ? Math.round(n.approved / n.total * 100) : 0;
+      var isEmpty = n.total === 0;
+      return '<div class="editor-tally-card' + (isEmpty ? ' editor-tally-empty' : '') + '">' +
+        '<div class="editor-tally-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(ed.slice(0,2).toUpperCase()) + '</div>' +
+        '<div class="editor-tally-name">' + escapeHtml(ed) + '</div>' +
+        '<div class="editor-tally-count">' + n.total + '</div>' +
+        '<div class="editor-tally-sub">' + n.approved + ' approved · ' + pct + '%</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="editor-tally-wrap">' +
+      '<div class="report-section-header" style="margin-top:0;margin-bottom:12px;">' +
+        '<span class="report-section-title">Editor Output — ' + periodLabel + '</span>' +
+        '<span class="report-section-badge">' + totalVideos + ' video' + (totalVideos !== 1 ? 's' : '') + ' total</span>' +
+      '</div>' +
+      '<div class="editor-tally-grid">' + cardsHtml + '</div>' +
+    '</div>';
+  })();
+
+  return '<div class="report-panel">' + controls + paceHtml + editorTallyHtml + mainContent + '</div>';
 }
 
 function renderContentView() {
