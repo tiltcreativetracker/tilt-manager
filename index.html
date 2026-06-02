@@ -5788,8 +5788,8 @@ function renderMonthPanel() {
   var mr = getMonthRange(parseInt(parts[0]), parseInt(parts[1]) - 1);
 
   var today = todayISO();
-  var approved = countVideosByMonthYear(selectedKey, isPaidAdsUKApproval);
-  var organicApproved = countVideosByMonthYear(selectedKey, isOrganicApproval);
+  var approved = countApprovedInRange(mr.start, mr.end, isPaidAdsUKApproval);
+  var organicApproved = countApprovedInRange(mr.start, mr.end, isOrganicApproval);
   var target = MONTHLY_APPROVAL_TARGET;
   var pct = Math.min(100, Math.round((approved / target) * 100));
   var totalWorkdays = countWorkdays(mr.start, mr.end);
