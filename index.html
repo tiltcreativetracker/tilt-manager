@@ -9092,7 +9092,7 @@ function renderReportingView() {
           editorVideos.map(function(a) {
             var c = findCampaignById(a.campaignId);
             var campName = c ? c.name : '—';
-            return '<div class="editor-tally-video-item">' +
+            return '<div class="editor-tally-video-item" title="' + escapeHtml(a.name) + ' — ' + escapeHtml(campName) + '">' +
               '<span class="editor-tally-video-name">' + escapeHtml(a.name) + '</span>' +
               '<span class="editor-tally-video-camp">' + escapeHtml(campName) + '</span>' +
             '</div>';
