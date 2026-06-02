@@ -9063,7 +9063,9 @@ function renderReportingView() {
 
     var totalVideos = EDITORS.reduce(function(s, e) { return s + counts[e].total; }, 0);
 
-    var cardsHtml = EDITORS.map(function(ed) {
+    var cardsHtml = EDITORS.filter(function(ed) {
+      return ed !== 'Elsa' || counts[ed].total > 0;
+    }).map(function(ed) {
       var n = counts[ed];
       var isEmpty = n.total === 0;
       return '<div class="editor-tally-card' + (isEmpty ? ' editor-tally-empty' : '') + '">' +
@@ -9079,7 +9081,7 @@ function renderReportingView() {
       '<div class="report-section-header" style="margin-top:0;margin-bottom:' + (collapsed ? '0' : '12px') + ';cursor:pointer;" onclick="App.toggleEditorTally()">' +
         '<span class="report-section-title">Editor Output — ' + periodLabel + '</span>' +
         '<span style="display:flex;align-items:center;gap:8px;">' +
-          '<span class="report-section-badge">' + totalVideos + ' video' + (totalVideos !== 1 ? 's' : '') + ' total</span>' +
+          '<span class="report-section-badge">' + totalVideos + ' approved video' + (totalVideos !== 1 ? 's' : '') + ' total</span>' +
           '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + (collapsed ? '▶' : '▼') + '</span>' +
         '</span>' +
       '</div>' +
