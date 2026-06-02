@@ -9112,7 +9112,7 @@ function renderContentView() {
   }
 
   var allActive = STATE.assets.filter(function(a) {
-    return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled' && inRange(a);
+    return a.status !== 'Cancelled' && inRange(a);
   });
 
   function assetsForCountry(cc) {
@@ -9130,6 +9130,7 @@ function renderContentView() {
   var totalAll     = scopedAssets.length;
   var totalContent = scopedAssets.filter(hasContent).length;
   var totalEdited  = scopedAssets.filter(isEdited).length;
+
 
   function statBar(value, total, color) {
     if (!total) return '';
