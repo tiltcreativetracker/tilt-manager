@@ -1802,6 +1802,7 @@ var Fb = {
       editorSlackChannels: STATE.editorSlackChannels,
       editorSlackIds: STATE.editorSlackIds,
       categoryHeadSlackIds: STATE.categoryHeadSlackIds,
+      categoryHeadOverrides: STATE.categoryHeadOverrides,
       pmSlackIds: STATE.pmSlackIds,
       slackBotToken: STATE.slackBotToken,
       metaAccessToken: STATE.metaAccessToken,
@@ -2620,9 +2621,18 @@ var CATEGORY_HEADS = {
 // CATEGORY_HEADS uses titlecase keys; this normalizes both sides.
 function getCategoryHead(category) {
   if (!category) return '';
+  // Check runtime overrides first (set via Config → Categories).
+  var overrides = (STATE && STATE.categoryHeadOverrides) || {};
+  if (overrides[category] !== undefined) return overrides[category];
+  var keyLower = String(category).toLowerCase();
+  for (var k in overrides) {
+    if (Object.prototype.hasOwnProperty.call(overrides, k) && k.toLowerCase() === keyLower) {
+      return overrides[k];
+    }
+  }
+  // Fall back to hardcoded defaults.
   var direct = CATEGORY_HEADS[category];
   if (direct) return direct;
-  var keyLower = String(category).toLowerCase();
   for (var k in CATEGORY_HEADS) {
     if (Object.prototype.hasOwnProperty.call(CATEGORY_HEADS, k) && k.toLowerCase() === keyLower) {
       return CATEGORY_HEADS[k];
@@ -2721,6 +2731,10 @@ var STATE = {
   // Heads are derived from category via CATEGORY_HEADS; this map is keyed by
   // the head's display name (Anand, Hanyan, Jacob, Cristian).
   categoryHeadSlackIds: { Anand: '', Hanyan: '', Jacob: '', Cristian: '' },
+  // Overrides for CATEGORY_HEADS — keyed by category name, value is the head's
+  // display name. When set, getCategoryHead() returns this instead of the
+  // hardcoded default. New categories added via Config use this map.
+  categoryHeadOverrides: {},
   // Slack member IDs per country PM — keyed by country code, values are the
   // PM's Slack member ID. When set, PM Review queue and Category Head QC
   // Approved messages @mention the PM so they get pinged. Names of the PMs
@@ -9596,21 +9610,37 @@ function renderConfigView() {
     '<div class="section-title">Categories</div>' +
     '<div class="auto-card">' +
       '<div class="auto-desc" style="margin-bottom:12px;">Shared category list used by every campaign. Rename a category here and every campaign using it updates automatically. Delete is only available when no campaign currently uses the category.</div>' +
+      '<div style="display:grid; grid-template-columns: 10px 1fr 1fr auto; gap:0; align-items:center; padding:6px 0 8px; border-bottom:1px solid var(--border); margin-bottom:4px;">' +
+        '<div></div>' +
+        '<div style="font-size:10.5px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:0 6px;">Category</div>' +
+        '<div style="font-size:10.5px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:0 6px;">Category Head</div>' +
+        '<div></div>' +
+      '</div>' +
       '<div id="category-rows" style="display:flex; flex-direction:column; gap:6px;">' +
         STATE.categories.map(function(cat, idx) {
           var usage = categoryUsageCount(cat.name);
           var canDelete = usage === 0;
           var delTitle = canDelete ? 'Delete this category' : usage + ' campaign(s) use this category \u2014 reassign them before deleting';
-          return '<div class="cat-manage-row" data-cat-idx="' + idx + '">' +
-            '<span class="cat-swatch" style="background:' + ((cat.color || cat).bg || 'var(--bg4)') + ';"></span>' +
+          var overrides = STATE.categoryHeadOverrides || {};
+          var headVal = overrides[cat.name] !== undefined ? overrides[cat.name] : (CATEGORY_HEADS[cat.name] || '');
+          var headEsc = escapeHtml(headVal);
+          return '<div class="cat-manage-row" data-cat-idx="' + idx + '" style="display:grid; grid-template-columns:10px 1fr 1fr auto; align-items:center;">' +
+            '<span class="cat-swatch" style="background:' + ((cat.color || cat).bg || 'var(--bg4)') + '; margin:0;"></span>' +
             '<input type="text" class="form-input cat-name-input" data-orig="' + escapeHtml(cat.name) + '" ' +
               'value="' + escapeHtml(cat.name) + '" ' +
-              'onblur="App.renameCategory(' + idx + ', this.value)">' +
-            '<span class="cat-usage">' + usage + ' in use</span>' +
-            '<button class="edit-btn del-btn" ' + (canDelete ? '' : 'disabled ') +
-              'style="' + (canDelete ? '' : 'opacity:0.4; cursor:not-allowed;') + '" ' +
-              'title="' + escapeHtml(delTitle) + '" ' +
-              'onclick="App.deleteCategory(' + idx + ')">\u2715</button>' +
+              'onblur="App.renameCategory(' + idx + ', this.value)" style="margin:0 4px;">' +
+            '<input type="text" class="form-input" ' +
+              'placeholder="e.g. Anand" ' +
+              'value="' + headEsc + '" ' +
+              'title="The person responsible for QC-reviewing videos in this category." ' +
+              'onblur="App.saveCategoryHead(' + idx + ', this.value)" style="margin:0 4px;">' +
+            '<div style="display:flex; align-items:center; gap:6px;">' +
+              '<span class="cat-usage">' + usage + ' in use</span>' +
+              '<button class="edit-btn del-btn" ' + (canDelete ? '' : 'disabled ') +
+                'style="' + (canDelete ? '' : 'opacity:0.4; cursor:not-allowed;') + '" ' +
+                'title="' + escapeHtml(delTitle) + '" ' +
+                'onclick="App.deleteCategory(' + idx + ')">\u2715</button>' +
+            '</div>' +
           '</div>';
         }).join('') +
       '</div>' +
@@ -12498,6 +12528,11 @@ var App = {
     STATE.campaigns.forEach(function(camp) {
       if (camp.category === oldName) { camp.category = trimmed; updated++; }
     });
+    // Migrate the category head override key so the assignment isn't orphaned.
+    if (STATE.categoryHeadOverrides && STATE.categoryHeadOverrides[oldName] !== undefined) {
+      STATE.categoryHeadOverrides[trimmed] = STATE.categoryHeadOverrides[oldName];
+      delete STATE.categoryHeadOverrides[oldName];
+    }
     saveState();
     logAction('updated', 'Category "' + oldName + '" renamed to "' + trimmed + '" (' + updated + ' campaign(s) updated)');
     toast('Renamed to "' + trimmed + '"', 'success');
@@ -12515,6 +12550,7 @@ var App = {
     }
     if (!confirm('Delete the category "' + cat.name + '"?')) return;
     STATE.categories.splice(idx, 1);
+    if (STATE.categoryHeadOverrides) delete STATE.categoryHeadOverrides[cat.name];
     saveState();
     logAction('deleted', 'Category "' + cat.name + '" deleted');
     toast('Category deleted', 'success');
@@ -13684,6 +13720,21 @@ var App = {
     STATE.editorSlackIds[editor] = trimmed;
     saveState();
     logAction('updated', editor + ' Slack member ID ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
+    render();
+  },
+
+  // Save the category head assignment for a category. Stored in
+  // STATE.categoryHeadOverrides, which getCategoryHead() checks before
+  // the hardcoded CATEGORY_HEADS defaults.
+  saveCategoryHead: function(idx, name) {
+    var cat = STATE.categories[idx];
+    if (!cat) return;
+    var trimmed = (name || '').trim();
+    if (!STATE.categoryHeadOverrides) STATE.categoryHeadOverrides = {};
+    if (STATE.categoryHeadOverrides[cat.name] === trimmed) return;
+    STATE.categoryHeadOverrides[cat.name] = trimmed;
+    saveState();
+    logAction('updated', 'Category head for ' + cat.name + ' ' + (trimmed === '' ? 'cleared' : 'set to ' + trimmed));
     render();
   },
 
