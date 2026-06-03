@@ -4847,6 +4847,7 @@ function deleteAsset(id) {
   if (!confirm('Delete "' + a.name + '"?')) return;
   STATE.assets = STATE.assets.filter(function(x) { return String(x.id) !== String(id); });
   logAction('deleted', 'Asset "' + a.name + '" deleted');
+  saveState();
   toast('Asset deleted', 'success');
   render();
 }
