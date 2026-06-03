@@ -2524,11 +2524,14 @@ function renderStatusLegend(badgeCls) {
 }
 
 // ===================== EDITOR RULES =====================
-var EDITORS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
+var EDITORS = ['Zidni', 'Sharm', 'Patty', 'Elsa', 'Seller'];
+// Editors available only for specific countries.
+var EDITOR_COUNTRY_RESTRICT = { Seller: ['IT', 'ES', 'PL'] };
 // Subset of EDITORS whose accountability the Daily Log tab tracks. Elsa is a PM
 // doing occasional edits, not a full-time editor on the 3-a-day target, so she's
-// excluded here. Other tabs (assign dropdown, card author, etc.) still use EDITORS.
-var DAILY_LOG_EDITORS = EDITORS.filter(function(e) { return e !== 'Elsa'; });
+// excluded here. Seller is an external assignee, not a tracked internal editor.
+// Other tabs (assign dropdown, card author, etc.) still use EDITORS.
+var DAILY_LOG_EDITORS = EDITORS.filter(function(e) { return e !== 'Elsa' && e !== 'Seller'; });
 var DIFFICULTIES = ['Low', 'Moderate', 'High', 'Max'];
 // Canonical country list \u2014 order used for display + sorting.
 // loadState migrates saved state that's missing any of these.
@@ -2633,12 +2636,13 @@ function getCategoryHead(category) {
 // the head's review verdict on the produced video.
 var CATEGORY_HEAD_QC_VALUES = ['Draft', 'For Review', 'Needs Revisions', 'Approved', 'Cancelled'];
 var EDITOR_ALLOWED_DIFF = {
-  Zidni: ['Low','Moderate','High','Max'],
-  Sharm: ['Low','Moderate','High'],
-  Patty: ['Low','Moderate'],
-  Elsa:  ['Low','Moderate','High','Max']
+  Zidni:  ['Low','Moderate','High','Max'],
+  Sharm:  ['Low','Moderate','High'],
+  Patty:  ['Low','Moderate'],
+  Elsa:   ['Low','Moderate','High','Max'],
+  Seller: ['Low','Moderate','High','Max']
 };
-var EDITOR_AUTO_SCHEDULE = { Zidni: true, Sharm: true, Patty: true, Elsa: false };
+var EDITOR_AUTO_SCHEDULE = { Zidni: true, Sharm: true, Patty: true, Elsa: false, Seller: false };
 var EDITOR_RULES = {
   Zidni: { cap: 4, countryOrder: ['ES', 'IT', 'UK'], idealMix: { Low: 1, Moderate: 1, High: 1, Max: 1 } },
   Sharm: { cap: 3, countryOrder: ['UK'], idealMix: { Low: 1, Moderate: 2 } },
@@ -2838,7 +2842,7 @@ function getThisWeekRange() {
 var MONTHLY_APPROVAL_TARGET = 200;
 var DAILY_APPROVAL_TARGET = 10; // Explicit daily goal (UK Paid Ads) \u2014 keeps the pace pill stable regardless of month length.
 var DAILY_EDITOR_APPROVAL_TARGET = 3; // Default per-editor daily minimum for the Daily Log tab.
-var EDITOR_DAILY_APPROVAL_TARGET = { Zidni: 4, Sharm: 3, Patty: 3, Elsa: 3 }; // Per-editor overrides.
+var EDITOR_DAILY_APPROVAL_TARGET = { Zidni: 4, Sharm: 3, Patty: 3, Elsa: 3, Seller: 0 }; // Per-editor overrides.
 function getEditorDailyTarget(editor) { return EDITOR_DAILY_APPROVAL_TARGET[editor] || DAILY_EDITOR_APPROVAL_TARGET; }
 
 // Returns { start, end, year, month, label } describing the current calendar month.
@@ -3277,7 +3281,7 @@ function escapeHtml(s) {
   });
 }
 
-function editorInitials(e) { return ({Zidni:'ZD', Patty:'PT', Sharm:'SH', Elsa:'EL'})[e] || '??'; }
+function editorInitials(e) { return ({Zidni:'ZD', Patty:'PT', Sharm:'SH', Elsa:'EL', Seller:'SL'})[e] || '??'; }
 function statusClass(s) { return 'st-' + s.replace(/ /g, '_'); }
 
 // ===================== INLINE CELL EDITING =====================
@@ -3742,6 +3746,7 @@ function getFilteredAssets() {
 // `detail` is the already-formatted detail string to show under the item (e.g. raw+brief or Frame.io link).
 function queueNotification(recipient, changeType, asset, detail, opts) {
   opts = opts || {};
+  if (asset && asset.editor === 'Seller') return;
   if (!STATE.pendingBatches[recipient]) {
     STATE.pendingBatches[recipient] = { items: [], firstQueuedAt: null, sendingSince: null };
   }
@@ -4727,7 +4732,11 @@ function showAssetModal(existing) {
   };
 
   var unassignedOpt = '<option value=""' + (!a.editor ? ' selected' : '') + '>\u2014 Unassigned (Draft) \u2014</option>';
-  var editorOpts = unassignedOpt + EDITORS.map(function(v) {
+  var campCountry = camp ? camp.country : '';
+  var editorOpts = unassignedOpt + EDITORS.filter(function(v) {
+    var restrict = EDITOR_COUNTRY_RESTRICT[v];
+    return !restrict || restrict.indexOf(campCountry) >= 0;
+  }).map(function(v) {
     var mark = EDITOR_AUTO_SCHEDULE[v] ? '' : ' \u2014 manual only';
     return '<option' + (v === a.editor ? ' selected' : '') + ' value="' + v + '">' + v + mark + '</option>';
   }).join('');
@@ -6885,7 +6894,7 @@ function renderNotificationsView() {
     '</div>';
   }
 
-  var editorCards = EDITORS.map(renderBatchCard).join('');
+  var editorCards = EDITORS.filter(function(e) { return e !== 'Seller'; }).map(renderBatchCard).join('');
   var pmCards = STATE.countries.map(function(c) { return renderBatchCard('PM:' + c.code); }).join('');
   // Category Head QC cards — one per category that has a head. The queue keys off
   // the asset's category, batched independent of country (UK + US items share one
@@ -9071,7 +9080,7 @@ function renderReportingView() {
     var totalVideos = EDITORS.reduce(function(s, e) { return s + counts[e].total; }, 0);
 
     var cardsHtml = EDITORS.filter(function(ed) {
-      return ed !== 'Elsa' || counts[ed].total > 0;
+      return (ed !== 'Elsa' && ed !== 'Seller') || counts[ed].total > 0;
     }).map(function(ed) {
       var n = counts[ed];
       var isEmpty = n.total === 0;
@@ -9102,7 +9111,7 @@ function renderReportingView() {
       }
       return '<div class="editor-tally-card' + (isEmpty ? ' editor-tally-empty' : '') + (isExpanded ? ' editor-tally-card-open' : '') + '"' +
         (!isEmpty ? ' onclick="App.toggleEditorTallyCard(\'' + escapeHtml(ed) + '\')" style="cursor:pointer;"' : '') + '>' +
-        '<div class="editor-tally-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(ed.slice(0,2).toUpperCase()) + '</div>' +
+        '<div class="editor-tally-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(editorInitials(ed)) + '</div>' +
         '<div class="editor-tally-name">' + escapeHtml(ed) + '</div>' +
         '<div class="editor-tally-count">' + n.total + '</div>' +
         '<div class="editor-tally-sub">' + (isEmpty ? 'no videos' : (isExpanded ? '▲ collapse' : '▼ approved videos')) + '</div>' +
@@ -9339,7 +9348,7 @@ function renderConfigView() {
   var counts = {};
   EDITORS.forEach(function(e) { counts[e] = STATE.assets.filter(function(a) { return a.editor === e; }).length; });
 
-  var editorCards = EDITORS.map(function(e) {
+  var editorCards = EDITORS.filter(function(e) { return e !== 'Seller'; }).map(function(e) {
     var rules = EDITOR_RULES[e];
     var mix = rules ? Object.keys(rules.idealMix).map(function(k) { return rules.idealMix[k] + ' ' + k; }).join(' + ') : '\u2014';
     var cap = rules ? rules.cap : '\u2014';
@@ -9408,7 +9417,7 @@ function renderConfigView() {
   })();
 
   // Per-editor Slack channel + member ID rows
-  var slackRows = EDITORS.map(function(e) {
+  var slackRows = EDITORS.filter(function(e) { return e !== 'Seller'; }).map(function(e) {
     var url = (STATE.editorSlackChannels && STATE.editorSlackChannels[e]) || '';
     var urlEsc = escapeHtml(url);
     var hasUrl = !!url;
