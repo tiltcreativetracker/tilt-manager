@@ -8757,7 +8757,7 @@ function renderReportingView() {
                (dAp  && dAp  >= range.start && dAp  <= range.end) ||
                (dCh  && dCh  >= range.start && dCh  <= range.end);
       }).length;
-      subLabel = 'videos in tracker ' + periodLabel;
+      subLabel = 'tracked ' + periodLabel + ' by date';
     } else {
       displayCount = STATE.assets.filter(function(a) {
         var c = findCampaignById(a.campaignId);
@@ -8767,7 +8767,7 @@ function renderReportingView() {
         }
         return paceApprovedInRange(a, c ? c.country : '');
       }).length;
-      subLabel = paceApprovalLabel + ' videos ' + periodLabel;
+      subLabel = paceApprovalLabel + ' ' + periodLabel;
     }
 
     return '<div class="report-pace-wrap">' +
@@ -9114,7 +9114,7 @@ function renderReportingView() {
         '<div class="editor-tally-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(editorInitials(ed)) + '</div>' +
         '<div class="editor-tally-name">' + escapeHtml(ed) + '</div>' +
         '<div class="editor-tally-count">' + n.total + '</div>' +
-        '<div class="editor-tally-sub">' + (isEmpty ? 'no videos' : (isExpanded ? '▲ collapse' : '▼ approved videos')) + '</div>' +
+        '<div class="editor-tally-sub">' + (isEmpty ? 'none yet' : (isExpanded ? '▲ collapse' : '▼ approved')) + '</div>' +
         videoListHtml +
       '</div>';
     }).join('');
@@ -9124,7 +9124,7 @@ function renderReportingView() {
       '<div class="report-section-header" style="margin-top:0;margin-bottom:' + (collapsed ? '0' : '12px') + ';cursor:pointer;" onclick="App.toggleEditorTally()">' +
         '<span class="report-section-title">Editor Output — ' + periodLabel + '</span>' +
         '<span style="display:flex;align-items:center;gap:8px;">' +
-          '<span class="report-section-badge">' + totalVideos + ' approved video' + (totalVideos !== 1 ? 's' : '') + ' total</span>' +
+          '<span class="report-section-badge">' + totalVideos + ' approved total</span>' +
           '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;">' + (collapsed ? '▶' : '▼') + '</span>' +
         '</span>' +
       '</div>' +
@@ -9249,7 +9249,7 @@ function renderContentView() {
     return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;min-width:180px;flex:1;">' +
       '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">' + label + '</div>' +
       '<div style="font-size:36px;font-weight:700;color:var(--text1);line-height:1;">' + value + '</div>' +
-      '<div style="font-size:12px;color:var(--text3);margin-top:4px;">' + pct + '% of ' + total + ' videos in period' + (note ? ' · ' + note : '') + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px;">' + pct + '% of ' + total + ' scheduled' + (note ? ' · ' + note : '') + '</div>' +
       statBar(value, total, color) +
       '</div>';
   }
@@ -9329,8 +9329,8 @@ function renderContentView() {
     '</div>' +
 
     '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:36px;">' +
-      statCard('Has Raw Content', totalContent, totalAll, '#4fc3f7', 'rawVideo link set') +
-      statCard('Edited', totalEdited, totalAll, '#81c784', 'finalVideo set or in progress') +
+      statCard('Raw footage in', totalContent, totalAll, '#4fc3f7', 'rawVideo link added') +
+      statCard('Edited', totalEdited, totalAll, '#81c784', 'final video uploaded or in progress') +
       '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;min-width:160px;flex:1;opacity:.45;">' +
         '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Gone Live</div>' +
         '<div style="font-size:36px;font-weight:700;color:var(--text1);line-height:1;">—</div>' +
