@@ -1970,6 +1970,13 @@ var Fb = {
           return ai - bi;
         });
       }
+      // Migration: add Elsa to dailyThreads if not present.
+      if (STATE.dailyThreads && !STATE.dailyThreads.hasOwnProperty('Elsa')) {
+        STATE.dailyThreads.Elsa = null;
+        if (!STATE.dailyThreadHistory) STATE.dailyThreadHistory = {};
+        if (!STATE.dailyThreadHistory.Elsa) STATE.dailyThreadHistory.Elsa = [];
+        setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
+      }
       if (typeof render === 'function' && Auth._booted) render();
     } finally {
       // Defer un-suppressing past the synchronous render so any saveState calls fired
@@ -2747,12 +2754,12 @@ var STATE = {
   slackBotToken: '',
   metaAccessToken: '',
   metaAdAccountIds: ['', '', '', ''],
-  // One daily Slack thread per editor (Zidni/Sharm/Patty). Each entry: { date,
+  // One daily Slack thread per editor (Zidni/Sharm/Patty/Elsa). Each entry: { date,
   // url, channelId, threadTs }. Cleared at midnight rollover. Notifications
   // routed to that editor land in the thread when set; otherwise webhook.
-  dailyThreads: { Zidni: null, Sharm: null, Patty: null },
+  dailyThreads: { Zidni: null, Sharm: null, Patty: null, Elsa: null },
   // Last 7 archived per-editor threads, kept for audit / re-paste.
-  dailyThreadHistory: { Zidni: [], Sharm: [], Patty: [] },
+  dailyThreadHistory: { Zidni: [], Sharm: [], Patty: [], Elsa: [] },
   // One daily Slack thread per category (keyed by category name). CHQ batches
   // for that category post as replies in the thread when set; otherwise webhook.
   catHeadDailyThreads: {},
@@ -7160,7 +7167,7 @@ function renderAutomationsView() {
   function renderDailyThreadCard() {
     var today = todayUK();
     // Bot token no longer needed — thread replies now use the webhook with thread_ts.
-    var rows = ['Zidni', 'Sharm', 'Patty'].map(function(ed) {
+    var rows = ['Zidni', 'Sharm', 'Patty', 'Elsa'].map(function(ed) {
       var t = (STATE.dailyThreads && STATE.dailyThreads[ed]) || null;
       var url = t ? t.url : '';
       var dot = '';
@@ -13018,7 +13025,7 @@ var App = {
 
   // Daily-thread + bot token handlers.
   saveDailyThread: function(editor) {
-    if (!STATE.dailyThreads) STATE.dailyThreads = { Zidni: null, Sharm: null, Patty: null };
+    if (!STATE.dailyThreads) STATE.dailyThreads = { Zidni: null, Sharm: null, Patty: null, Elsa: null };
     var input = document.getElementById('daily-thread-input-' + editor);
     if (!input) return;
     var url = (input.value || '').trim();
