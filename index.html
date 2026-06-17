@@ -1916,6 +1916,31 @@ var Fb = {
       var currentCampId  = (STATE.nextCampaignId !== undefined) ? Number(STATE.nextCampaignId) : 0;
       var campaignsAreStale = incomingCampId > 0 && incomingCampId < currentCampId;
 
+      // Stale-writer guard for daily threads. Any user's upload includes the full
+      // dailyThreads object from their STATE at upload time. If a teammate loaded
+      // Firestore before you set a thread, their STATE has null for your editor slot —
+      // their write can land in Firestore after yours, wiping the thread you just set.
+      // Snapshot the local thread values BEFORE the forEach overwrites STATE, then
+      // restore any slot where the incoming value is null but the local one has today's
+      // UK date. Same treatment for catHeadDailyThreads and intlDailyThread.
+      var _todayUK = todayUK();
+      var _savedThreads = {};
+      if (STATE.dailyThreads) {
+        Object.keys(STATE.dailyThreads).forEach(function(ed) {
+          var t = STATE.dailyThreads[ed];
+          if (t && t.date === _todayUK) _savedThreads[ed] = t;
+        });
+      }
+      var _savedCatThreads = {};
+      if (STATE.catHeadDailyThreads) {
+        Object.keys(STATE.catHeadDailyThreads).forEach(function(cat) {
+          var t = STATE.catHeadDailyThreads[cat];
+          if (t && t.date === _todayUK) _savedCatThreads[cat] = t;
+        });
+      }
+      var _savedIntlThread = (STATE.intlDailyThread && STATE.intlDailyThread.date === _todayUK)
+        ? STATE.intlDailyThread : null;
+
       Object.keys(data).forEach(function(k) {
         if (k === '_lastEditedAt' || k === '_lastEditedBy' || k === '_lastEditedByName') return;
         if (PER_USER_UI_FIELDS[k]) return;
@@ -1923,6 +1948,32 @@ var Fb = {
 
         STATE[k] = data[k];
       });
+
+      // Restore any today-dated threads that the incoming snapshot tried to null out.
+      var _threadsRescued = false;
+      Object.keys(_savedThreads).forEach(function(ed) {
+        if (!STATE.dailyThreads) STATE.dailyThreads = {};
+        if (!STATE.dailyThreads[ed]) {
+          STATE.dailyThreads[ed] = _savedThreads[ed];
+          _threadsRescued = true;
+        }
+      });
+      Object.keys(_savedCatThreads).forEach(function(cat) {
+        if (!STATE.catHeadDailyThreads) STATE.catHeadDailyThreads = {};
+        if (!STATE.catHeadDailyThreads[cat]) {
+          STATE.catHeadDailyThreads[cat] = _savedCatThreads[cat];
+          _threadsRescued = true;
+        }
+      });
+      if (_savedIntlThread && !STATE.intlDailyThread) {
+        STATE.intlDailyThread = _savedIntlThread;
+        _threadsRescued = true;
+      }
+      // Push a correction upload so Firestore reflects the rescued threads.
+      if (_threadsRescued) {
+        setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
+      }
+
       // If we skipped stale campaigns, Firestore now has the wrong data. Push a
       // correction upload so the next browser to load sees the correct campaigns.
       // Deferred past the _suppressUpload window (cleared via setTimeout in finally).
@@ -2194,10 +2245,12 @@ var Fb = {
         return;
       }
 
-      // Defer while a local upload is pending. Applying remote assets now would
-      // overwrite local edits that are in the 600ms debounce window (not yet
-      // uploaded), silently discarding them. Retry after the upload clears.
-      if (Fb._uploadTimer) {
+      // Defer while a local upload is pending (in-flight or awaiting retry after failure).
+      // Applying remote assets now would overwrite local edits that haven't been committed
+      // to Firestore yet. _uploadTimer covers the debounce window and in-flight period;
+      // _pendingLocalJson covers the post-failure retry window (upload failed but unsaved
+      // changes still exist in STATE and must not be overwritten by a stale snapshot).
+      if (Fb._uploadTimer || Fb._pendingLocalJson) {
         Fb._pendingAssetsData = assets;
         clearTimeout(Fb._assetsRetryTimer);
         Fb._assetsRetryTimer = setTimeout(Fb._retryPendingAssets, 700);
@@ -2213,8 +2266,8 @@ var Fb = {
   _retryPendingAssets: function() {
     var assets = Fb._pendingAssetsData;
     if (!assets) return;
-    if (Fb._uploadTimer) {
-      // Upload still in progress — keep waiting.
+    if (Fb._uploadTimer || Fb._pendingLocalJson) {
+      // Upload in progress or failed with unsaved local changes — keep waiting.
       clearTimeout(Fb._assetsRetryTimer);
       Fb._assetsRetryTimer = setTimeout(Fb._retryPendingAssets, 700);
       return;
