@@ -1427,9 +1427,8 @@
 // =====================================================================
 // Firebase init + Auth gate
 // ---------------------------------------------------------------------
-// Phase A of the Firebase migration: app boot is gated by Google sign-in
-// restricted to @tilt.app emails. Data still persists to localStorage for
-// now \u2014 Phase B replaces the data layer with Firestore.
+// Firebase init: app boot is gated by Google sign-in restricted to @tilt.app
+// emails. Firestore is the sole data store \u2014 localStorage is not used.
 // =====================================================================
 var firebaseConfig = {
   apiKey: "AIzaSyDjFMaP63PeJoAjJaZNQARHwer--fc0_hE",
@@ -1748,11 +1747,11 @@ var Auth = {
 function bootApp() { /* replaced at end of script */ }
 
 // =====================================================================
-// Firestore data layer (Phase B)
+// Firestore data layer
 // ---------------------------------------------------------------------
-// Single-document snapshot sync at `state/app`. saveState() writes a
-// debounced snapshot up to Firestore in addition to localStorage; an
-// onSnapshot listener pulls remote changes back into STATE and re-renders.
+// Single-document snapshot sync at `state/app`. saveState() schedules a
+// debounced Firestore write (600ms); an onSnapshot listener pulls remote
+// changes back into STATE and re-renders.
 //
 // suppressUpload = true while applying an incoming snapshot, so the
 // resulting saveState() call doesn't echo the change back to Firestore
@@ -3978,11 +3977,7 @@ function clearBatch(recipient) {
 }
 
 // ===================== DAILY TALLY SCHEDULER =====================
-// localStorage key holding the ISO date (YYYY-MM-DD) of the most recent tally send.
-// Kept separate from STORAGE_KEY so it survives a state reset and so other browsers can
-// race-check without parsing the full state blob. Will migrate to Firestore once the
-// Firebase wiring lands (shared flag eliminates duplicate-browser sends entirely).
-var TALLY_STORAGE_KEY = 'tilt-creative-tracker-last-tally-date';
+
 // Firestore doc path for the shared tally race flag. When Firebase is connected, this is
 // the source of truth: a transactional write determines which browser fires the tally,
 // and all other browsers atomically lose the race and skip. Falls back to localStorage
@@ -10579,9 +10574,15 @@ function sendPendingBatch(editor, opts) {
   toast('Sending to Slack...', '');
   claimSendSlot(slotKey).then(function(wonClaim) {
     if (!wonClaim) {
-      // Another browser is already sending this batch (or just sent it within the
-      // dedupe window). Skip silently \u2014 we'd be sending a duplicate.
+      // Another browser claimed the slot \u2014 it will handle the send and clear
+      // the batch. Clear items locally NOW so the saveState() debounce timer
+      // that fired above (to persist sendingSince) doesn't write stale items
+      // back to Firestore after the winning browser already cleared them.
+      // Without this, the 600ms save races against the winner's Fb.uploadNow()
+      // and can land after it, restoring items and causing a duplicate send.
       clearInFlight();
+      batch.items = [];
+      batch.firstQueuedAt = null;
       if (!silent) {
         // Only show toast on manual sends so auto-fires don't nag the user.
         toast('Already sent by another browser \u2014 check Slack', '');
@@ -10712,6 +10713,10 @@ function sendPendingBatchSplit(editor, windowItems, extraItems, opts) {
   claimSendSlot(slotKey).then(function(wonClaim) {
     if (!wonClaim) {
       clearBatchInFlight(editor);
+      // Same stale-write fix as the single-send path: clear items locally so
+      // the pending saveState() debounce doesn't restore them to Firestore.
+      var bRef = STATE.pendingBatches[editor];
+      if (bRef) { bRef.items = []; bRef.firstQueuedAt = null; }
       if (!silent) toast('Already sent by another browser \u2014 check Slack', '');
       return;
     }
