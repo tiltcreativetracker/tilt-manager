@@ -8761,7 +8761,7 @@ function renderReportingView() {
       return a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
     }
 
-    var paceApprovalLabel = approval === 'pm' ? 'PM-approved' : approval === 'pm_and_ch' ? 'PM + CH approved' : 'CH-approved';
+    var paceApprovalLabel = approval === 'pm' ? 'PM-approved' : approval === 'pm_and_ch' ? 'PM + CH approved' : approval === 'not_pm' ? 'not yet PM-approved' : 'CH-approved';
 
     if (country === 'UK' && type === 'Paid Ads') {
       // UK Paid Media pace — compare against MONTHLY_APPROVAL_TARGET (pro-rated for weekly/quarterly)
@@ -8773,7 +8773,7 @@ function renderReportingView() {
       }).length;
 
       // Pace target is defined against CH approvals; only show pace pill when filter is default/ch
-      var showPace = approval === 'all' || approval === 'pm_and_ch';
+      var showPace = approval === 'all' || approval === 'pm_and_ch' || approval === 'not_pm';
       var ukTarget;
       if (period === 'monthly') {
         ukTarget = MONTHLY_APPROVAL_TARGET;
@@ -8828,6 +8828,24 @@ function renderReportingView() {
                (dCh  && dCh  >= range.start && dCh  <= range.end);
       }).length;
       subLabel = 'tracked ' + periodLabel + ' by date';
+    } else if (approval === 'not_pm') {
+      // Count active assets dated this period that have NOT been PM-approved yet
+      displayCount = STATE.assets.filter(function(a) {
+        if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return false;
+        if (a.status === 'Approved') return false;
+        var c = findCampaignById(a.campaignId);
+        if (c) {
+          if (country !== 'all' && c.country !== country) return false;
+          if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
+        }
+        var dEst = a.estDelivery || '';
+        var dAp  = a.dateApproved || '';
+        var dCh  = a.chDateApproved || '';
+        return (dEst && dEst >= range.start && dEst <= range.end) ||
+               (dAp  && dAp  >= range.start && dAp  <= range.end) ||
+               (dCh  && dCh  >= range.start && dCh  <= range.end);
+      }).length;
+      subLabel = 'not yet PM-approved · dated ' + periodLabel;
     } else {
       displayCount = STATE.assets.filter(function(a) {
         var c = findCampaignById(a.campaignId);
@@ -8869,13 +8887,15 @@ function renderReportingView() {
   function assetApprovedInPeriod(a, campaignCountry) {
     var isSimple = SIMPLE_APPROVAL_COUNTRIES.indexOf(campaignCountry) >= 0;
     if (approval === 'pm') {
-      // PM-only: use status + dateApproved regardless of country
       return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
     }
     if (approval === 'pm_and_ch') {
-      // Both PM and cat head must be approved; date keyed off cat head approval
       if (isSimple) return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
       return a.status === 'Approved' && a.categoryHeadQc === 'Approved' && a.chDateApproved && a.chDateApproved >= range.start && a.chDateApproved <= range.end;
+    }
+    if (approval === 'not_pm') {
+      // In range but not yet PM-approved — use estDelivery as the date anchor
+      return a.status !== 'Approved' && a.estDelivery && a.estDelivery >= range.start && a.estDelivery <= range.end;
     }
     // 'all' — default country-based logic
     if (isSimple) return a.status === 'Approved' && a.dateApproved && a.dateApproved >= range.start && a.dateApproved <= range.end;
@@ -8889,6 +8909,7 @@ function renderReportingView() {
       if (isSimple) return a.status === 'Approved';
       return a.status === 'Approved' && a.categoryHeadQc === 'Approved';
     }
+    if (approval === 'not_pm') return a.status !== 'Approved';
     // 'all' — default
     if (isSimple) return a.status === 'Approved';
     return a.categoryHeadQc === 'Approved';
@@ -8922,6 +8943,7 @@ function renderReportingView() {
   // Returns true if asset matches the approval filter
   function assetMatchesApproval(a, campaignCountry) {
     if (approval === 'all') return true;
+    if (approval === 'not_pm') return a.status !== 'Approved';
     var pmApproved = a.status === 'Approved';
     if (approval === 'pm') return pmApproved;
     // pm_and_ch: PM approved AND category head approved
@@ -9111,6 +9133,7 @@ function renderReportingView() {
         '<option value="all"' + (approval === 'all' ? ' selected' : '') + '>All</option>' +
         '<option value="pm"' + (approval === 'pm' ? ' selected' : '') + '>Approved by PM</option>' +
         '<option value="pm_and_ch"' + (approval === 'pm_and_ch' ? ' selected' : '') + '>Approved by PM + Cat Heads</option>' +
+        '<option value="not_pm"' + (approval === 'not_pm' ? ' selected' : '') + '>Not yet PM approved</option>' +
       '</select>' +
       '<div class="report-view-toggle">' +
         '<button class="report-view-btn' + (view === 'table' ? ' active' : '') + '" onclick="App.setReporting(\'view\',\'table\')">' + tableIcon + ' Table</button>' +
@@ -9290,6 +9313,11 @@ function renderContentView() {
     return a.status !== 'Cancelled' && inRange(a);
   });
 
+  // Assets missing raw footage (no rawVideo link, or flagged Missing files)
+  function missingRaw(a) { return !a.rawVideo || a.qc === 'Missing files'; }
+  // Assets missing edited video (no finalVideo or not PM-approved)
+  function missingEdited(a) { return !a.finalVideo || a.status !== 'Approved'; }
+
   function assetsForCountry(cc) {
     if (cc === 'all') return allActive;
     return allActive.filter(function(a) {
@@ -9407,6 +9435,43 @@ function renderContentView() {
         '<div style="font-size:12px;color:var(--text3);margin-top:4px;">coming soon</div>' +
       '</div>' +
     '</div>' +
+
+    (function() {
+      var missingRawAssets = scopedAssets.filter(missingRaw);
+      var missingEditedAssets = scopedAssets.filter(function(a) { return hasContent(a) && !isEdited(a); });
+      if (!missingRawAssets.length && !missingEditedAssets.length) return '';
+
+      function drillGroup(assets, label, color) {
+        if (!assets.length) return '';
+        // Group by campaign
+        var byCamp = {};
+        var campOrder = [];
+        assets.forEach(function(a) {
+          var camp = findCampaignById(a.campaignId);
+          var campName = camp ? escapeHtml(camp.name) + (camp.country ? ' (' + camp.country + ')' : '') : 'Unknown campaign';
+          if (!byCamp[campName]) { byCamp[campName] = []; campOrder.push(campName); }
+          byCamp[campName].push(a);
+        });
+        var rows = campOrder.map(function(cn) {
+          var aList = byCamp[cn].map(function(a) {
+            return '<li style="padding:3px 0;color:var(--text2);font-size:12px;">' + escapeHtml(a.name || 'Untitled') + (a.editor ? ' <span style="color:var(--text3);">· ' + escapeHtml(a.editor) + '</span>' : '') + (a.estDelivery ? ' <span style="color:var(--text3);font-family:\'JetBrains Mono\',monospace;font-size:11px;">· ' + a.estDelivery + '</span>' : '') + '</li>';
+          }).join('');
+          return '<div style="margin-bottom:10px;"><div style="font-size:12px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + cn + '</div><ul style="list-style:none;padding-left:10px;border-left:2px solid var(--border2);">' + aList + '</ul></div>';
+        }).join('');
+        return '<details style="margin-bottom:12px;">' +
+          '<summary style="cursor:pointer;font-size:13px;font-weight:600;color:' + color + ';padding:10px 14px;background:var(--bg3);border-radius:8px;list-style:none;display:flex;align-items:center;gap:8px;">' +
+            '<span style="background:' + color + ';color:#000;font-size:11px;font-weight:700;border-radius:10px;padding:1px 7px;opacity:.85;">' + assets.length + '</span>' +
+            label +
+          '</summary>' +
+          '<div style="padding:14px 16px 4px;">' + rows + '</div>' +
+        '</details>';
+      }
+
+      return '<div style="margin-bottom:28px;">' +
+        drillGroup(missingRawAssets, 'Missing raw footage', '#4fc3f7') +
+        drillGroup(missingEditedAssets, 'Raw in · not yet edited', '#81c784') +
+      '</div>';
+    })() +
 
     '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;">' +
       '<table style="width:100%;border-collapse:collapse;">' + tableHtml + '</table>' +
@@ -11624,6 +11689,7 @@ var App = {
         if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
         return a.status==='Approved' && a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
       }
+      if (approval === 'not_pm') return a.status!=='Approved' && a.estDelivery && a.estDelivery>=range.start && a.estDelivery<=range.end;
       if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
       return a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
     }
@@ -11632,6 +11698,7 @@ var App = {
       var isSimple = SIMPLE.indexOf(cc) >= 0;
       if (approval === 'pm') return a.status==='Approved';
       if (approval === 'pm_and_ch') { if (isSimple) return a.status==='Approved'; return a.status==='Approved' && a.categoryHeadQc==='Approved'; }
+      if (approval === 'not_pm') return a.status!=='Approved';
       if (isSimple) return a.status==='Approved';
       return a.categoryHeadQc==='Approved';
     }
@@ -11646,6 +11713,7 @@ var App = {
       var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
       if (approval !== 'all') assets = assets.filter(function(a) {
+        if (approval === 'not_pm') return a.status!=='Approved' && a.categoryHeadQc!=='Cancelled';
         var pmOk = a.status==='Approved';
         if (approval === 'pm') return pmOk;
         var chOk = SIMPLE.indexOf(c.country)>=0 ? pmOk : a.categoryHeadQc==='Approved';
@@ -11729,6 +11797,7 @@ var App = {
         if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
         return a.status==='Approved' && a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
       }
+      if (approval === 'not_pm') return a.status!=='Approved' && a.estDelivery && a.estDelivery>=range.start && a.estDelivery<=range.end;
       if (isSimple) return a.status==='Approved' && a.dateApproved && a.dateApproved>=range.start && a.dateApproved<=range.end;
       return a.categoryHeadQc==='Approved' && a.chDateApproved && a.chDateApproved>=range.start && a.chDateApproved<=range.end;
     }
@@ -11737,6 +11806,7 @@ var App = {
       var isSimple = SIMPLE.indexOf(cc) >= 0;
       if (approval === 'pm') return a.status==='Approved';
       if (approval === 'pm_and_ch') { if (isSimple) return a.status==='Approved'; return a.status==='Approved' && a.categoryHeadQc==='Approved'; }
+      if (approval === 'not_pm') return a.status!=='Approved';
       if (isSimple) return a.status==='Approved';
       return a.categoryHeadQc==='Approved';
     }
@@ -11751,6 +11821,7 @@ var App = {
       var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
       if (approval !== 'all') assets = assets.filter(function(a) {
+        if (approval === 'not_pm') return a.status!=='Approved' && a.categoryHeadQc!=='Cancelled';
         var pmOk = a.status==='Approved';
         if (approval === 'pm') return pmOk;
         var chOk = SIMPLE.indexOf(c.country)>=0 ? pmOk : a.categoryHeadQc==='Approved';
@@ -11769,6 +11840,8 @@ var App = {
       approvalExplain = 'Approval filter: Approved by PM — these videos have received PM sign-off. Category head review may still be pending for some.';
     } else if (approval === 'pm_and_ch') {
       approvalExplain = 'Approval filter: Approved by PM + Category Heads — these videos have received full sign-off from both the PM and the assigned category head. This represents final, fully-cleared creative.';
+    } else if (approval === 'not_pm') {
+      approvalExplain = 'Approval filter: Not yet PM approved — these videos are scheduled this period but have not yet received PM sign-off.';
     } else {
       approvalExplain = 'Approval filter: All statuses — counts reflect the full standard approval pipeline (category head sign-off for UK/US; PM approval for IT/ES/PL).';
     }
