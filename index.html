@@ -8946,7 +8946,15 @@ function renderReportingView() {
     var activeAssets     = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
     var periodAssets     = activeAssets.filter(assetInRange);
     var total            = periodAssets.length;
-    var approvedInPeriod = periodAssets.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
+    // In notYetMode, count directly from periodAssets (already date-filtered) so we don't double-filter on dates
+    var approvedInPeriod;
+    if (approval === 'not_pm') {
+      approvedInPeriod = periodAssets.filter(function(a) { return a.status !== 'Approved'; }).length;
+    } else if (approval === 'not_ch') {
+      approvedInPeriod = periodAssets.filter(function(a) { return a.status === 'Approved' && a.categoryHeadQc !== 'Approved' && SIMPLE_APPROVAL_COUNTRIES.indexOf(c.country) < 0; }).length;
+    } else {
+      approvedInPeriod = periodAssets.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
+    }
     var approvedAllTime  = activeAssets.filter(function(a) { return assetApprovedAllTime(a, c.country); }).length;
     var revisions        = activeAssets.filter(function(a) { return a.categoryHeadQc === 'Needs Revisions'; }).length;
     var pct    = total > 0 ? Math.round(approvedAllTime / total * 100) : 0;
@@ -9007,7 +9015,7 @@ function renderReportingView() {
       return '<tr onclick="App.selectCampaign(\'' + r.c.id + '\'); App.setTab(\'campaigns\')">' +
         '<td class="td-name">' + escapeHtml(r.c.name) + '</td>' +
         '<td>' + flagHtml(r.c.country) + '</td>' +
-        '<td class="' + (notYetMode ? ((r.total - r.approved) > 0 ? 'td-amber' : 'td-green') : 'td-green') + '">' + (notYetMode ? (r.total - r.approved) : r.approved) + '</td>' +
+        '<td class="' + (notYetMode ? (r.approved > 0 ? 'td-amber' : 'td-green') : 'td-green') + '">' + r.approved + '</td>' +
         '<td class="td-mono">' + r.total + '</td>' +
         '<td><div class="report-prog-cell"><div class="report-mini-track"><div class="report-mini-fill' + (r.isFull ? ' full' : '') + '" style="width:' + r.pct + '%"></div></div><span class="report-pct">' + r.pct + '%</span></div></td>' +
         '<td class="' + (r.revisions > 0 ? 'td-amber' : 'td-mono') + '">' + r.revisions + '</td>' +
