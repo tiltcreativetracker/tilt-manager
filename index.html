@@ -8995,7 +8995,8 @@ function renderReportingView() {
   }
 
   // ── TABLE VIEW — grouped by category ──
-  var approvedColLabel = 'Not Yet Approved';
+  var notYetMode = approval === 'not_pm' || approval === 'not_ch';
+  var approvedColLabel = notYetMode ? 'Not Yet Approved' : (period === 'weekly' ? 'Approved This Week' : period === 'quarterly' ? 'Approved This Quarter' : 'Approved This Month');
   function tableHtml() {
     var thead = '<thead><tr><th>Campaign</th><th>Country</th><th>' + approvedColLabel + '</th><th>Total</th><th>Progress</th><th>Revisions</th><th title="PM-approved but category head not yet signed off">Pending Cat Head</th><th>Editors</th><th>Finish Date</th><th>Status</th></tr></thead>';
 
@@ -9006,7 +9007,7 @@ function renderReportingView() {
       return '<tr onclick="App.selectCampaign(\'' + r.c.id + '\'); App.setTab(\'campaigns\')">' +
         '<td class="td-name">' + escapeHtml(r.c.name) + '</td>' +
         '<td>' + flagHtml(r.c.country) + '</td>' +
-        '<td class="' + ((r.total - r.approved) > 0 ? 'td-amber' : 'td-green') + '">' + (r.total - r.approved) + '</td>' +
+        '<td class="' + (notYetMode ? ((r.total - r.approved) > 0 ? 'td-amber' : 'td-green') : 'td-green') + '">' + (notYetMode ? (r.total - r.approved) : r.approved) + '</td>' +
         '<td class="td-mono">' + r.total + '</td>' +
         '<td><div class="report-prog-cell"><div class="report-mini-track"><div class="report-mini-fill' + (r.isFull ? ' full' : '') + '" style="width:' + r.pct + '%"></div></div><span class="report-pct">' + r.pct + '%</span></div></td>' +
         '<td class="' + (r.revisions > 0 ? 'td-amber' : 'td-mono') + '">' + r.revisions + '</td>' +
