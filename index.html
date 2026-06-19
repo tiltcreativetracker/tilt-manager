@@ -8854,7 +8854,7 @@ function renderReportingView() {
         if (a.categoryHeadQc === 'Approved') return false;
         var c = findCampaignById(a.campaignId);
         if (c) {
-          if (SIMPLE_APPROVAL_COUNTRIES.indexOf(c.country) >= 0) return false;
+          if (['IT','ES','PL'].indexOf(c.country) >= 0) return false;
           if (country !== 'all' && c.country !== country) return false;
           if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
         }
