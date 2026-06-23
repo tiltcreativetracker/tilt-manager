@@ -263,7 +263,6 @@
   .av-Patty { background: #085041; color: var(--green-text); }
   .av-Sharm { background: #633806; color: var(--amber-text); }
   .av-Elsa { background: #72243e; color: var(--pink-text); }
-  .av-Millie { background: #1a4a3a; color: #6fd6b0; }
   .editor-name { font-size: 12px; color: var(--text1); }
   .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .s-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
@@ -1220,7 +1219,6 @@
     .av-Patty { background: #d4f4e6; color: #0a5040; }
     .av-Sharm { background: #fff0d5; color: #8a4f00; }
     .av-Elsa  { background: #fde0ea; color: #8a1f3f; }
-    .av-Millie { background: #d0f0e6; color: #0f4a38; }
 
     /* Activity / change tags. Use background-color (NOT the shorthand) because
        .st-Assigned is also applied to <select class="status-select"> and the
@@ -2029,13 +2027,6 @@ var Fb = {
         if (!STATE.dailyThreadHistory.Elsa) STATE.dailyThreadHistory.Elsa = [];
         setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
       }
-      // Migration: add Millie to dailyThreads if not present.
-      if (STATE.dailyThreads && !STATE.dailyThreads.hasOwnProperty('Millie')) {
-        STATE.dailyThreads.Millie = null;
-        if (!STATE.dailyThreadHistory) STATE.dailyThreadHistory = {};
-        if (!STATE.dailyThreadHistory.Millie) STATE.dailyThreadHistory.Millie = [];
-        setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
-      }
       if (typeof render === 'function' && Auth._booted) render();
     } finally {
       // Defer un-suppressing past the synchronous render so any saveState calls fired
@@ -2681,7 +2672,8 @@ var CATEGORY_HEADS = {
   'Health and Beauty':    'Jacob',
   'Streetwear':           'Jacob',
   'Watches':              'Jacob',
-  'Mixed Deals':          'Anand'
+  'Mixed Deals':          'Anand',
+  'Event - Stone Island': 'Millie'
 };
 
 // Returns the assigned head's name for a given category name, or '' if none.
@@ -2799,7 +2791,7 @@ var STATE = {
   // when set, asset-change notifications mention the head so they get pinged.
   // Heads are derived from category via CATEGORY_HEADS; this map is keyed by
   // the head's display name (Anand, Hanyan, Jacob, Cristian).
-  categoryHeadSlackIds: { Anand: '', Hanyan: '', Jacob: '', Cristian: '' },
+  categoryHeadSlackIds: { Anand: '', Hanyan: '', Jacob: '', Cristian: '', Millie: '' },
   // Overrides for CATEGORY_HEADS — keyed by category name, value is the head's
   // display name. When set, getCategoryHead() returns this instead of the
   // hardcoded default. New categories added via Config use this map.
@@ -2818,9 +2810,9 @@ var STATE = {
   // One daily Slack thread per editor (Zidni/Sharm/Patty/Elsa). Each entry: { date,
   // url, channelId, threadTs }. Cleared at midnight rollover. Notifications
   // routed to that editor land in the thread when set; otherwise webhook.
-  dailyThreads: { Zidni: null, Sharm: null, Patty: null, Elsa: null, Millie: null },
+  dailyThreads: { Zidni: null, Sharm: null, Patty: null, Elsa: null },
   // Last 7 archived per-editor threads, kept for audit / re-paste.
-  dailyThreadHistory: { Zidni: [], Sharm: [], Patty: [], Elsa: [], Millie: [] },
+  dailyThreadHistory: { Zidni: [], Sharm: [], Patty: [], Elsa: [] },
   // One daily Slack thread per category (keyed by category name). CHQ batches
   // for that category post as replies in the thread when set; otherwise webhook.
   catHeadDailyThreads: {},
@@ -3364,7 +3356,7 @@ function escapeHtml(s) {
   });
 }
 
-function editorInitials(e) { return ({Zidni:'ZD', Patty:'PT', Sharm:'SH', Elsa:'EL', Seller:'SL', Millie:'ML'})[e] || '??'; }
+function editorInitials(e) { return ({Zidni:'ZD', Patty:'PT', Sharm:'SH', Elsa:'EL', Seller:'SL'})[e] || '??'; }
 function statusClass(s) { return 'st-' + s.replace(/ /g, '_'); }
 
 // ===================== INLINE CELL EDITING =====================
@@ -7253,38 +7245,6 @@ function renderAutomationsView() {
       '</div>';
     }).join('');
 
-    // Event — Stone Island section
-    (function() {
-      var millieEd = 'Millie';
-      var t = (STATE.dailyThreads && STATE.dailyThreads[millieEd]) || null;
-      var url = t ? t.url : '';
-      var dot = '', dotTitle = 'No thread set — falls back to webhook';
-      if (t) {
-        if (t.date === today) { dot = 'ok'; dotTitle = 'Thread set for today'; }
-        else { dot = 'bad'; dotTitle = 'Thread is from ' + t.date + ' (stale) — will reset at UK midnight'; }
-      }
-      var hist = (STATE.dailyThreadHistory && STATE.dailyThreadHistory[millieEd]) || [];
-      var histHtml = hist.length === 0 ? '' :
-        '<div style="font-size:11px; color:var(--text3); margin-top:4px;">Recent: ' +
-        hist.slice(0, 3).map(function(h) {
-          return '<a href="' + escapeHtml(h.url) + '" target="_blank" style="color:var(--text3);">' + h.date + '</a>';
-        }).join(' · ') + '</div>';
-      rows += '<div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border2);">' +
-        '<div style="font-size:11px; font-weight:600; letter-spacing:0.05em; color:var(--text3); text-transform:uppercase; margin-bottom:8px;">Event — Stone Island</div>' +
-        '<div style="margin-top:0;">' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
-            '<div class="editor-avatar av-' + millieEd + '">' + editorInitials(millieEd) + '</div>' +
-            '<span style="font-weight:600;font-size:13px;color:var(--text1);">' + millieEd + '</span>' +
-            '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '" style="margin-left:auto;"></span>' +
-          '</div>' +
-          '<div class="webhook-row">' +
-            '<input type="text" id="daily-thread-input-' + millieEd + '" value="' + escapeHtml(url) + '" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx" style="flex:1;">' +
-            '<button class="save-btn" onclick="App.saveDailyThread(\'' + millieEd + '\')">Set</button>' +
-            (t ? '<button class="edit-btn" onclick="App.clearDailyThread(\'' + millieEd + '\')" style="margin-left:4px;">Clear</button>' : '') +
-          '</div>' + histHtml +
-        '</div>' +
-      '</div>';
-    })();
 
     var tokenVal = escapeHtml(STATE.slackBotToken || '');
     var tokenDot = tokenVal ? 'ok' : '';
@@ -13238,7 +13198,7 @@ var App = {
 
   // Daily-thread + bot token handlers.
   saveDailyThread: function(editor) {
-    if (!STATE.dailyThreads) STATE.dailyThreads = { Zidni: null, Sharm: null, Patty: null, Elsa: null, Millie: null };
+    if (!STATE.dailyThreads) STATE.dailyThreads = { Zidni: null, Sharm: null, Patty: null, Elsa: null };
     var input = document.getElementById('daily-thread-input-' + editor);
     if (!input) return;
     var url = (input.value || '').trim();
