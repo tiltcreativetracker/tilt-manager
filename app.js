@@ -5480,7 +5480,10 @@ function renderCampaignsView() {
   // BOTH the <thead> below and each row, and the empty-state colspan adjusts.
   var hideLinkCols = !!camp.hideAssetLinkCols;
   var showSparksCode = ['IT', 'ES'].indexOf(camp.country) !== -1;
-  var showIgLink = camp.country === 'IT';
+  // Per-video IG Link column shows on every campaign. Was previously IT-only when
+  // the field was piloted there; product ask is for editors to be able to paste
+  // the post URL on any campaign's videos.
+  var showIgLink = true;
   var hideCHQC = ['IT', 'ES'].indexOf(camp.country) !== -1;
   // Total column count for full-width rows (empty state, week-group headers). Mirrors the
   // conditional columns in the <thead>/row markup below.

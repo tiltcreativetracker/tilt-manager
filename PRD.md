@@ -204,6 +204,7 @@ All entities live as arrays/objects on the global `STATE`. Identifiers are local
 | `editingBrief` | string (URL) | Notion link |
 | `finalVideo` | string (URL) | Final cut link |
 | `sparksCode` | string | Sparks promotion code — only surfaced in the UI for IT, ES campaigns |
+| `igLink` | string (URL) | Per-video Instagram post link. Column shows on every campaign regardless of country/type (was IT-only during the initial pilot). |
 | `estDelivery` | string (YYYY-MM-DD) | ETA |
 | `dateApproved` | string (YYYY-MM-DD) | Stamped on transition to Approved |
 | `scheduledFor` | string (YYYY-MM-DD) | Stamped by the scheduler |
