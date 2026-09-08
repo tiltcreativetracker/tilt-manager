@@ -5046,6 +5046,28 @@ function renderTopbar() {
 
 function renderSidebar() {
   var compact = !!STATE.sidebarCompact;
+  // Sidebar badge = the campaign's 1-based index within its (country, type, month)
+  // bucket, ordered by the per-country `rank` field. This resets numbering per month
+  // so Sep 2026 Organic reads 1, 2, 3 even if the same country has other Organic
+  // months eating rank slots 3, 5, 8. Computed once per render and looked up in
+  // every branch (grouped, flat, compact).
+  var bucketIdxByCampId = (function() {
+    var counters = {};
+    var idx = {};
+    STATE.campaigns.slice().sort(function(a, b) {
+      // Group by country first so buckets are contiguous, then rank asc within each.
+      if (a.country !== b.country) return a.country < b.country ? -1 : 1;
+      return (a.rank || 0) - (b.rank || 0);
+    }).forEach(function(c) {
+      var typeKey = (c.type || DEFAULT_CAMPAIGN_TYPE) === 'Organic' ? 'organic' : 'paid';
+      var mk = (c.monthYear || '').slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(mk)) mk = 'none';
+      var bucket = c.country + '|' + typeKey + '|' + mk;
+      counters[bucket] = (counters[bucket] || 0) + 1;
+      idx[c.id] = counters[bucket];
+    });
+    return idx;
+  })();
   // Build the set of months that exist across all campaigns' explicit monthYear field.
   // Used to populate the month-filter dropdown so we don't list months with zero
   // assigned campaigns. Each entry is an ISO 'YYYY-MM' string. Sorted ascending.
@@ -5225,7 +5247,7 @@ function renderSidebar() {
                   'ondrop="App.onSubcampDrop(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
                   'ondragend="App.onSubcampDragEnd(event)">' +
                   '<span class="drag-handle" title="Drag to reorder">⁝</span>' +
-                  '<div class="rank-badge">' + s.rank + '</div>' +
+                  '<div class="rank-badge" title="Campaign #' + s.rank + ' in ' + country.code + '">' + (bucketIdxByCampId[s.id] || s.rank) + '</div>' +
                   '<span class="ad-status-dot ' + (s.killedDate ? 'dot-killed' : s.goneLive ? 'dot-live' : 'dot-notlive') + '" title="' + (s.killedDate ? (s.goneLive ? 'Live ' + formatDate(s.goneLive) + ' → Killed ' + formatDate(s.killedDate) : 'Killed ' + formatDate(s.killedDate) + ' (no live date)') : s.goneLive ? 'Live since ' + formatDate(s.goneLive) : 'Not yet live') + '"></span>' +
                   nameHtml +
                   (isRenaming ? '' : categoryBadgeHtml(s.category)) +
@@ -5259,7 +5281,7 @@ function renderSidebar() {
               'ondrop="App.onSubcampDrop(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
               'ondragend="App.onSubcampDragEnd(event)">' +
               '<div class="country-flag flag-' + country.code + '" style="width:18px; height:13px; font-size:8px;">' + country.code + '</div>' +
-              '<div class="rank-badge">' + s.rank + '</div>' +
+              '<div class="rank-badge" title="Campaign #' + s.rank + ' in ' + country.code + '">' + (bucketIdxByCampId[s.id] || s.rank) + '</div>' +
             '</div>';
         } else {
           // In full mode: if this row is currently being renamed, render an inline
@@ -5286,7 +5308,7 @@ function renderSidebar() {
               'ondrop="App.onSubcampDrop(event, \'' + s.id + '\', \'' + country.code + '\')" ' +
               'ondragend="App.onSubcampDragEnd(event)">' +
               '<span class="drag-handle" title="Drag to reorder">\u205D</span>' +
-              '<div class="rank-badge">' + s.rank + '</div>' +
+              '<div class="rank-badge" title="Campaign #' + s.rank + ' in ' + country.code + '">' + (bucketIdxByCampId[s.id] || s.rank) + '</div>' +
               '<span class="ad-status-dot ' + (s.killedDate ? 'dot-killed' : s.goneLive ? 'dot-live' : 'dot-notlive') + '" title="' + (s.killedDate ? (s.goneLive ? 'Live ' + formatDate(s.goneLive) + ' → Killed ' + formatDate(s.killedDate) : 'Killed ' + formatDate(s.killedDate) + ' (no live date)') : s.goneLive ? 'Live since ' + formatDate(s.goneLive) : 'Not yet live') + '"></span>' +
               nameHtml +
               (isRenaming ? '' : categoryBadgeHtml(s.category)) +
