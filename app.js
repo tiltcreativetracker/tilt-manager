@@ -5504,11 +5504,15 @@ function renderCampaignsView() {
         '<td>' + renderEditableCell(a, 'editor') + '</td>' +
         '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
         (showSparksCode ? '<td>' + renderEditableCell(a, 'sparksCode') + '</td>' : '') +
-        (showIgLink ? '<td class="link-cell">' + renderEditableCell(a, 'igLink') + '</td>' : '') +
         '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
         '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
         '<td>' + renderEditableCell(a, 'qc') + '</td>' +
         '<td>' + renderStatusSelect(a) + '</td>' +
+        // IG Link sits immediately before Category Head QC so the CH verdict and
+        // the resulting posted IG URL are visually adjacent when reviewing videos.
+        // On IT/ES the CHQC block is hidden, so IG Link falls through to just
+        // before Actions in the same slot.
+        (showIgLink ? '<td class="link-cell">' + renderEditableCell(a, 'igLink') + '</td>' : '') +
         (hideCHQC ? '' :
           '<td>' + (function() {
             var head = getCategoryHead(a.category);
@@ -5718,7 +5722,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (showIgLink ? '<th>IG Link</th>' : '') + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
