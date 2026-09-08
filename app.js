@@ -4323,6 +4323,18 @@ function showAddSubCampaignModal(forCountry) {
         '</div>' +
         '<input id="f-cbrief" class="form-input" placeholder="https://notion.so/... (campaign-wide brief link)" oninput="App.refreshOpenLinkButton(\'f-cbrief\')">' +
       '</div>' +
+      // Organic-only: IG link. Default type is Paid Ads, so start hidden;
+      // onModalTypeChange toggles visibility when the Type select changes.
+      '<div class="form-row full" id="f-ciglink-row" style="display:none;">' +
+        '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
+          '<label class="form-label" style="margin:0;">Instagram Link</label>' +
+          '<button type="button" id="f-ciglink-open" class="edit-btn" disabled ' +
+            'style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" ' +
+            'title="Field must contain a single URL to open" ' +
+            'onclick="App.openLinkFromField(\'f-ciglink\')">open \u2197</button>' +
+        '</div>' +
+        '<input id="f-ciglink" class="form-input" placeholder="https://instagram.com/... (Organic only)" oninput="App.refreshOpenLinkButton(\'f-ciglink\')">' +
+      '</div>' +
       '<div class="form-row full">' +
         '<label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
           '<input type="checkbox" id="f-chideLinks" style="width:auto; margin:0;">' +
@@ -4344,16 +4356,19 @@ function showAddSubCampaignModal(forCountry) {
     var country = document.getElementById('f-ccountry').value;
     // New campaigns append to the end of their country's order \u2014 reorder the list below.
     STATE.nextCampaignId++;
+    var _newType = document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE;
     var camp = {
       id: newLocalId('c'), country: country, name: name,
       rank: getSubCampaignsForCountry(country).length + 1,
       brief: document.getElementById('f-cbrief').value,
       category: document.getElementById('f-ccat').value,
-      type: document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE,
+      type: _newType,
       driveId: document.getElementById('f-cdrive').value,
       slackOverride: document.getElementById('f-cslack').value,
       monthYear: document.getElementById('f-cmonth').value || '',
       hideAssetLinkCols: !!document.getElementById('f-chideLinks').checked,
+      // IG link is Organic-only; drop it silently if the campaign is Paid Ads
+      igLink: _newType === 'Organic' ? (document.getElementById('f-ciglink').value || '') : '',
       goneLive: '',
       killedDate: ''
     };
@@ -4398,6 +4413,7 @@ function showEditCampaignModal() {
         var briefUrl = extractSingleUrl(c.brief);
         var driveUrl = extractSingleUrl(c.driveId);
         var finalVideosUrl = extractSingleUrl(c.finalVideos || '');
+        var igUrl = extractSingleUrl(c.igLink || '');
         var briefBtn = briefUrl
           ? '<button type="button" id="f-cbrief-open" class="edit-btn" style="padding:4px 10px; font-size:11px;" title="Open the URL in this brief" onclick="App.openLinkFromField(\'f-cbrief\')">open \u2197</button>'
           : '<button type="button" id="f-cbrief-open" class="edit-btn" disabled style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" title="Field must contain a single URL to open" onclick="App.openLinkFromField(\'f-cbrief\')">open \u2197</button>';
@@ -4407,6 +4423,12 @@ function showEditCampaignModal() {
         var finalVideosBtn = finalVideosUrl
           ? '<button type="button" id="f-cfinalvideos-open" class="edit-btn" style="padding:4px 10px; font-size:11px;" title="Open the Final Videos link" onclick="App.openLinkFromField(\'f-cfinalvideos\')">open \u2197</button>'
           : '<button type="button" id="f-cfinalvideos-open" class="edit-btn" disabled style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" title="Field must contain a single URL to open" onclick="App.openLinkFromField(\'f-cfinalvideos\')">open \u2197</button>';
+        var igBtn = igUrl
+          ? '<button type="button" id="f-ciglink-open" class="edit-btn" style="padding:4px 10px; font-size:11px;" title="Open the Instagram link" onclick="App.openLinkFromField(\'f-ciglink\')">open \u2197</button>'
+          : '<button type="button" id="f-ciglink-open" class="edit-btn" disabled style="padding:4px 10px; font-size:11px; opacity:0.4; cursor:not-allowed;" title="Field must contain a single URL to open" onclick="App.openLinkFromField(\'f-ciglink\')">open \u2197</button>';
+        // IG link is Organic-only. Hidden when the campaign type is Paid Ads
+        // and toggled by onModalTypeChange when Type flips.
+        var igRowStyle = currentType === 'Organic' ? '' : 'display:none;';
         return (
           '<div class="form-row full">' +
             '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
@@ -4428,6 +4450,13 @@ function showEditCampaignModal() {
               finalVideosBtn +
             '</div>' +
             '<input id="f-cfinalvideos" class="form-input" placeholder="https://frame.io/... or https://drive.google.com/..." value="' + escapeHtml(c.finalVideos || '') + '" oninput="App.refreshOpenLinkButton(\'f-cfinalvideos\')">' +
+          '</div>' +
+          '<div class="form-row full" id="f-ciglink-row" style="' + igRowStyle + '">' +
+            '<div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">' +
+              '<label class="form-label" style="margin:0;">Instagram Link</label>' +
+              igBtn +
+            '</div>' +
+            '<input id="f-ciglink" class="form-input" placeholder="https://instagram.com/... (Organic only)" value="' + escapeHtml(c.igLink || '') + '" oninput="App.refreshOpenLinkButton(\'f-ciglink\')">' +
           '</div>'
         );
       })() +
@@ -4462,6 +4491,9 @@ function showEditCampaignModal() {
     c.type = document.getElementById('f-ctype').value || DEFAULT_CAMPAIGN_TYPE;
     c.driveId = document.getElementById('f-cdrive').value;
     c.finalVideos = document.getElementById('f-cfinalvideos').value;
+    // IG link is Organic-only; if the user flipped Type to Paid Ads on save, drop it
+    var _igEl = document.getElementById('f-ciglink');
+    c.igLink = (c.type === 'Organic' && _igEl) ? (_igEl.value || '') : '';
     c.slackOverride = document.getElementById('f-cslack').value;
     c.monthYear = document.getElementById('f-cmonth').value || '';
     c.goneLive = document.getElementById('f-cgonelive').value || '';
@@ -5559,6 +5591,23 @@ function renderCampaignsView() {
     finalVideosPill = '<span class="meta-chip link-pill-invalid" title="Not a valid URL \u2014 edit the campaign to fix">' +
       '<span class="meta-chip-label">finals</span>invalid link</span>';
   }
+  // Organic-only IG link pill. Never rendered for Paid Ads campaigns even if a
+  // stale igLink value survives a type flip (the save handlers clear it, but be
+  // defensive at render time so legacy data or a rare race can't leak the chip).
+  var igPill = '';
+  if ((camp.type || DEFAULT_CAMPAIGN_TYPE) === 'Organic') {
+    var igUrl = extractSingleUrl(camp.igLink || '');
+    if (igUrl) {
+      igPill = '<a href="' + escapeHtml(igUrl) + '" target="_blank" rel="noopener" class="meta-chip link-pill" title="' + escapeHtml(igUrl) + '">' +
+        '<span class="meta-chip-label">ig</span>' +
+        '<span class="link-pill-host">' + escapeHtml(hostnameFromUrl(igUrl)) + '</span>' +
+        '<span class="link-pill-arrow">\u2197</span>' +
+      '</a>';
+    } else if (camp.igLink) {
+      igPill = '<span class="meta-chip link-pill-invalid" title="Not a valid URL \u2014 edit the campaign to fix">' +
+        '<span class="meta-chip-label">ig</span>invalid link</span>';
+    }
+  }
 
   var metaChips =
     '<span class="meta-chip"><span class="meta-chip-label">rank</span>' + camp.rank + ' / ' + getSubCampaignsForCountry(camp.country).length + '</span>' +
@@ -5594,6 +5643,7 @@ function renderCampaignsView() {
     drivePill +
     briefPill +
     finalVideosPill +
+    igPill +
     (function() {
       // Only show the slack pill when a per-campaign override is set. No override \u2014 no
       // pill (country/global webhook is doing its job silently). If set but not a valid
@@ -17332,6 +17382,10 @@ var App = {
     var current = sel ? sel.value : '';
     var stillValid = list.some(function(c) { return c.name === current; });
     refreshModalCategoryPicker(stillValid ? current : (list.length ? list[0].name : ''));
+    // IG link is Organic-only. Toggle the row without touching its value so a flip
+    // back to Organic doesn't lose what the user already typed in the same modal.
+    var igRow = document.getElementById('f-ciglink-row');
+    if (igRow) igRow.style.display = (value === 'Organic') ? '' : 'none';
   },
 
   // Reveal the rename input, seeded with the currently-selected category name.

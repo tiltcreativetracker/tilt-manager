@@ -181,6 +181,7 @@ All entities live as arrays/objects on the global `STATE`. Identifiers are local
 | `monthYear` | string | Display tag |
 | `hideAssetLinkCols` | boolean | Hides Drive/Brief columns in the asset table for this campaign |
 | `finalVideos` | string (URL) | Campaign-level final videos folder/playlist link (e.g. Frame.io or Drive) |
+| `igLink` | string (URL) | Instagram link — **Organic-only**. Field is hidden in the campaign modal when Type is Paid Ads, cleared on save if Type flips away from Organic, and the header pill is guarded by the same type check so a stale value can never render on a Paid Ads campaign. |
 | `done` | boolean | Manually marked as done; shown with green left border and dimmed name in sidebar |
 
 ### 4.2 Asset (video)
