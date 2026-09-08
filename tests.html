@@ -97,6 +97,26 @@
       }
     }
 
+    // Mirrors getMonthlyPnOffset from app.js. Returns the count of videos in
+    // same (country, type, monthYear) campaigns ranked ABOVE `camp`, so the
+    // campaign's local pn 1..N displays continuously across the month bucket.
+    function getMonthlyPnOffset(camp, campaigns, assets) {
+      if (!camp) return 0;
+      var campType = camp.type || 'Paid Ads';
+      var campMonth = (camp.monthYear || '').slice(0, 7);
+      var siblings = campaigns.filter(function(c) {
+        if (c.country !== camp.country) return false;
+        if ((c.type || 'Paid Ads') !== campType) return false;
+        if (((c.monthYear || '').slice(0, 7)) !== campMonth) return false;
+        return c.rank < camp.rank;
+      });
+      var offset = 0;
+      siblings.forEach(function(c) {
+        offset += assets.filter(function(a) { return a.campaignId === c.id; }).length;
+      });
+      return offset;
+    }
+
     // Mirrors the Sparks Code visibility check
     function showSparksCode(countryCode) {
       return ['IT', 'ES', 'PL'].indexOf(countryCode) !== -1;
@@ -176,6 +196,90 @@
         expect(campaigns[0].rank).toBe(1);
         expect(campaigns[1].rank).toBe(2);
         expect(campaigns[2].rank).toBe(3);
+      });
+    });
+
+    describe('Monthly video-NO. offset (continuous across the month bucket)', function() {
+      it('first campaign in the bucket has offset 0', function() {
+        var campaigns = [
+          { id: 1, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 1 },
+          { id: 2, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 2 }
+        ];
+        var assets = [
+          { campaignId: 1, pn: 1 }, { campaignId: 1, pn: 2 }, { campaignId: 1, pn: 3 },
+          { campaignId: 1, pn: 4 }, { campaignId: 1, pn: 5 },
+          { campaignId: 2, pn: 1 }, { campaignId: 2, pn: 2 }, { campaignId: 2, pn: 3 }
+        ];
+        expect(getMonthlyPnOffset(campaigns[0], campaigns, assets)).toBe(0);
+      });
+
+      it('second campaign starts after the first campaign\'s video count', function() {
+        var campaigns = [
+          { id: 1, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 1 },
+          { id: 2, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 2 }
+        ];
+        var assets = [
+          { campaignId: 1, pn: 1 }, { campaignId: 1, pn: 2 }, { campaignId: 1, pn: 3 },
+          { campaignId: 1, pn: 4 }, { campaignId: 1, pn: 5 },
+          { campaignId: 2, pn: 1 }, { campaignId: 2, pn: 2 }, { campaignId: 2, pn: 3 }
+        ];
+        // Campaign 1 has 5 videos so campaign 2 starts at 6 → offset = 5.
+        expect(getMonthlyPnOffset(campaigns[1], campaigns, assets)).toBe(5);
+      });
+
+      it('different types are independent buckets', function() {
+        var campaigns = [
+          { id: 1, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 1 },
+          { id: 2, country: 'UK', type: 'Organic',  monthYear: '2026-04', rank: 2 }
+        ];
+        var assets = [
+          { campaignId: 1, pn: 1 }, { campaignId: 1, pn: 2 }, { campaignId: 1, pn: 3 },
+          { campaignId: 2, pn: 1 }
+        ];
+        // Organic campaign doesn't count the Paid Ads videos.
+        expect(getMonthlyPnOffset(campaigns[1], campaigns, assets)).toBe(0);
+      });
+
+      it('different months are independent buckets', function() {
+        var campaigns = [
+          { id: 1, country: 'UK', type: 'Paid Ads', monthYear: '2026-03', rank: 1 },
+          { id: 2, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 2 }
+        ];
+        var assets = [
+          { campaignId: 1, pn: 1 }, { campaignId: 1, pn: 2 }, { campaignId: 1, pn: 3 },
+          { campaignId: 2, pn: 1 }
+        ];
+        // April campaign doesn't count March videos.
+        expect(getMonthlyPnOffset(campaigns[1], campaigns, assets)).toBe(0);
+      });
+
+      it('undated campaigns bucket together under the empty month', function() {
+        var campaigns = [
+          { id: 1, country: 'UK', type: 'Paid Ads', monthYear: '',       rank: 1 },
+          { id: 2, country: 'UK', type: 'Paid Ads', monthYear: '',       rank: 2 },
+          { id: 3, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 3 }
+        ];
+        var assets = [
+          { campaignId: 1, pn: 1 }, { campaignId: 1, pn: 2 },
+          { campaignId: 2, pn: 1 },
+          { campaignId: 3, pn: 1 }
+        ];
+        expect(getMonthlyPnOffset(campaigns[1], campaigns, assets)).toBe(2);
+        // April campaign is in its own bucket — no offset even though undated campaigns
+        // sit at ranks 1 and 2 above it in the country order.
+        expect(getMonthlyPnOffset(campaigns[2], campaigns, assets)).toBe(0);
+      });
+
+      it('countries are independent', function() {
+        var campaigns = [
+          { id: 1, country: 'UK', type: 'Paid Ads', monthYear: '2026-04', rank: 1 },
+          { id: 2, country: 'IT', type: 'Paid Ads', monthYear: '2026-04', rank: 1 }
+        ];
+        var assets = [
+          { campaignId: 1, pn: 1 }, { campaignId: 1, pn: 2 },
+          { campaignId: 2, pn: 1 }
+        ];
+        expect(getMonthlyPnOffset(campaigns[1], campaigns, assets)).toBe(0);
       });
     });
 

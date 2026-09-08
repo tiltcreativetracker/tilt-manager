@@ -3367,6 +3367,28 @@ function getSubCampaignsForCountry(code) {
   return STATE.campaigns.filter(function(c) { return c.country === code; }).sort(function(a, b) { return a.rank - b.rank; });
 }
 
+// Returns the number of video assets that live in campaigns from the same
+// (country, type, monthYear) bucket as `camp` and sit ABOVE it in sidebar order
+// (i.e., have a lower `rank`). Used to compute the "NO." column so video numbers
+// run continuously across a month's campaigns: campaign 1's five videos are
+// 1‑5, campaign 2's three videos are 6‑8, etc. Campaigns without a monthYear
+// bucket together under a shared 'none' month.
+function getMonthlyPnOffset(camp) {
+  if (!camp) return 0;
+  var campType = (camp.type || DEFAULT_CAMPAIGN_TYPE);
+  var campMonth = (camp.monthYear || '').slice(0, 7);
+  var siblings = getSubCampaignsForCountry(camp.country).filter(function(c) {
+    if ((c.type || DEFAULT_CAMPAIGN_TYPE) !== campType) return false;
+    if (((c.monthYear || '').slice(0, 7)) !== campMonth) return false;
+    return c.rank < camp.rank;
+  });
+  var offset = 0;
+  siblings.forEach(function(c) {
+    offset += STATE.assets.filter(function(a) { return a.campaignId === c.id; }).length;
+  });
+  return offset;
+}
+
 function getCountryByCode(code) {
   for (var i = 0; i < STATE.countries.length; i++) if (STATE.countries[i].code === code) return STATE.countries[i];
   return null;
@@ -4674,7 +4696,7 @@ function showAssetModal(existing) {
     '<div class="modal-title">' + (isEdit ? 'Edit Video Asset' : 'New Video Asset') + '</div>' +
     '<div class="form-grid">' +
       '<div class="form-row full"><label class="form-label">Video Name *</label><input id="f-vname" class="form-input" value="' + escapeHtml(a.name) + '"></div>' +
-      '<div class="form-row"><label class="form-label">NO.</label><input id="f-vpn" type="number" min="1" class="form-input" value="' + a.pn + '"></div>' +
+      '<div class="form-row"><label class="form-label">NO. <span style="color:var(--text3); font-weight:400; font-size:11px;">(within campaign)</span></label><input id="f-vpn" type="number" min="1" class="form-input" value="' + a.pn + '"><div style="font-size:11px; color:var(--text3); margin-top:4px;">Table shows this as #' + (getMonthlyPnOffset(camp) + a.pn) + ' — continuous across the month.</div></div>' +
       '<div class="form-row"><label class="form-label">Version</label><input id="f-vver" class="form-input" value="' + escapeHtml(a.version) + '"></div>' +
       '<div class="form-row"><label class="form-label">Category</label><select id="f-vcat" class="form-select">' + categoriesForType(camp.type).map(function(c) { var n = c.name || c; return '<option value="' + escapeHtml(n) + '"' + (n === a.category ? ' selected' : '') + '>' + escapeHtml(n) + '</option>'; }).join('') + '</select></div>' +
       '<div class="form-row"><label class="form-label">Difficulty</label><select id="f-vdiff" class="form-select">' + diffOpts + '</select></div>' +
@@ -5393,6 +5415,10 @@ function renderCampaignsView() {
   var filtered = getFilteredAssets();
   var totalForCamp = STATE.assets.filter(function(a) { return a.campaignId === camp.id; }).length;
   var approved = STATE.assets.filter(function(a) { return a.campaignId === camp.id && a.status === 'Approved'; }).length;
+  // Video NO. displays continuous across the (country, type, month) bucket:
+  // campaign 1's five videos = 1‑5, campaign 2's three videos = 6‑8, etc.
+  // Underlying pn stays 1..N per campaign — this is a DISPLAY offset only.
+  var pnOffset = getMonthlyPnOffset(camp);
 
   // Per-campaign toggle: when true, hide the per-video Raw + Brief columns. Used
   // when the campaign relies on the campaign-level Raw Files / Brief links shown
@@ -5411,7 +5437,7 @@ function renderCampaignsView() {
   function buildAssetRow(a) {
     return '<tr data-asset-id="' + a.id + '" draggable="true" ondragstart="App.videoDragStart(event,\'' + a.id + '\')" ondragover="App.videoDragOver(event)" ondrop="App.videoDrop(event,\'' + a.id + '\')" ondragend="App.videoDragEnd(event)">' +
         '<td style="width:28px;padding:0 6px;cursor:grab"><span class="drag-handle" title="Drag to reorder">⠿</span></td>' +
-        '<td><span class="pn">' + a.pn + '</span></td>' +
+        '<td><span class="pn" title="Video #' + a.pn + ' within this campaign">' + (pnOffset + a.pn) + '</span></td>' +
         '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + '</div></td>' +
         '<td>' + renderEditableCell(a, 'category') + '</td>' +
         '<td>' + renderEditableCell(a, 'difficulty') + '</td>' +
