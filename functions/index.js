@@ -28,6 +28,8 @@ const db = admin.firestore();
 const SLACK_BOT_TOKEN = defineSecret('SLACK_BOT_TOKEN');
 const LINEAR_API_KEY = defineSecret('LINEAR_API_KEY');
 const DRIVE_SERVICE_ACCOUNT_JSON = defineSecret('DRIVE_SERVICE_ACCOUNT_JSON');
+const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
+const FRAMEIO_TOKEN = defineSecret('FRAMEIO_TOKEN');
 
 const ALLOWED_DOMAIN = 'tilt.app';
 
@@ -972,5 +974,189 @@ exports.syncDriveClipsScheduled = onSchedule(
       console.error('[syncDriveClipsScheduled] failed:', e && e.message ? e.message : e);
       throw e;
     }
+  }
+);
+
+// ── Claude: generate 10 caption drafts for an approved video ─────────
+// Phase A of the auto-post feature. No Meta calls yet — this returns 10
+// stylistically-different caption drafts to the client so Elsa can pick +
+// edit before we ship the Meta posting side. Text-only for the first pass;
+// multimodal (Frame.io still frames) added once URL→asset-id parsing is
+// tested end-to-end with a real Frame.io token.
+//
+// Client: { assetId, styleHint? }  →  { ok, drafts: [{style, caption}], usage, ms, model }
+// Requires: config/meta doc with { captionStyleGuide, enabled }
+//           ANTHROPIC_API_KEY set as a functions secret
+const CAPTION_MODEL = 'claude-opus-5';
+const CAPTION_STYLES = [
+  { key: 'hook',           label: 'Hook',           note: 'first line stops the scroll' },
+  { key: 'product',        label: 'Product-focused', note: 'names the item, brand, era, condition' },
+  { key: 'conversational', label: 'Conversational', note: 'like you\'re texting a mate' },
+  { key: 'meme',           label: 'Meme-y',         note: 'internet-native, playful' },
+  { key: 'question',       label: 'Question',       note: 'opens with a question' },
+  { key: 'list',           label: 'List',           note: 'short bulleted or comma list' },
+  { key: 'oneliner',       label: 'One-liner',      note: 'single punchy sentence' },
+  { key: 'hype',           label: 'Hype',           note: 'high energy, urgency' },
+  { key: 'deadpan',        label: 'Deadpan',        note: 'dry, understated' },
+  { key: 'story',          label: 'Story-tease',    note: 'sets up a narrative hook' },
+];
+
+exports.generateCaptionsForAsset = onCall(
+  { secrets: [ANTHROPIC_API_KEY], region: 'us-central1', timeoutSeconds: 60, memory: '512MiB' },
+  async (request) => {
+    requireTiltUser(request);
+    const t0 = Date.now();
+
+    const { assetId, styleHint } = request.data || {};
+    if (!assetId) throw new HttpsError('invalid-argument', 'assetId is required');
+
+    // 1. Config check — feature must be enabled + we need a style guide.
+    const metaSnap = await db.doc('config/meta').get();
+    if (!metaSnap.exists) {
+      throw new HttpsError('failed-precondition', 'config/meta missing — save an Anthropic key + caption style guide in the Config tab first.');
+    }
+    const meta = metaSnap.data() || {};
+    if (meta.enabled === false) {
+      throw new HttpsError('failed-precondition', 'Auto-post is disabled in Config.');
+    }
+    const styleGuide = String(meta.captionStyleGuide || '').trim();
+    if (!styleGuide) {
+      throw new HttpsError('failed-precondition', 'config/meta.captionStyleGuide is empty — set it in the Config tab.');
+    }
+
+    // 2. Load asset + parent campaign for prompt context.
+    const assetSnap = await db.doc('state/app/assets/' + assetId).get();
+    if (!assetSnap.exists) throw new HttpsError('not-found', 'asset not found: ' + assetId);
+    const asset = assetSnap.data() || {};
+
+    // Defense in depth — the UI already hides the button on unapproved
+    // assets, but a direct callable shouldn't bypass the approval gate.
+    // (This currently gates on categoryHeadQc === 'Approved' — confirm
+    // this maps to "Content Lead approved" or add a separate check.)
+    if (asset.status !== 'Approved' || asset.categoryHeadQc !== 'Approved') {
+      throw new HttpsError('failed-precondition',
+        'asset not fully approved (status=' + asset.status + ', categoryHeadQc=' + asset.categoryHeadQc + ')');
+    }
+
+    let campaign = null;
+    if (asset.campaignId) {
+      const stateSnap = await db.doc('state/app').get();
+      if (stateSnap.exists) {
+        const campaigns = (stateSnap.data() || {}).campaigns || [];
+        campaign = campaigns.find((c) => String(c.id) === String(asset.campaignId)) || null;
+      }
+    }
+
+    // 3. Build the metadata block Claude sees.
+    const context = {
+      campaign: campaign && campaign.name || asset.campaignName || null,
+      seller: campaign && campaign.seller || asset.seller || null,
+      category: campaign && campaign.category || asset.category || null,
+      country: campaign && campaign.country || asset.country || null,
+      editor: asset.editor || null,
+      brief: asset.brief || asset.notes || null,
+      frameIoUrl: asset.finalVideo || null,
+    };
+
+    // 4. Call Claude — one request, structured JSON output with 10 drafts.
+    const Anthropic = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+
+    const styleList = CAPTION_STYLES
+      .map((s, i) => (i + 1) + '. ' + s.key + ' — ' + s.note)
+      .join('\n');
+
+    const system = [
+      'You write Instagram Reel + Facebook captions for Tilt, a livestream auction marketplace for fashion and collectibles.',
+      '',
+      '# Tilt brand voice',
+      styleGuide,
+      '',
+      '# Task',
+      'Given the video metadata, return exactly 10 caption drafts. Each draft must be a genuinely different style — do not paraphrase the same idea 10 ways.',
+      '',
+      '# The 10 required styles (in order):',
+      styleList,
+      styleHint ? '\n# Extra direction from the user: ' + styleHint : '',
+      '',
+      '# Output',
+      'Return ONLY a JSON object matching this shape, nothing else:',
+      '{"drafts":[{"style":"hook","caption":"..."},{"style":"product","caption":"..."}, ... 10 entries in the exact order above]}',
+      'No prose, no markdown fences, no leading/trailing text — just the JSON object.',
+    ].filter(Boolean).join('\n');
+
+    const userMsg = [
+      'Video metadata:',
+      '```json',
+      JSON.stringify(context, null, 2),
+      '```',
+      '',
+      'Return 10 captions as specified.',
+    ].join('\n');
+
+    const resp = await client.messages.create({
+      model: CAPTION_MODEL,
+      max_tokens: 4000,
+      thinking: { type: 'adaptive' },
+      system,
+      messages: [{ role: 'user', content: userMsg }],
+    });
+
+    // 5. Parse. Claude returns content blocks; the last text block is the JSON.
+    const textBlock = (resp.content || []).slice().reverse().find((b) => b.type === 'text');
+    if (!textBlock || !textBlock.text) {
+      throw new HttpsError('internal', 'Claude returned no text block');
+    }
+    const raw = textBlock.text.trim();
+    // Tolerate a stray fence, just in case.
+    const jsonStr = raw
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('[generateCaptionsForAsset] JSON parse failed. Raw:', raw.slice(0, 500));
+      throw new HttpsError('internal', 'Claude returned invalid JSON: ' + (e.message || 'parse error'));
+    }
+    const drafts = Array.isArray(parsed && parsed.drafts) ? parsed.drafts : [];
+    if (drafts.length === 0) {
+      throw new HttpsError('internal', 'Claude returned zero drafts');
+    }
+
+    // 6. Log for later eval / iteration.
+    const ms = Date.now() - t0;
+    const usage = resp.usage || {};
+    const logDoc = {
+      assetId,
+      styleHint: styleHint || null,
+      context,
+      drafts,
+      usage: {
+        input_tokens: usage.input_tokens || 0,
+        output_tokens: usage.output_tokens || 0,
+        cache_read_input_tokens: usage.cache_read_input_tokens || 0,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
+      },
+      model: CAPTION_MODEL,
+      ms,
+      byEmail: (request.auth && request.auth.token && request.auth.token.email) || null,
+      ts: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    try {
+      await db.collection('captionGenerations').add(logDoc);
+    } catch (e) {
+      // Don't fail the request if logging fails — the caption is what matters.
+      console.warn('[generateCaptionsForAsset] log write failed:', e && e.message);
+    }
+
+    return {
+      ok: true,
+      drafts,
+      usage: logDoc.usage,
+      model: CAPTION_MODEL,
+      ms,
+    };
   }
 );
