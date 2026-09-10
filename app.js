@@ -14153,27 +14153,44 @@ function sendPendingBatch(editor, opts) {
   }
 
   // Single-send path (PM batches, single-country editor batches, or user overrode split)
-  // Daily-thread path: when the recipient is an editor (or a CHQ batch whose items
-  // share one editor) and that editor has a daily thread set for today plus a bot
-  // token, POST as a thread reply via chat.postMessage instead of using the webhook.
-  var thread = null;
-  if (EDITORS.indexOf(editor) >= 0) {
-    thread = resolveDailyThreadForEditor(editor);
-    // For all-international batches, prefer the shared intl thread over the
-    // per-editor thread (intl thread takes priority when set).
-    var intlThread = resolveDailyThreadForIntl(windowItems);
-    if (intlThread) thread = intlThread;
-  } else if (typeof editor === 'string' && editor.indexOf('CHQ:') === 0) {
-    // CHQ batches are keyed per head now; the per-category daily thread (if any) is
-    // resolved from a representative item's category.
-    var chqCategory = (windowItems[0] && windowItems[0].category) || '';
-    thread = chqCategory ? resolveDailyThreadForCategory(chqCategory) : null;
+  // Route resolution: pick the destination (intl thread, editor's own daily thread,
+  // per-category CHQ thread, or webhook) from the CURRENT set of items. Bundled in
+  // a helper so we can call it twice — once for the pre-flight webhook-valid
+  // check, and once AFTER claimSendSlot() to close a race. The slot claim is a
+  // Firestore transaction that takes ~200-500ms; items can change during it
+  // (another status change queues on top, a dismissal, a remote snapshot from
+  // another tab). If we resolve once up-front and don't re-check, a batch that was
+  // all-intl at resolve time can end up mixed at send time (or vice versa) yet
+  // still route to the originally-chosen thread. `reason` is a short tag
+  // ('intl'/'editor'/'category'/'webhook') that we stamp into the activity log
+  // so we can tell WHERE a batch actually went.
+  function resolveRouteForItems(items) {
+    var t = null, why = 'webhook';
+    if (EDITORS.indexOf(editor) >= 0) {
+      // Intl takes priority: if every item is IT/ES/US and the intl thread is set
+      // for today, that's the destination. Only if intl doesn't apply do we look
+      // up the per-editor daily thread.
+      var intl = resolveDailyThreadForIntl(items);
+      if (intl) { t = intl; why = 'intl'; }
+      else {
+        var edThread = resolveDailyThreadForEditor(editor);
+        if (edThread) { t = edThread; why = 'editor'; }
+      }
+    } else if (typeof editor === 'string' && editor.indexOf('CHQ:') === 0) {
+      var chqCategory = (items[0] && items[0].category) || '';
+      var catThread = chqCategory ? resolveDailyThreadForCategory(chqCategory) : null;
+      if (catThread) { t = catThread; why = 'category'; }
+    }
+    return {
+      thread: t,
+      useThread: !!t,
+      url: resolveWebhookForEditor(editor, items),
+      reason: why
+    };
   }
-  // Bot token lives in the Cloud Function; client only decides whether a
-  // thread is set. postToThreadPreferred → sendSlackChatPostMessage does the rest.
-  var useThread = !!thread;
 
-  var url = resolveWebhookForEditor(editor, windowItems);
+  var route = resolveRouteForItems(windowItems);
+  var thread = route.thread, useThread = route.useThread, url = route.url;
   if (!webhookValid(url)) {
     if (!silent) {
       toast('Webhook URL is missing or a placeholder \u2014 fix it in Automations', 'error');
@@ -14220,12 +14237,26 @@ function sendPendingBatch(editor, opts) {
       }
       return;
     }
-    // Re-check after the async claim \u2014 user may have dismissed items while the
-    // Firestore transaction was in flight. Rebuild windowItems/msg from current state.
+    // Re-check after the async claim \u2014 items and the intl thread can both change
+    // during the slot-claim transaction. Rebuild windowItems, message, AND route
+    // from current state so a batch that flipped from all-intl to mixed (or vice
+    // versa) still lands in the right place. Without this re-resolve, an intl
+    // status change queued right before an editor's daily-thread batch fires can
+    // end up posted in the editor's own thread instead of the shared intl thread.
     windowItems = batch.items.slice(0, BATCH_SIZE_LIMIT);
     extraItems  = batch.items.slice(BATCH_SIZE_LIMIT);
     if (!windowItems.length) { clearInFlight(); return; }
     msg = buildBatchMessage(editor, windowItems);
+    route = resolveRouteForItems(windowItems);
+    thread = route.thread; useThread = route.useThread; url = route.url;
+    if (!webhookValid(url)) {
+      // Extremely rare: fresh items resolved to a country whose webhook isn't
+      // configured. Bail out of the send rather than post to the wrong place.
+      clearInFlight();
+      logAction('deleted', editor + ': send aborted \u2014 no valid webhook after re-resolve');
+      if (!silent) toast('Webhook missing for updated batch \u2014 fix it in Automations', 'error');
+      return;
+    }
     var primary = useThread ? postToThreadPreferred(thread, url, msg) : postToSlack(url, msg);
     return primary.then(function(r) {
       if (!r.ok) {
@@ -14246,7 +14277,11 @@ function sendPendingBatch(editor, opts) {
       dualPostToSecondaryThreads(editor, windowItems, msg);
       clearInFlight();
       if (typeof Fb !== 'undefined' && Fb.uploadNow) Fb.uploadNow();
-      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) ' + (useThread ? 'in daily thread' : 'live to Slack') + ' (confirmed)');
+      // Route tag ('intl'/'editor'/'category'/'webhook') recorded so the activity
+      // log answers "where did this batch actually go?" without re-deriving from
+      // the item mix or STATE at read time.
+      var _routeTag = useThread ? (route.reason + ' thread') : 'webhook';
+      logAction('notified', editor + ' \u2014 sent ' + windowItems.length + ' update(s) via ' + _routeTag + ' (confirmed)');
       toast('\u2713 Sent to Slack' + (useThread ? ' (thread)' : ''), 'success');
       render();
     }).catch(function(err) {
