@@ -9439,7 +9439,7 @@ function renderNotificationsView() {
           var leadOptions = ['<option value="">\u2014 Content Lead \u2014</option>'].concat(CONTENT_LEADS.map(function(l) {
             return '<option value="' + escapeHtml(l) + '"' + (l === currentLead ? ' selected' : '') + '>' + escapeHtml(l) + '</option>';
           })).join('');
-          var pickerTitle = 'Ownership tag \u2014 all Organic activity routes to the shared Organic daily thread regardless of this value';
+          var pickerTitle = 'Ownership tag \u2014 UK Organic activity routes to the shared Organic daily thread regardless of this value. Intl Organic (IT/ES/US) uses the intl thread / ORG webhook instead.';
           contentLeadPickerHtml =
             '<div style="margin-top:6px; display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text3);">' +
               '<span title="' + escapeHtml(pickerTitle) + '">Owner:</span>' +
@@ -9700,8 +9700,8 @@ function renderAutomationsView() {
       }).join(' · ') + '</div>';
     var row = '<div style="margin-top:10px;">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
-        '<span style="font-weight:600;font-size:13px;color:var(--text1);">Organic</span>' +
-        '<span style="font-size:12px;color:var(--text3);">Millie · Rivers · all countries · all categories</span>' +
+        '<span style="font-weight:600;font-size:13px;color:var(--text1);">Organic (UK)</span>' +
+        '<span style="font-size:12px;color:var(--text3);">Millie · Rivers · UK only · all categories</span>' +
         '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '" style="margin-left:auto;"></span>' +
       '</div>' +
       '<div class="webhook-row">' +
@@ -9711,8 +9711,8 @@ function renderAutomationsView() {
       '</div>' + histHtml +
     '</div>';
     return '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack thread (Organic)</div><div class="auto-sub">one shared thread — Millie and Rivers both watch. Overrides per-editor, per-category, and intl routing for Organic-only batches.</div></div></div>' +
-      '<div class="auto-desc">One shared daily thread for ALL Organic activity. When set, any Organic-only editor batch, Organic-only CHQ batch, and Organic QC report posts as a reply here — regardless of country, editor, category, or Content Lead assignment. Mixed batches (any Paid Ads item) still use paid routing (per-editor / intl / category). Resets at UK midnight; falls back to the ORG webhook chain when unset or stale.</div>' +
+      '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack thread (Organic · UK)</div><div class="auto-sub">one shared thread — Millie and Rivers both watch. UK Organic only.</div></div></div>' +
+      '<div class="auto-desc">Shared daily thread for UK Organic activity. When set, any UK-Organic-only editor batch, UK-Organic-only CHQ batch, and UK Organic QC report posts as a reply here — regardless of editor, category, or Content Lead assignment. Intl Organic (IT / ES / US) uses the intl thread instead. Mixed batches (any Paid Ads item, or any intl item) fall through to paid routing (per-editor / intl / category). Resets at UK midnight; falls back to the ORG webhook chain when unset or stale.</div>' +
       row +
     '</div>';
   }
@@ -13776,15 +13776,17 @@ function resolveDailyThreadForCategory(category) {
 // the single shared organicDailyThread).
 var CONTENT_LEADS = ['Millie', 'Rivers'];
 
-// For an Organic sub-campaign, returns the shared Organic daily thread IFF it's
-// set today. Content Lead assignment (Millie / Rivers) is no longer part of the
-// route — routing collapsed to one shared thread that both leads watch. The
-// contentLead field is preserved on sub-campaigns as an ownership tag only.
-// Non-Organic campaigns and stale threads return null (→ caller uses webhook).
+// For a UK Organic sub-campaign, returns the shared Organic daily thread IFF
+// it's set today. Content Lead assignment (Millie / Rivers) is no longer part
+// of the route — routing collapsed to one shared thread that both leads watch.
+// The contentLead field is preserved on sub-campaigns as an ownership tag only.
+// Intl Organic (IT/ES/US), non-Organic campaigns, and stale threads return
+// null (→ caller uses the QC webhook chain instead).
 function resolveQcThreadForCampaign(campaignId) {
   var camp = findCampaignById(campaignId);
   if (!camp) return null;
   if ((camp.type || DEFAULT_CAMPAIGN_TYPE) !== 'Organic') return null;
+  if (camp.country !== 'UK') return null;
   var t = STATE.organicDailyThread;
   if (!t) return null;
   if (t.date !== todayUK()) return null;
@@ -13810,11 +13812,13 @@ function resolveDailyThreadForIntl(items) {
   return t;
 }
 
-// True when every item belongs to an Organic sub-campaign. A missing campaign
-// or any Paid Ads item disqualifies the batch (mixed → paid routing).
-function itemsAllOrganic(items) {
+// True when every item belongs to an Organic sub-campaign AND is UK. A missing
+// campaign, any Paid Ads item, or any non-UK item disqualifies the batch.
+// International Organic falls through to intl / editor routing instead.
+function itemsAllOrganicUK(items) {
   if (!items || !items.length) return false;
   for (var i = 0; i < items.length; i++) {
+    if (items[i].country !== 'UK') return false;
     var cid = items[i].campaignId;
     var camp = cid ? findCampaignById(cid) : null;
     if (!camp) return false;
@@ -13824,14 +13828,15 @@ function itemsAllOrganic(items) {
 }
 
 // Returns the shared Organic daily-thread IFF it's set today AND every item is
-// Organic. Takes priority over intl / editor / category routing when it applies.
-// Mixed batches or empty batches return null so the caller uses paid routing.
+// UK Organic. Takes priority over per-editor / category routing when it applies.
+// Intl Organic, mixed-type, or empty batches return null so the caller falls
+// through to intl / editor / category / webhook routing.
 function resolveDailyThreadForOrganic(items) {
   var t = STATE.organicDailyThread;
   if (!t) return null;
   if (t.date !== todayUK()) return null;
   if (!t.channelId || !t.threadTs) return null;
-  if (!itemsAllOrganic(items)) return null;
+  if (!itemsAllOrganicUK(items)) return null;
   return t;
 }
 
@@ -14221,10 +14226,11 @@ function sendPendingBatch(editor, opts) {
   // so we can tell WHERE a batch actually went.
   function resolveRouteForItems(items) {
     var t = null, why = 'webhook';
-    // Organic takes highest priority: if every item is Organic AND the shared
-    // Organic thread is set for today, route there regardless of editor / CHQ /
-    // country. Mixed batches (any paid item) fall through to paid routing so
-    // paid work never leaks into the Organic thread.
+    // Organic takes highest priority: if every item is UK Organic AND the
+    // shared Organic thread is set for today, route there regardless of editor
+    // / CHQ. Intl Organic falls through to intl routing; mixed-type batches
+    // (any Paid Ads item) fall through to paid routing so paid work never
+    // leaks into the Organic thread.
     var org = resolveDailyThreadForOrganic(items);
     if (org) { t = org; why = 'organic'; }
     else if (EDITORS.indexOf(editor) >= 0) {
