@@ -1951,8 +1951,8 @@ var DEFAULT_CATEGORIES = [
 // ready to publish. Empty value = no auto-mention (US not assigned yet).
 var COUNTRY_PMS = {
   UK: 'Elsa',
-  IT: 'Anasstassiya',
-  ES: 'Laura',
+  IT: 'Gian',
+  ES: 'Marcel',
   US: ''
 };
 
@@ -2188,7 +2188,7 @@ var STATE = {
   // Slack member IDs per country PM — keyed by country code, values are the
   // PM's Slack member ID. When set, PM Review queue and Category Head QC
   // Approved messages @mention the PM so they get pinged. Names of the PMs
-  // come from COUNTRY_PMS (UK→Elsa, IT→Anasstassiya, ES→Laura).
+  // come from COUNTRY_PMS (UK→Elsa, IT→Gian, ES→Marcel).
   pmSlackIds: { UK: '', IT: '', ES: '', US: '' },
   // Slack Bot User OAuth Token (xoxb-...) used for chat.postMessage when posting
   // to a daily editor thread. Webhook fallback is still used when this is blank
@@ -19218,7 +19218,7 @@ var App = {
   // Save a country PM's Slack member ID. When set, the PM gets @mentioned in
   // the PM Review queue header AND in Category Head QC Approved messages for
   // that country. Names of the PMs are mapped per country in COUNTRY_PMS
-  // (UK → Elsa, IT → Anasstassiya, ES → Laura).
+  // (UK → Elsa, IT → Gian, ES → Marcel).
   savePmSlackId: function(country, id) {
     var trimmed = (id || '').trim();
     if (!STATE.pmSlackIds) STATE.pmSlackIds = {};
