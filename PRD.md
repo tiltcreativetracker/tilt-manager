@@ -87,7 +87,7 @@ Every open tab (yours in another window, a teammate in another city) is a live v
 | `nextAssetId`, `nextCampaignId`, `nextBatchItemId` | `Math.max` (monotonic — a stale writer's lower counter never rolls ours back) |
 | `deletedCampaignIds` | `{id: ts}` tombstone ledger, unioned and pruned to a 24h window. `campaigns` merge drops any id in the ledger before returning — so a stale tab that still has a just-deleted campaign in its local STATE can't resurrect it on next upload. |
 | `recentNotifKeys` | Union by `key` keeping newest `ts`, pruned to the recency window |
-| `dailyThreads`, `catHeadDailyThreads`, `intlDailyThread`, `contentLeadDailyThreads` | Per-slot reconcile by `setAt` timestamp — the most-recently-set thread wins |
+| `dailyThreads`, `catHeadDailyThreads`, `intlDailyThread`, `organicDailyThread`, `contentLeadDailyThreads` | Per-slot reconcile by `setAt` timestamp — the most-recently-set thread wins |
 | `assets`, `assetCount` | Never applied from the main doc — the `state/app/assets/{id}` subcollection is the sole source of truth |
 | `broll` | Never applied from the main doc — the `state/app/broll/{id}` subcollection is the sole source of truth |
 | everything else | Direct overwrite (`STATE[k] = data[k]`) — matches every stored snapshot's existing shape |
@@ -257,10 +257,15 @@ Each value: `{ items: [...], firstQueuedAt: timestamp | null }`.
 - `STATE.qcWebhooks` — per-country QC report routing.
 - `STATE.tabOrder` — user-draggable tab order.
 - `STATE.sidebarMonthFilter` — `'all'` \| `'YYYY-MM'` \| `'none'`.
-- `STATE.dailyThreads` — `{ Zidni, Sharm, Patty }` — per-editor daily thread `{ date, url, channelId, threadTs }`. Cleared at midnight.
+- `STATE.dailyThreads` — `{ Zidni, Sharm, Patty, Elsa }` — per-editor daily thread `{ date, url, channelId, threadTs, setAt }`. Cleared at midnight.
 - `STATE.dailyThreadHistory` — last 7 archived thread URLs per editor.
 - `STATE.catHeadDailyThreads` — per-category daily thread, keyed by category name. Same shape as `dailyThreads`.
 - `STATE.catHeadDailyThreadHistory` — last 7 archived thread URLs per category.
+- `STATE.intlDailyThread` — single shared thread for IT/ES/US traffic. Same shape.
+- `STATE.intlDailyThreadHistory` — last 7 archived intl thread URLs.
+- `STATE.organicDailyThread` — single shared thread for **UK Organic** traffic (Millie + Rivers both watch). Same shape. Not used for intl Organic.
+- `STATE.organicDailyThreadHistory` — last 7 archived Organic thread URLs.
+- `STATE.contentLeadDailyThreads` — legacy per-lead (Millie/Rivers) map, kept in the schema so old snapshots load cleanly. Any today-dated slot is auto-migrated into `organicDailyThread` on load; the sweep archives the stale entries at UK midnight.
 - `STATE.grades[]` — one grade row per graded asset (§5.8). Shape: `{ id, assetId, video, editor, date, contentType ('Net New' | 'Maintenance'), brandPass, qaClean, newIdea, revisionRounds, roundsManual, dismissed, createdAt/By, updatedAt }`. Persisted to Firestore.
 - `STATE.scorecardMeta` — `{ editor: { avgVideosPerDay, targetPerDay } }` for the scorecard's Output pillar. Persisted.
 - `STATE.gradingStreak` — `{ last (UK date), count, best }` shared grading streak. Persisted.
@@ -440,7 +445,7 @@ Editor changes always go through `setAssetEditor` (Slack notification, version s
     - Needs Revisions / Approved → recipient = editor, sender = country PM
     - CHQ For Review → recipient = category head, sender = editor
     - CHQ Needs Revisions / Approved → recipient = editor, sender = category head
-- **Routing.** Editor batches deliver to that editor's daily Slack thread (webhook + `thread_ts`, `reply_broadcast: false`) when a thread is set. CHQ batches route to the category's daily thread when set. Falls back to the webhook when no thread is configured or the post fails.
+- **Routing.** Organic-only, UK-only batches (editor or CHQ) deliver to the shared **Organic (UK) daily thread** when set. Otherwise: editor batches deliver to that editor's daily Slack thread (or the intl thread when every item is IT/ES/US) via `chat.postMessage` on `channelId` + `threadTs`; CHQ batches route to the category's daily thread when set. Falls back to the webhook when no thread is configured or the post fails.
 - **Dual-thread posting.** Every CHQ-related notification is silently mirrored to the *other* party's thread after the primary send succeeds: CHQ For Review batches (primary → CH thread) also post to each item's editor's daily thread; CHQ Approved / Needs Revisions batches (primary → editor thread) also post to the relevant category head's daily thread. Secondary posts are fire-and-forget — failures are silent and do not affect the primary send or the UI.
 
 ### 6.6 Campaign management
@@ -462,17 +467,20 @@ Version history has been removed. Asset mutations no longer capture snapshots. T
 
 ### 7.0 Daily threads (editor + category head)
 Notifications post as **replies in a daily Slack thread** when one is configured. Set in Automations:
-- One **daily thread URL** per editor (Zidni / Sharm / Patty / Elsa), per category head (Sneakers, TCG, etc.), per Content Lead (Millie / Rivers — for Organic QC), and a single **shared International thread** for IT/ES/US traffic. URLs are parsed for `channelId` + `threadTs` at save time.
+- One **daily thread URL** per editor (Zidni / Sharm / Patty / Elsa), per category head (Sneakers, TCG, etc.), a single **shared Organic (UK) thread** watched jointly by Millie and Rivers, and a single **shared International thread** for IT/ES/US traffic. URLs are parsed for `channelId` + `threadTs` at save time.
 - Sends use the `sendSlackChatPostMessage` Cloud Function (bot-token backed `chat.postMessage`) so the reply lands in the thread only, without the `reply_broadcast` fan-out that plain webhooks force.
-- A sweep at midnight archives stale thread entries (last 7 per editor / category / Content Lead retained; single history array for the intl slot).
+- A sweep at midnight archives stale thread entries (last 7 per editor / category retained; single history array for the intl and Organic slots).
 - On thread post failure we **do not** silently fall back to the webhook — a webhook thread-reply broadcasts to the main channel, which is worse than a missed post. The toast surfaces the error and the batch stays pending for a retry.
 
 **Destination priority for an editor batch** (resolved by `resolveRouteForItems`):
-1. **Intl thread** if every item in the batch is IT/ES/US and `STATE.intlDailyThread` is set for today.
-2. Otherwise the **editor's own daily thread** if set for today.
-3. Otherwise the country/global **webhook** chain from §7.1.
+1. **Organic (UK) thread** if `STATE.organicDailyThread` is set for today AND every item in the batch is UK Organic (each item's `country === 'UK'` and its campaign's `type === 'Organic'`). Intl Organic is deliberately excluded — it falls through to the intl thread.
+2. **Intl thread** if every item in the batch is IT/ES/US and `STATE.intlDailyThread` is set for today.
+3. Otherwise the **editor's own daily thread** if set for today.
+4. Otherwise the country/global **webhook** chain from §7.1.
 
-Route resolution runs **twice per send** — once for the pre-flight webhook-valid check and once **after** `claimSendSlot()` returns — because the slot claim is a ~200-500ms Firestore transaction during which items can be added/removed by another status change or a remote snapshot from another tab. Resolving only up-front let a batch that flipped from all-intl to mixed still land in the pre-claim thread (or vice versa). The `notified` activity-log entry records the route tag it actually took (`intl thread` / `editor thread` / `category thread` / `webhook`) so misroutes are diagnosable from the log alone.
+The same organic-first rule also applies to **CHQ batches** (a UK Organic-only CHQ batch posts to the Organic thread instead of the category thread) and to **Organic QC reports** — for a UK Organic sub-campaign, `resolveQcThreadForCampaign` returns the shared Organic thread; intl Organic QC reports skip the thread and use the ORG webhook chain. The Content Lead field on Organic sub-campaigns (`camp.contentLead`, Millie / Rivers / '') is preserved as an **ownership tag only** — it no longer selects a destination.
+
+Route resolution runs **twice per send** — once for the pre-flight webhook-valid check and once **after** `claimSendSlot()` returns — because the slot claim is a ~200-500ms Firestore transaction during which items can be added/removed by another status change or a remote snapshot from another tab. Resolving only up-front let a batch that flipped from all-intl to mixed still land in the pre-claim thread (or vice versa). The `notified` activity-log entry records the route tag it actually took (`organic thread` / `intl thread` / `editor thread` / `category thread` / `webhook`) so misroutes are diagnosable from the log alone.
 
 ### 7.1 Webhook fallback chain
 
@@ -638,6 +646,10 @@ A separate import modal handles Italy-specific CSV files, which use a different 
 ---
 
 ## 9.5 Bug Fixes Log
+
+- **Organic daily-thread routing — collapsed per-lead → one shared UK-only thread (2026-09-10)**: Previously every Organic sub-campaign carried a `contentLead` field (Millie / Rivers / '') and each lead had their own daily Slack thread (`STATE.contentLeadDailyThreads`), consulted only for Organic QC reports; editor batches and CHQ batches on Organic sub-campaigns still routed through the per-editor / per-category / intl threads. Elsa asked to simplify: one shared Slack thread for **all** Organic work — Millie and Rivers both watch — used for editor batches, CHQ batches, AND QC reports; then narrowed further to **UK Organic only** so intl Organic keeps flowing through the intl thread. Implementation: added `STATE.organicDailyThread` (single slot) + `organicDailyThreadHistory` (last 7). New resolver `resolveDailyThreadForOrganic(items)` returns the thread iff it's set today AND `itemsAllOrganicUK(items)` — every item has `country === 'UK'` and its campaign's `type === 'Organic'`. Wired as the highest-priority branch in `resolveRouteForItems` (before intl/editor/category); reason tag `'organic'` is stamped into the `notified` activity log. `resolveQcThreadForCampaign` was rewritten to require `camp.country === 'UK'` and route to the shared thread regardless of `contentLead`. UI: the two per-lead cards in Automations were replaced by a single "Daily Slack thread (Organic · UK)" card with handlers `App.saveOrganicDailyThread` / `App.clearOrganicDailyThread`; the QC card's Content Lead dropdown was relabeled `Owner:` (ownership tag only, no routing effect). Any today-dated per-lead thread already set is auto-migrated into the shared slot on first load; the legacy `contentLeadDailyThreads` map is kept in the schema for cross-version compat and the midnight sweep archives its stale entries. Verified: `itemsAllOrganicUK([UK Organic])` → thread; `[UK Organic + UK Paid]` → null (falls to paid routing); `[IT Organic]` → null (falls to intl thread); `[UK Paid]` → null (unchanged).
+
+- **International PM names updated (2026-09-10)**: `COUNTRY_PMS.IT` changed from `'Anasstassiya'` → `'Gian'`; `COUNTRY_PMS.ES` from `'Laura'` → `'Marcel'`. Drives the auto-mention on For Review / CHQ Approved batches for IT and ES campaigns.
 
 - **"★ All campaigns" option — Grading tab** (§5.8, added 2026-07-31): the Campaigns dropdown previously forced a one-campaign-at-a-time view of the Grade Videos table, so grading a whole week across every country meant opening each campaign individually. Added a sentinel `'all'` option pinned to the top of the dropdown: when picked, `monthCampAssets` becomes the union of every campaign's videos in the current month/week/type scope, sorted by campaign → video, with a `Country · Campaign` chip under each video name. The progress hero, section title, and header subtitle all switch to "All campaigns · N/M graded" language; the celebration signature includes the sentinel so switching modes doesn't false-fire the completion burst. Scorecard rollup and Team Composite strip are unchanged — they were already cross-campaign.
 
@@ -831,7 +843,9 @@ Descriptions are written in the app in a conversational voice (contractions, pun
 | Approved | editor | `<@editor> — Approved from <@PM>` | editor's daily thread → webhook |
 | CHQ: For Review | `CHQ:<category>` | `<@CategoryHead> — FOR REVIEW from <@editor>` | category's daily thread → webhook |
 | CHQ: Needs Revisions / Approved | editor | `<@editor> — <STATUS> from <@CategoryHead>` | editor's daily thread → webhook |
-| QC report (manual) | `qcWebhooks[CC]` | n/a | webhook only |
+| **UK Organic-only editor or CHQ batch** (overrides the two rows above) | editor / `CHQ:<category>` | as above | **Organic (UK) daily thread** → falls through to the row above when unset/stale |
+| **UK Organic QC report (manual)** | shared Organic thread | n/a | Organic (UK) daily thread → ORG webhook chain |
+| QC report (manual, all others) | `qcWebhooks[CC]` | n/a | webhook only |
 | Per-campaign override | `campaign.slackOverride` | n/a | webhook |
 
 ### 11.6 Key constants
