@@ -2787,9 +2787,10 @@ function toast(msg, type) {
 // changes to Firestore. Data has already synced via onSnapshot — this is a
 // comfort signal so the user knows their view was updated, with a Reload
 // button for the (rare) case where the sync missed something. Increments a
-// counter for repeated changes so the user sees activity, and auto-hides after
-// 20s of quiet. Click to reload; click × to dismiss without reloading.
-var _crossTabPill = { count: 0, lastName: null, hideTimer: null };
+// counter for repeated changes so the user sees activity. Stays visible until
+// the user clicks Reload or × (no auto-hide — Elsa asked for a persistent
+// reminder so she doesn't miss it while heads-down in another window).
+var _crossTabPill = { count: 0, lastName: null };
 function showCrossTabUpdatePill(fromName) {
   _crossTabPill.count += 1;
   if (fromName) _crossTabPill.lastName = String(fromName).split(' ')[0];
@@ -2806,19 +2807,52 @@ function showCrossTabUpdatePill(fromName) {
   el.innerHTML =
     '<span class="cross-tab-pill-dot"></span>' +
     '<span class="cross-tab-pill-label">' + label + '</span>' +
-    '<button type="button" class="cross-tab-pill-reload" onclick="location.reload()" title="Reload to get the latest">Reload</button>' +
+    '<button type="button" class="cross-tab-pill-reload" onclick="reloadPreservingView()" title="Reload to get the latest (keeps you on the same tab and campaign)">Reload</button>' +
     '<button type="button" class="cross-tab-pill-dismiss" onclick="dismissCrossTabPill()" title="Dismiss (data has already synced)" aria-label="Dismiss">×</button>';
   el.classList.add('visible');
-  if (_crossTabPill.hideTimer) clearTimeout(_crossTabPill.hideTimer);
-  _crossTabPill.hideTimer = setTimeout(dismissCrossTabPill, 20000);
 }
 function dismissCrossTabPill() {
   var el = document.getElementById('cross-tab-pill');
   if (el) el.classList.remove('visible');
   _crossTabPill.count = 0;
   _crossTabPill.lastName = null;
-  if (_crossTabPill.hideTimer) { clearTimeout(_crossTabPill.hideTimer); _crossTabPill.hideTimer = null; }
 }
+
+// Per-user UI prefs (tab, active campaign, calendar month) are excluded from
+// the Firestore snapshot so a teammate's view can't stomp on yours. But they
+// also aren't persisted anywhere else, so a plain location.reload() drops you
+// back on the default (Campaigns tab, campaign #1). This mirrors the fields to
+// localStorage right before reloading, and hydratePersistedView() reads them
+// back on boot to restore the view. Called by every in-app reload path (the
+// cross-tab pill and the auto-update flow).
+var _PERSIST_KEY = 'tilt-view-prefs';
+function persistViewPrefs() {
+  try {
+    var prefs = {
+      tab: STATE.tab || null,
+      activeSubCampaignId: STATE.activeSubCampaignId != null ? STATE.activeSubCampaignId : null,
+      calendarMonth: (typeof STATE.calendarMonth === 'string') ? STATE.calendarMonth : null,
+      scrollY: window.scrollY || 0
+    };
+    localStorage.setItem(_PERSIST_KEY, JSON.stringify(prefs));
+  } catch (_) { /* private mode / quota — reload will just fall back to defaults */ }
+}
+function hydratePersistedView() {
+  try {
+    var raw = localStorage.getItem(_PERSIST_KEY);
+    if (!raw) return null;
+    var prefs = JSON.parse(raw);
+    if (!prefs || typeof prefs !== 'object') return null;
+    // Consume once per boot so later navigation doesn't accidentally restore stale prefs.
+    localStorage.removeItem(_PERSIST_KEY);
+    return prefs;
+  } catch (_) { return null; }
+}
+function reloadPreservingView() {
+  persistViewPrefs();
+  window.location.reload();
+}
+window.reloadPreservingView = reloadPreservingView;
 
 function timeStamp() {
   var d = new Date();
@@ -19666,6 +19700,25 @@ bootApp = function() {
     // and expands its country). Guard ensures this runs only once per session.
     if (!window.__deepLinkApplied) {
       window.__deepLinkApplied = true;
+      // Restore per-user view (tab, active campaign, calendar month, scroll) if the
+      // last reload came through reloadPreservingView(). Hash-based deep links below
+      // still win because they're set intentionally by a click from Slack/etc.
+      var _persisted = (typeof hydratePersistedView === 'function') ? hydratePersistedView() : null;
+      if (_persisted && !location.hash) {
+        if (_persisted.tab) STATE.tab = _persisted.tab;
+        if (_persisted.activeSubCampaignId != null) {
+          var camp = findCampaignById(_persisted.activeSubCampaignId);
+          if (camp) {
+            STATE.activeSubCampaignId = camp.id;
+            if (camp.country) STATE.expandedCountries[camp.country] = true;
+          }
+        }
+        if (_persisted.calendarMonth) STATE.calendarMonth = _persisted.calendarMonth;
+        if (typeof _persisted.scrollY === 'number' && _persisted.scrollY > 0) {
+          // Defer to after render so the layout exists to scroll into.
+          setTimeout(function() { try { window.scrollTo(0, _persisted.scrollY); } catch (_) {} }, 50);
+        }
+      }
       // #catReview → open the Cat Heads Review tab and flash the signed-in manager's own
       // section purple (resolved from their login via currentCatHead()). This is where the
       // category-head "you have N pending reviews" Slack digest links to.
@@ -19814,9 +19867,13 @@ window.addEventListener('online', function() {
     reloading = true;
     if (typeof toast === 'function') toast('New version available — reloading…', 'success');
     // Give the toast a beat to render, then reload once the user's not mid-edit.
+    // Route through reloadPreservingView so we land back on the same tab / campaign
+    // rather than the Campaigns default (STATE.tab / activeSubCampaignId aren't in
+    // the Firestore snapshot).
     var tryReload = function () {
       if (isBusy()) { setTimeout(tryReload, 3000); return; }
-      window.location.reload();
+      if (typeof reloadPreservingView === 'function') reloadPreservingView();
+      else window.location.reload();
     };
     setTimeout(tryReload, 1500);
   }
