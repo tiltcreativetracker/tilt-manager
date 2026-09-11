@@ -383,7 +383,6 @@ var Fb = {
     // Target 900KB so there's headroom for campaign/asset growth.
     var TARGET_BYTES = 900 * 1024;
     var snap = {
-      schedulerIncludeWeekends: STATE.schedulerIncludeWeekends,
       sheetsWebhookUrl: STATE.sheetsWebhookUrl,
       webhookUrl: STATE.webhookUrl,
       countryWebhooks: STATE.countryWebhooks,
@@ -510,7 +509,6 @@ var Fb = {
         search: true,
         logEditor: true,
         logWeekOffset: true,
-        schedulerDate: true,
         // qcDismissed is now persisted — intentionally excluded from PER_USER_UI_FIELDS
         noSplit: true,
         reportingPeriod: true,
@@ -2249,8 +2247,6 @@ var STATE = {
   // Migrated into organicDailyThread on first load (see boot migration below).
   contentLeadDailyThreads: { Millie: null, Rivers: null },
   contentLeadDailyThreadHistory: { Millie: [], Rivers: [] },
-  schedulerDate: todayISO(),
-  schedulerIncludeWeekends: false,
   // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
   // Null = show first editor. Changed via the dropdown; persisted by saveState.
   logEditor: null,
@@ -4163,49 +4159,6 @@ function sortByPriority(assets, countryOrder) {
     if (ka.subRank !== kb.subRank) return ka.subRank - kb.subRank;
     return ka.pn - kb.pn;
   });
-}
-
-// Auto-pick scheduler removed \u2014 Scheduler tab is now manual. See renderSchedulerView.
-
-function clearSchedule() {
-  var dateStr = STATE.schedulerDate, cleared = 0;
-  STATE.assets.forEach(function(a) {
-    if (a.scheduledFor === dateStr && !a.released) { a.scheduledFor = ''; cleared++; }
-  });
-  if (cleared) logAction('updated', 'Cleared ' + cleared + ' scheduled video' + (cleared === 1 ? '' : 's') + ' for ' + dateStr);
-  toast(cleared ? 'Cleared ' + cleared + ' scheduled video' + (cleared === 1 ? '' : 's') : 'Nothing to clear', cleared ? 'success' : '');
-  render();
-}
-
-function releaseScheduled() {
-  var dateStr = STATE.schedulerDate;
-  var byEditor = {};
-  STATE.assets.forEach(function(a) {
-    if (a.scheduledFor === dateStr && !a.released) {
-      a.released = true;
-      byEditor[a.editor] = (byEditor[a.editor] || []);
-      byEditor[a.editor].push(a);
-    }
-  });
-
-  var total = 0;
-  Object.keys(byEditor).forEach(function(editor) {
-    var list = byEditor[editor];
-    total += list.length;
-    // Daily drop is a direct send (not batched) because it's already a batch
-    var lines = [':clapper: *Daily queue for ' + editor + '* (' + dateStr + ')'];
-    list.forEach(function(a, i) { lines.push('  ' + (i+1) + '. ' + a.name + '  _(' + a.difficulty + ')_'); });
-    STATE.sentNotifications.unshift({
-      time: timeStamp(), sentAt: Date.now(), editor: editor,
-      items: list.map(function(a) { return { name: a.name, change: 'daily-queue' }; }),
-      reason: 'daily-drop', body: lines.join('\n')
-    });
-    logAction('notified', editor + ' \u2014 daily queue sent (' + list.length + ' video' + (list.length === 1 ? '' : 's') + ')');
-  });
-  if (STATE.sentNotifications.length > 20) STATE.sentNotifications = STATE.sentNotifications.slice(0, 20);
-
-  toast(total ? 'Released ' + total + ' video' + (total === 1 ? '' : 's') + ' + sent daily queue pings' : 'Nothing to release', total ? 'success' : '');
-  render();
 }
 
 // ===================== SUB-CAMPAIGN MODALS =====================
@@ -19269,25 +19222,6 @@ var App = {
     if (!a) return;
     if (!window.confirm('Cancel this video? It will be marked Cancelled and removed from the review queue.')) return;
     App.setAssetCategoryHeadQc(id, 'Cancelled');
-  },
-  setSchedulerDate: function(v) { STATE.schedulerDate = v; render(); },
-  toggleWeekends: function(v) { STATE.schedulerIncludeWeekends = v; render(); },
-  clearSchedule: clearSchedule,
-  releaseScheduled: releaseScheduled,
-  // Manual scheduler row handlers — assign editor (delegates to setAssetEditor for
-  // notification side effects) and stamp ETA + scheduledFor for the planned date.
-  scheduleAssignEditor: function(id, editor) {
-    App.setAssetEditor(id, editor || '');
-  },
-  scheduleSetEta: function(id, iso) {
-    var a = null;
-    a = findAssetById(id);
-    if (!a) return;
-    var clean = toISODate(iso);
-    a.estDelivery = clean;
-    if (clean) a.scheduledFor = STATE.schedulerDate;
-    logAction('updated', 'Asset "' + a.name + '" ETA → ' + (clean ? formatDate(clean) : 'cleared') + (clean ? ' · scheduled for ' + STATE.schedulerDate : ''));
-    render();
   },
   flushBatch: function(editor) {
     var fired = fireBatch(editor, 'manual');
