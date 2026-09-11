@@ -430,6 +430,7 @@ var Fb = {
       editorStatsBadgesCollapsed: !!STATE.editorStatsBadgesCollapsed,
       editorStatsGroupCollapsed: STATE.editorStatsGroupCollapsed || {},
       gradingVideosCollapsed: !!STATE.gradingVideosCollapsed,
+      editingStyleNotionUrl: STATE.editingStyleNotionUrl || '',
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedByTab: Fb._tabId,
@@ -2312,6 +2313,10 @@ var STATE = {
   // Grading tab: Grade Videos table collapsed state (per-user persisted). Header still
   // shows the graded/total count so you know progress at a glance while folded.
   gradingVideosCollapsed: false,
+
+  // Editing Style tab: public Notion page URL to embed. Shared across teammates
+  // (in the snapshot) so everyone sees the same reference doc.
+  editingStyleNotionUrl: '',
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -4958,6 +4963,7 @@ var TAB_DEFS = {
   editingCalendar:  { label: 'Editing Calendar' },
   log:              { label: 'Daily Log' },
   grading:          { label: 'Grading' },
+  editingStyle:     { label: 'Editing Style' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
@@ -4966,7 +4972,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'log', 'editingCalendar', 'grading', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -4979,15 +4985,15 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'lo
 // so only Zidni/Sharm/Patty (own view) or the viewer list (Elsa, peer picker)
 // actually see the tab in the nav. Viewers land here on first sign-in — a broad
 // read-mostly set that excludes internal-ops tabs and the Strava page.
-var ALL_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'notifications', 'automations', 'reporting', 'content', 'config'];
-var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'notifications', 'reporting', 'content'];
+var ALL_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'notifications', 'automations', 'reporting', 'content', 'config'];
+var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'notifications', 'reporting', 'content'];
 // 'clips' is admin+editor only — intentionally NOT in ALL_TABS (so it doesn't
 // leak to catHead/contentLead, who otherwise mirror ALL_TABS). Added explicitly
 // to the editor and admin lists only.
 var ROLE_TAB_VISIBILITY = {
   viewer:      VIEWER_TABS.slice(),
-  editor:      ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
-  pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'notifications', 'reporting', 'content'],
+  editor:      ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
+  pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'notifications', 'reporting', 'content'],
   catHead:     ALL_TABS.slice(),
   contentLead: ALL_TABS.slice(),
   admin:       ALL_TABS.concat(['editorStats', 'clips'])
@@ -5046,6 +5052,18 @@ function renderTopbar() {
       order.splice(nf, 1);
       cp = order.indexOf('campaigns');
       order.splice(cp + 1, 0, 'notifications');
+      STATE.tabOrder = order.slice();
+    }
+  })();
+  // Migration: place editingStyle immediately after grading (matches DEFAULT_TAB_ORDER).
+  // The append-unknown-tabs step above dropped it at the end for existing users;
+  // splice it beside grading so everyone sees the intended adjacency.
+  (function() {
+    var es = order.indexOf('editingStyle'), gr = order.indexOf('grading');
+    if (es >= 0 && gr >= 0 && es !== gr + 1) {
+      order.splice(es, 1);
+      gr = order.indexOf('grading');
+      order.splice(gr + 1, 0, 'editingStyle');
       STATE.tabOrder = order.slice();
     }
   })();
@@ -8497,6 +8515,88 @@ function resolveGradingYM() {
 // The grades that fall inside the given YM ('YYYY-MM'), by their stored date.
 function gradesInYM(ym) {
   return (STATE.grades || []).filter(function(g) { return (g.date || '').slice(0, 7) === ym; });
+}
+
+// ── Editing Style tab ─────────────────────────────────────────────────────
+// A simple reference surface: paste the public Notion page URL that documents
+// the current editing style, and it renders below in an iframe. URL is shared
+// across teammates (persisted in the Firestore snapshot as
+// STATE.editingStyleNotionUrl), so whoever pastes it, everyone sees the same
+// page next render.
+//
+// Notion note: only pages published via "Share → Publish → Publish to web"
+// (notion.site URLs) can be iframed. Private notion.so URLs get blocked by
+// X-Frame-Options; when that happens the iframe renders empty and the
+// fallback "Open in new tab" link below is the only working exit.
+// Only http(s) URLs are ever placed into iframe src or <a href>. Notion is the
+// intended source, but a stored javascript:/data:/vbscript: URL would execute
+// in the parent origin (the iframe carries allow-scripts + allow-same-origin),
+// so this is the security boundary — enforced both at write (setEditingStyleUrl)
+// and at read time in case something older is already in Firestore.
+function isSafeEmbedUrl(u) {
+  if (!u || typeof u !== 'string') return false;
+  return /^https?:\/\//i.test(u.trim());
+}
+
+function renderEditingStyleView() {
+  var rawUrl = STATE.editingStyleNotionUrl || '';
+  var url = isSafeEmbedUrl(rawUrl) ? rawUrl : '';
+  var canEdit = (typeof roleAtLeast === 'function') ? roleAtLeast('pm') : false;
+  var safeUrl = escapeHtml(url);
+  // The input mirrors the raw stored value so an admin can see and correct a
+  // rejected URL rather than have it silently disappear.
+  var safeRawUrl = escapeHtml(rawUrl);
+  var iframeBlock;
+  if (url) {
+    iframeBlock =
+      '<div style="margin-top:16px;border:1px solid var(--border2);border-radius:12px;overflow:hidden;background:var(--bg2);">' +
+        '<iframe src="' + safeUrl + '" ' +
+          'style="width:100%;height:calc(100vh - 260px);min-height:600px;border:0;display:block;background:#fff;" ' +
+          'referrerpolicy="no-referrer" ' +
+          'sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox">' +
+        '</iframe>' +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:12px;color:var(--text3);">' +
+        'Not loading? Notion only allows embedding pages published via <em>Share → Publish → Publish to web</em> (notion.site URLs). ' +
+        '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Open in new tab ↗</a>' +
+      '</div>';
+  } else {
+    var emptyMsg = rawUrl
+      ? 'Stored URL was rejected (only http:// or https:// links can be embedded). Paste a valid published Notion URL above.'
+      : 'Paste your published Notion page URL above to embed it here.';
+    iframeBlock =
+      '<div style="margin-top:24px;padding:32px;border:1px dashed var(--border2);border-radius:12px;text-align:center;color:var(--text3);background:var(--bg2);">' +
+        escapeHtml(emptyMsg) +
+      '</div>';
+  }
+
+  var inputRow;
+  if (canEdit) {
+    inputRow =
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<input id="editing-style-url-input" type="url" class="form-input" ' +
+          'placeholder="https://your-workspace.notion.site/..." ' +
+          'value="' + safeRawUrl + '" ' +
+          'style="flex:1 1 320px;min-width:280px;" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.setEditingStyleUrl(document.getElementById(\'editing-style-url-input\').value)}">' +
+        '<button class="btn btn-primary" onclick="App.setEditingStyleUrl(document.getElementById(\'editing-style-url-input\').value)">Save & Load</button>' +
+        (rawUrl ? '<button class="btn" onclick="App.setEditingStyleUrl(\'\')">Clear</button>' : '') +
+      '</div>';
+  } else {
+    inputRow = url
+      ? '<div style="font-size:13px;color:var(--text3);">Showing: <a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">' + safeUrl + '</a></div>'
+      : '<div style="font-size:13px;color:var(--text3);">No Notion page set yet. Ask an admin/PM to paste the URL.</div>';
+  }
+
+  return '' +
+    '<div style="padding:24px;max-width:1400px;margin:0 auto;">' +
+      '<h1 style="margin:0 0 6px;font-size:22px;">Editing Style</h1>' +
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+        'Reference the shared Notion page below. Paste the published (notion.site) URL to change it — everyone sees the same page.' +
+      '</div>' +
+      inputRow +
+      iframeBlock +
+    '</div>';
 }
 
 function renderGradingView() {
@@ -14884,6 +14984,7 @@ function render() {
   else if (STATE.tab === 'editingCalendar') body = renderEditingCalendarView();
   else if (STATE.tab === 'log') body = renderDailyLogView();
   else if (STATE.tab === 'grading') body = renderGradingView();
+  else if (STATE.tab === 'editingStyle') body = renderEditingStyleView();
   else if (STATE.tab === 'editorStats') body = renderEditorStatsView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
@@ -14999,6 +15100,26 @@ function restoreScrollPositions(snap) {
 // ===================== EVENTS =====================
 var App = {
   setTab: function(t) { STATE.tab = t; Presence.update(); render(); },
+
+  // Editing Style tab: save the shared Notion embed URL. Trimmed; empty string
+  // clears it. Rejects any non-http(s) URL — a stored javascript:/data: URL
+  // would execute in the parent origin via the iframe's src (allow-scripts +
+  // allow-same-origin sandbox) or via the "Open in new tab" href, so this is
+  // the write-side security boundary paired with isSafeEmbedUrl at render.
+  // Persisted to Firestore via saveState so every teammate sees the same page
+  // on next snapshot.
+  setEditingStyleUrl: function(url) {
+    var v = (url || '').trim();
+    if (v && !isSafeEmbedUrl(v)) {
+      if (typeof toast === 'function') {
+        toast('Only http:// or https:// URLs can be embedded', 'error');
+      }
+      return;
+    }
+    STATE.editingStyleNotionUrl = v;
+    saveState();
+    render();
+  },
 
   // ===== Clips (b-roll library) =====
   setBrollFilter: function(kind, value) {
