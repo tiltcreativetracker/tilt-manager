@@ -3160,10 +3160,6 @@ function undoLastEdit() {
   render();
 }
 
-// Transient state for the Today kanban drag-and-drop. Holds the id of the asset
-// currently being dragged. Cleared on dragend or successful drop. Not persisted.
-var TodayDragState = { assetId: null };
-
 // Input-kind dispatch for renderEditableCell. Each entry says how the field reads from the
 // asset, what control to render in edit mode, and what appMethod to call on commit.
 // The display function returns the HTML for the read-only view (e.g. a styled span).
@@ -4975,9 +4971,6 @@ function roleAtLeast(required) {
   var have = (u && u.role) ? u.role : 'viewer';
   return (ROLE_RANK[have] || 0) >= (ROLE_RANK[required] || 0);
 }
-
-// Transient: id of the tab currently being dragged in the topbar.
-var TabDragState = { tabId: null };
 
 function renderTopbar() {
   var pending = totalPending();
@@ -16902,170 +16895,6 @@ var App = {
     lines.push('  Avg revision rounds: ' + (avgRounds == null ? '—' : String(Math.round(avgRounds))));
 
     copyToClipboard(lines.join('\n'), 'Report copied');
-  },
-
-  // --- Topbar tab drag-to-reorder ---
-  // Users can grab any tab in the topbar and drag it to a new position. The new
-  // order is written to STATE.tabOrder and persisted via saveState (called inside
-  // render()). Clicks still work as before \u2014 the browser dispatches click only
-  // when no drag occurred.
-  onTabDragStart: function(event, tabId) {
-    TabDragState.tabId = tabId;
-    try {
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', tabId);
-    } catch (e) {}
-    setTimeout(function() {
-      var el = document.querySelector('.tab-btn[data-tab-id="' + tabId + '"]');
-      if (el) el.classList.add('tab-dragging');
-    }, 0);
-  },
-  onTabDragEnd: function(event) {
-    TabDragState.tabId = null;
-    var dragging = document.querySelectorAll('.tab-btn.tab-dragging');
-    for (var i = 0; i < dragging.length; i++) dragging[i].classList.remove('tab-dragging');
-    var hovered = document.querySelectorAll('.tab-btn.tab-drag-over');
-    for (var j = 0; j < hovered.length; j++) hovered[j].classList.remove('tab-drag-over');
-  },
-  onTabDragOver: function(event, tabId) {
-    // Allow drop and show a visual indicator on the target tab.
-    event.preventDefault();
-    try { event.dataTransfer.dropEffect = 'move'; } catch (e) {}
-    if (TabDragState.tabId === null || TabDragState.tabId === tabId) return;
-    var el = event.currentTarget;
-    if (el && !el.classList.contains('tab-drag-over')) {
-      // Clear any other hover marker first so we only show one at a time.
-      var hovered = document.querySelectorAll('.tab-btn.tab-drag-over');
-      for (var i = 0; i < hovered.length; i++) hovered[i].classList.remove('tab-drag-over');
-      el.classList.add('tab-drag-over');
-    }
-  },
-  onTabDragLeave: function(event) {
-    var el = event.currentTarget;
-    if (!el) return;
-    var related = event.relatedTarget;
-    if (related && el.contains(related)) return;
-    el.classList.remove('tab-drag-over');
-  },
-  onTabDrop: function(event, targetTabId) {
-    event.preventDefault();
-    var sourceTabId = TabDragState.tabId;
-    TabDragState.tabId = null;
-    // Clear any lingering visual state before the re-render.
-    var hovered = document.querySelectorAll('.tab-btn.tab-drag-over');
-    for (var i = 0; i < hovered.length; i++) hovered[i].classList.remove('tab-drag-over');
-    if (!sourceTabId || sourceTabId === targetTabId) { render(); return; }
-    var order = Array.isArray(STATE.tabOrder) ? STATE.tabOrder.slice() : DEFAULT_TAB_ORDER.slice();
-    var from = order.indexOf(sourceTabId);
-    var to = order.indexOf(targetTabId);
-    if (from < 0 || to < 0) { render(); return; }
-    // Splice the source out, then insert it at the target's index. If the source
-    // was left of the target, the target's index after removal is (to - 1) \u2014 that's
-    // what we want for "drop it where the target currently is". If source was right
-    // of the target, target index is unchanged.
-    order.splice(from, 1);
-    order.splice(to, 0, sourceTabId);
-    STATE.tabOrder = order;
-    render();
-  },
-
-  // --- Today kanban drag-and-drop ---
-  // Cards on the Today board are draggable between columns. Each column maps to a
-  // target status (todo\u2192Assigned, progress\u2192In Progress, review\u2192For Review,
-  // approved\u2192Approved). On drop we call setAssetStatus, which already handles the
-  // editor guard, logs the action, stamps assignedAt when transitioning into
-  // Assigned, and fires the usual notifications.
-  onTodayDragStart: function(event, id) {
-    TodayDragState.assetId = id;
-    try {
-      event.dataTransfer.effectAllowed = 'move';
-      // Some browsers need data set to allow drag; payload itself is unused.
-      event.dataTransfer.setData('text/plain', String(id));
-    } catch (e) {}
-    // Defer so the drag image captures the original card appearance.
-    setTimeout(function() {
-      var el = document.querySelector('.today-card[data-asset-id="' + id + '"]');
-      if (el) el.classList.add('dragging');
-    }, 0);
-  },
-  onTodayDragEnd: function(event) {
-    TodayDragState.assetId = null;
-    // Clear any lingering visual state (card + all column hover states).
-    var dragging = document.querySelectorAll('.today-card.dragging');
-    for (var i = 0; i < dragging.length; i++) dragging[i].classList.remove('dragging');
-    var hovered = document.querySelectorAll('.today-col.drag-over');
-    for (var j = 0; j < hovered.length; j++) hovered[j].classList.remove('drag-over');
-  },
-  onTodayDragOver: function(event, colKey) {
-    // Must preventDefault to make this a valid drop target.
-    event.preventDefault();
-    try { event.dataTransfer.dropEffect = 'move'; } catch (e) {}
-    var col = event.currentTarget;
-    if (col && !col.classList.contains('drag-over')) col.classList.add('drag-over');
-  },
-  onTodayDragLeave: function(event) {
-    var col = event.currentTarget;
-    if (!col) return;
-    // Ignore dragleave events fired when moving between children of the column.
-    var related = event.relatedTarget;
-    if (related && col.contains(related)) return;
-    col.classList.remove('drag-over');
-  },
-  onTodayDrop: function(event, targetStatus, colKey) {
-    event.preventDefault();
-    // If the drop originated on a child card, that card's handler already ran
-    // and set TodayDragState.assetId to null \u2014 skip here so we don't double-apply.
-    var col = event.currentTarget;
-    if (col) col.classList.remove('drag-over');
-    var id = TodayDragState.assetId;
-    TodayDragState.assetId = null;
-    if (id === null || id === undefined) return;
-    // Apply status change (inline, so we can control rendering order) then move
-    // the asset to the END of STATE.assets so it appears at the bottom of the
-    // destination column. Card-level drops (onTodayCardDrop) take precedence
-    // for positional inserts.
-    applyStatusChangeThenReorder(id, targetStatus, 'end', null);
-  },
-  // Card-level drop: hovering over another card shows a visual indicator and
-  // dropping here inserts the dragged card JUST BEFORE the target in
-  // STATE.assets \u2014 which is what the column renderers iterate in order.
-  onTodayCardDragOver: function(event, targetCardId) {
-    if (TodayDragState.assetId === null || TodayDragState.assetId === targetCardId) return;
-    // preventDefault makes this a valid drop target. Stop propagation so the
-    // column's own dragover doesn't also mark itself.
-    event.preventDefault();
-    event.stopPropagation();
-    try { event.dataTransfer.dropEffect = 'move'; } catch (e) {}
-    var el = event.currentTarget;
-    if (!el) return;
-    // Remove the marker from any other card first (one insertion indicator at a time).
-    var others = document.querySelectorAll('.today-card.card-drop-above');
-    for (var i = 0; i < others.length; i++) {
-      if (others[i] !== el) others[i].classList.remove('card-drop-above');
-    }
-    el.classList.add('card-drop-above');
-  },
-  onTodayCardDragLeave: function(event) {
-    var el = event.currentTarget;
-    if (!el) return;
-    var related = event.relatedTarget;
-    if (related && el.contains(related)) return;
-    el.classList.remove('card-drop-above');
-  },
-  onTodayCardDrop: function(event, targetCardId) {
-    event.preventDefault();
-    event.stopPropagation();
-    // Clear all visual indicators.
-    var others = document.querySelectorAll('.today-card.card-drop-above');
-    for (var i = 0; i < others.length; i++) others[i].classList.remove('card-drop-above');
-    var draggedId = TodayDragState.assetId;
-    TodayDragState.assetId = null;
-    if (draggedId === null || draggedId === undefined || draggedId === targetCardId) { render(); return; }
-    // Figure out the target status by looking up the target card's current status \u2014
-    // that's the column the user is dropping INTO.
-    var target = findAssetById(targetCardId);
-    if (!target) { render(); return; }
-    applyStatusChangeThenReorder(draggedId, target.status, 'before', targetCardId);
   },
 
   // --- Inline cell editing ---
