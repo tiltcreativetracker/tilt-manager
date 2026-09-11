@@ -521,9 +521,6 @@ var Fb = {
         reportingView: true,
         reportingApproval: true,
         editorTallyCollapsed: true,
-        gradingPeriod: true,
-        gradingEditorFilter: true,
-        gradingCustomEntry: true,
         gradingCampaignId: true,
         gradingYear: true,
         gradingMonth: true,
@@ -2279,14 +2276,10 @@ var STATE = {
   // Per-editor manual scorecard inputs that a single video row can't capture:
   //   { <editor>: { avgVideosPerDay: number|null, targetPerDay: number|null } }.
   scorecardMeta: {},
-  // Per-user UI (NOT shared): which period the scorecard covers and which editor
-  // the grades list is filtered to.
-  gradingPeriod: 'quarter',   // 'quarter' | 'month' | 'all'
-  gradingEditorFilter: 'all',
+  // Per-user UI (NOT shared): which slice of the grades list is visible.
   gradingCampaignId: null,    // selected campaign whose videos you're grading
   gradingYear: null,          // selected year (string 'YYYY'); null = latest month with videos
   gradingMonth: null,         // selected month (string '01'..'12')
-  gradingCustomEntry: false,  // (legacy) unused since grading moved to campaign videos
   gradingShowDismissed: false,// true = also show dismissed videos in the grade list
   gradingType: 'all',         // 'all' | 'Paid Ads' | 'Organic' — paid/organic filter
   gradingWeek: null,          // null = whole month; else a Monday ISO ('YYYY-MM-DD') scoping to one week
@@ -15645,9 +15638,6 @@ var App = {
   },
 
   // ===== Grading (Editor KPI Scorecard) =====
-  setGradingPeriod: function(p) { STATE.gradingPeriod = p; saveState(); render(); },
-  setGradingEditorFilter: function(e) { STATE.gradingEditorFilter = e; saveState(); render(); },
-
   // ── Grading controls: month / year / campaign ──
   setGradingMonth: function(m) {
     STATE.gradingMonth = m || null;
@@ -15748,138 +15738,6 @@ var App = {
     STATE.grades = (STATE.grades || []).filter(function(x) { return x.id !== g.id; });
     saveState(); render();
     toast('Grade cleared', 'success');
-  },
-
-  // Picker onchange: link is chosen at submit time, but pre-fill editor + rounds now so
-  // the form reflects the video's live revision history before you hit Add grade.
-  onGradingAssetPick: function(assetId) {
-    var a = assetId ? findAssetById(assetId) : null;
-    if (!a) return;
-    if (a.editor && GRADING_EDITORS.indexOf(a.editor) >= 0) {
-      var ed = document.getElementById('gr-editor'); if (ed) ed.value = a.editor;
-    }
-    var rd = document.getElementById('gr-rounds'); if (rd) rd.value = (a.revisionRounds || 0);
-  },
-
-  // Read the Log-a-video form and push a new grade row.
-  addGrade: function() {
-    var date   = (document.getElementById('gr-date')   || {}).value || todayISO();
-    var editor = (document.getElementById('gr-editor') || {}).value || GRADING_EDITORS[0];
-    var type   = (document.getElementById('gr-type')   || {}).value || 'Net New';
-    var rounds = (document.getElementById('gr-rounds') || {}).value;
-    var brand  = !!(document.getElementById('gr-brand') || {}).checked;
-    var qa     = !!(document.getElementById('gr-qa')    || {}).checked;
-    var idea   = !!(document.getElementById('gr-idea')  || {}).checked;
-
-    // Video comes from either the campaign-video picker (linked → auto rounds) or a
-    // typed custom name (free-text → manual rounds).
-    var assetSel = document.getElementById('gr-asset');
-    var assetId = assetSel ? assetSel.value : '';
-    var video, linkedAsset = null;
-    if (assetId) {
-      linkedAsset = findAssetById(assetId);
-      if (!linkedAsset) { toast('That video is no longer available', 'error'); return; }
-      var ver = (typeof deriveVersionFromName === 'function') ? deriveVersionFromName(linkedAsset) : (linkedAsset.version || '');
-      video = (linkedAsset.name + ((ver && linkedAsset.name.indexOf(ver) < 0) ? ' ' + ver : '')).trim();
-    } else {
-      video = ((document.getElementById('gr-video') || {}).value || '').trim();
-      if (!video) { toast('Pick a campaign video or type a name first', 'error'); return; }
-    }
-
-    var roundsN = Math.max(0, parseInt(rounds, 10) || 0);
-    var now = Date.now();
-    var grade = {
-      id: newLocalId('g'),
-      video: video,
-      assetId: assetId || null,
-      date: date,
-      editor: editor,
-      contentType: type,
-      brandPass: brand,
-      qaClean: qa,
-      // Linked + typed value matches the asset's live count → keep it AUTO (tracks the
-      // Board). Linked but a different number was typed → pin as manual. Free-text → manual.
-      roundsManual: assetId ? (roundsN !== (linkedAsset.revisionRounds || 0)) : true,
-      revisionRounds: roundsN,
-      newIdea: idea,
-      createdAt: now,
-      createdBy: Auth.user ? Auth.user.displayName : null,
-      updatedAt: now
-    };
-    if (!Array.isArray(STATE.grades)) STATE.grades = [];
-    STATE.grades.push(grade);
-    bumpGradingStreak();
-    saveState();
-    render();
-    toast('Graded “' + video + '” for ' + editor, 'success');
-    // Re-focus the first form control so several videos can be logged in a row.
-    setTimeout(function() { var el = document.getElementById('gr-asset') || document.getElementById('gr-video'); if (el) el.focus(); }, 60);
-  },
-
-  // Snap a manually-overridden linked grade back to live auto rounds.
-  resetGradeRoundsAuto: function(id) {
-    var g = (STATE.grades || []).filter(function(x) { return x.id === id; })[0];
-    if (!g) return;
-    g.roundsManual = false;
-    g.updatedAt = Date.now();
-    saveState();
-    render();
-  },
-
-  // Flip a boolean field on a grade row (brandPass / qaClean / newIdea) — lets Avy
-  // and Elsa tick their columns after the fact, straight from the graded-videos list.
-  toggleGradeField: function(id, field) {
-    var g = (STATE.grades || []).filter(function(x) { return x.id === id; })[0];
-    if (!g) return;
-    g[field] = !g[field];
-    g.updatedAt = Date.now();
-    saveState();
-    render();
-  },
-
-  // Set a value field on a grade row (contentType / revisionRounds / editor / date / video).
-  setGradeField: function(id, field, value) {
-    var g = (STATE.grades || []).filter(function(x) { return x.id === id; })[0];
-    if (!g) return;
-    if (field === 'revisionRounds') {
-      value = Math.max(0, parseInt(value, 10) || 0);
-      g.roundsManual = true; // a hand-typed count pins the value; ↺ reverts to auto
-    }
-    g[field] = value;
-    g.updatedAt = Date.now();
-    saveState();
-    render();
-  },
-
-  deleteGrade: function(id) {
-    var g = (STATE.grades || []).filter(function(x) { return x.id === id; })[0];
-    if (!g) return;
-    if (!window.confirm('Delete the grade for “' + (g.video || 'this video') + '”?')) return;
-    STATE.grades = (STATE.grades || []).filter(function(x) { return x.id !== id; });
-    saveState();
-    render();
-    toast('Grade deleted', 'success');
-  },
-
-  // Dismiss (soft): drop the video from the scorecard + hide it from the list, but keep
-  // the data so it can be restored. Use for mistakes or videos that shouldn't count.
-  dismissGrade: function(id) {
-    var g = (STATE.grades || []).filter(function(x) { return x.id === id; })[0];
-    if (!g) return;
-    g.dismissed = true;
-    g.updatedAt = Date.now();
-    saveState();
-    render();
-    toast('Dismissed “' + (g.video || 'video') + '” — won’t count toward the scorecard', 'success');
-  },
-  restoreGrade: function(id) {
-    var g = (STATE.grades || []).filter(function(x) { return x.id === id; })[0];
-    if (!g) return;
-    g.dismissed = false;
-    g.updatedAt = Date.now();
-    saveState();
-    render();
-    toast('Restored to the scorecard', 'success');
   },
 
   // Set an editor's manual scorecard input (avgVideosPerDay / targetPerDay).
