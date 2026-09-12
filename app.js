@@ -429,6 +429,8 @@ var Fb = {
       gradingVideosCollapsed: !!STATE.gradingVideosCollapsed,
       editingStyleNotionUrl: STATE.editingStyleNotionUrl || '',
       strategyNotionUrl: STATE.strategyNotionUrl || '',
+      trainingModules: Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [],
+      trainingCompletions: (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {},
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedByTab: Fb._tabId,
@@ -2276,6 +2278,10 @@ var STATE = {
   // (in the snapshot) so everyone sees the same reference doc.
   editingStyleNotionUrl: '',
   strategyNotionUrl: '',
+  // Training library — item #12. Modules are admin-authored; completions are
+  // per-editor and stored inline in the snapshot (small collection, fits fine).
+  trainingModules: [],
+  trainingCompletions: {},
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -4911,6 +4917,8 @@ var TAB_DEFS = {
   strategy:         { label: 'Strategy' },
   clReview:         { label: 'CL Review', badge: true },
   editorHome:       { label: 'My Day' },
+  training:         { label: 'Training' },
+  clHome:           { label: 'CL Home' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
@@ -4919,7 +4927,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'clReview', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['clHome', 'editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'clReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -4932,18 +4940,18 @@ var DEFAULT_TAB_ORDER = ['editorHome', 'campaigns', 'notifications', 'today', 'c
 // so only Zidni/Sharm/Patty (own view) or the viewer list (Elsa, peer picker)
 // actually see the tab in the nav. Viewers land here on first sign-in — a broad
 // read-mostly set that excludes internal-ops tabs and the Strava page.
-var ALL_TABS = ['campaigns', 'today', 'catReview', 'clReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
+var ALL_TABS = ['campaigns', 'today', 'catReview', 'clReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
 var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'];
 // 'clips' is admin+editor only — intentionally NOT in ALL_TABS (so it doesn't
 // leak to catHead/contentLead, who otherwise mirror ALL_TABS). Added explicitly
 // to the editor and admin lists only.
 var ROLE_TAB_VISIBILITY = {
   viewer:      VIEWER_TABS.slice(),
-  editor:      ['editorHome', 'campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
+  editor:      ['editorHome', 'campaigns', 'today', 'catReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
   pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'],
   catHead:     ALL_TABS.slice(),
-  contentLead: ALL_TABS.slice(),
-  admin:       ALL_TABS.concat(['editorStats', 'clips'])
+  contentLead: ALL_TABS.concat(['clHome']),
+  admin:       ALL_TABS.concat(['clHome', 'editorHome', 'editorStats', 'clips'])
 };
 
 // Human-readable role labels (role keys are camelCase / short; these are what the
@@ -12040,6 +12048,195 @@ function renderContentLeadReviewView() {
   '</div>';
 }
 
+// ── Training library (item #12) ────────────────────────────────────────────
+// Modules are admin-authored; each editor sees them in the Training tab and
+// can Start / Complete to log a completion. Admins/CLs see a matrix of who's
+// completed what.
+function renderTrainingView() {
+  var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
+  var completions = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
+  var role = (Auth && Auth.user && Auth.user.role) || 'viewer';
+  var isEditor = (role === 'editor');
+  var isAdminOrCL = (role === 'admin' || role === 'contentLead');
+  var currentEmail = (Auth && Auth.user && Auth.user.email) || '';
+
+  function moduleLinks(m) {
+    var parts = [];
+    if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Brief ↗</a>');
+    if (m.loomUrl) parts.push('<a href="' + escapeHtml(m.loomUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Loom ↗</a>');
+    if (m.footageUrl) parts.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Footage ↗</a>');
+    return parts.join(' · ');
+  }
+
+  // Editor view: practice cards
+  if (isEditor && currentEmail) {
+    var mine = completions[currentEmail] || {};
+    var cards = modules.length === 0
+      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules yet. Ask an admin to add one in Config.</div>'
+      : modules.map(function(m) {
+          var c = mine[m.id] || {};
+          var badge = c.completedAt
+            ? '<span style="background:#22c55e;color:white;padding:2px 8px;border-radius:12px;font-size:10.5px;font-weight:600;">✓ Completed ' + escapeHtml((c.completedAt || '').slice(0, 10)) + '</span>'
+            : c.startedAt
+              ? '<span style="background:var(--amber-bg, #fbbf24);color:var(--text1);padding:2px 8px;border-radius:12px;font-size:10.5px;font-weight:600;">In progress</span>'
+              : '<span style="background:var(--bg3);color:var(--text3);padding:2px 8px;border-radius:12px;font-size:10.5px;">Not started</span>';
+          var actions = c.completedAt
+            ? '<button class="btn" style="font-size:11.5px;padding:4px 10px;" onclick="App.trainingUncomplete(\'' + m.id + '\')">Undo</button>'
+            : c.startedAt
+              ? '<button class="btn btn-primary" style="font-size:11.5px;padding:4px 10px;background:#22c55e;border-color:#22c55e;" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark Complete</button>'
+              : '<button class="btn btn-primary" style="font-size:11.5px;padding:4px 10px;" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
+          return '<div class="auto-card" style="margin-bottom:10px;">' +
+            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
+              '<div style="flex:1 1 320px;min-width:280px;">' +
+                '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + ' &nbsp; ' + badge + '</div>' +
+                '<div style="font-size:12px;color:var(--text2);margin-top:6px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
+                '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
+              '</div>' +
+              '<div style="flex-shrink:0;">' + actions + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+
+    return '<div style="padding:24px;max-width:1000px;margin:0 auto;">' +
+      '<h1 style="margin:0 0 4px;font-size:22px;">Training</h1>' +
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+        'Practice briefs. Start one when you\'re idle, edit the demanded video, then mark complete.' +
+      '</div>' +
+      cards +
+    '</div>';
+  }
+
+  // Admin/CL view: completion matrix
+  if (isAdminOrCL) {
+    var editorEmails = Object.keys(completions).sort();
+    // Also include any known editors from EDITOR_EMAILS map even if they have no completions yet
+    if (typeof EDITOR_EMAILS !== 'undefined') {
+      Object.keys(EDITOR_EMAILS).forEach(function(prefix) {
+        var email = prefix + '@tilt.app';
+        if (editorEmails.indexOf(email) < 0) editorEmails.push(email);
+      });
+      editorEmails.sort();
+    }
+
+    var moduleHeaders = modules.map(function(m) {
+      return '<th style="padding:6px 8px;font-size:11px;text-align:center;">' + escapeHtml((m.title || '').slice(0, 30)) + '</th>';
+    }).join('');
+    var rows = editorEmails.map(function(email) {
+      var cells = modules.map(function(m) {
+        var c = ((completions[email] || {})[m.id]) || {};
+        var mark = c.completedAt ? '✓' : c.startedAt ? '…' : '—';
+        var color = c.completedAt ? '#22c55e' : c.startedAt ? '#f59e0b' : 'var(--text3)';
+        return '<td style="text-align:center;color:' + color + ';font-weight:600;">' + mark + '</td>';
+      }).join('');
+      var editorName = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[email.split('@')[0]]) || email.split('@')[0];
+      return '<tr><td style="padding:6px 10px;font-size:12px;color:var(--text1);">' + escapeHtml(editorName) + '</td>' + cells + '</tr>';
+    }).join('');
+
+    var matrix = modules.length === 0
+      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules yet. Add one in Config → Training modules.</div>'
+      : '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+          '<thead><tr><th style="text-align:left;padding:6px 10px;">Editor</th>' + moduleHeaders + '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>';
+
+    return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
+      '<h1 style="margin:0 0 4px;font-size:22px;">Training — Completion matrix</h1>' +
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+        '✓ = completed · … = in progress · — = not started. Add modules in Config → Training modules.' +
+      '</div>' +
+      matrix +
+    '</div>';
+  }
+
+  // Fallback for other roles
+  return '<div style="padding:32px;text-align:center;color:var(--text3);">' +
+    '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">Training</h1>' +
+    '<div>Training modules are for editors and admins.</div>' +
+  '</div>';
+}
+
+// ── Content Lead Home (item #13) ───────────────────────────────────────────
+// Assembly of existing widgets — no new data model. My campaigns (filtered by
+// contentLead === current user), QC queue (Organic pending for my campaigns),
+// today's approvals across my campaigns, Linear tasks.
+function renderContentLeadHomeView() {
+  var me = (Auth && Auth.user && Auth.user.displayName) || '';
+  var meFirst = (me || '').split(' ')[0];
+  var todayIso = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
+
+  // My campaigns: filter by camp.contentLead === my first name (matches existing picker)
+  var myCamps = (STATE.campaigns || []).filter(function(c) { return (c.contentLead || '') === meFirst; });
+  var myCampIds = {}; myCamps.forEach(function(c) { myCampIds[c.id] = true; });
+
+  // QC queue on MY campaigns: Organic assets with contentLeadQc unset or Needs Revisions or For Review
+  var qcQueue = STATE.assets.filter(function(a) {
+    if (!myCampIds[a.campaignId]) return false;
+    var q = a.contentLeadQc || '';
+    return q === '' || q === 'Draft' || q === 'For Review' || q === 'Needs Revisions';
+  });
+
+  // Today's approvals across my campaigns (any asset flipped to Approved today OR clQcDateApproved today)
+  var approvedToday = STATE.assets.filter(function(a) {
+    if (!myCampIds[a.campaignId]) return false;
+    return a.dateApproved === todayIso || a.clQcDateApproved === todayIso;
+  });
+
+  // Section: My campaigns list
+  var campsHtml = myCamps.length === 0
+    ? '<div style="font-size:12px;color:var(--text3);">No campaigns are assigned to you yet. Set the Content Lead on a campaign in the campaign edit modal.</div>'
+    : '<div style="display:flex;flex-direction:column;gap:6px;">' +
+        myCamps.slice(0, 12).map(function(c) {
+          var assetCount = STATE.assets.filter(function(a) { return a.campaignId === c.id; }).length;
+          return '<a href="#campaign=' + encodeURIComponent(c.id) + '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + c.id + '\')" style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg2);border-radius:6px;color:var(--text1);text-decoration:none;font-size:12.5px;">' +
+            '<span>' + escapeHtml(c.name) + ' <span style="color:var(--text3);">· ' + escapeHtml(c.country) + '</span></span>' +
+            '<span style="color:var(--text3);">' + assetCount + ' assets</span>' +
+          '</a>';
+        }).join('') +
+      '</div>';
+
+  // Section: QC queue
+  var qcHtml = qcQueue.length === 0
+    ? '<div style="font-size:12px;color:var(--text3);">All clear — nothing waiting on your QC.</div>'
+    : qcQueue.slice(0, 10).map(function(a) {
+        var camp = findCampaignById(a.campaignId);
+        var qc = a.contentLeadQc || 'Draft';
+        return '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg2);border-radius:6px;font-size:12.5px;margin-bottom:4px;">' +
+          '<span><a href="#" onclick="event.preventDefault(); App.openAssetInTracker(\'' + a.campaignId + '\', \'' + a.id + '\')" style="color:var(--text1);text-decoration:none;">' + escapeHtml(a.name) + '</a> <span style="color:var(--text3);">· ' + escapeHtml(camp ? camp.name : '—') + '</span></span>' +
+          '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '" style="flex-shrink:0;">' + qc + '</span>' +
+        '</div>';
+      }).join('');
+
+  // Section: today's approvals count
+  var approvalsHtml = approvedToday.length === 0
+    ? '<div style="font-size:12px;color:var(--text3);">No approvals on your campaigns today yet.</div>'
+    : '<div style="font-size:24px;font-weight:700;color:#22c55e;">' + approvedToday.length + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);">videos approved today across your campaigns</div>';
+
+  function section(title, contentHtml) {
+    return '<div class="auto-card" style="margin-bottom:14px;">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text1);margin-bottom:10px;">' + escapeHtml(title) + '</div>' +
+      contentHtml +
+    '</div>';
+  }
+
+  return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
+    '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead Home' + (meFirst ? ' — ' + escapeHtml(meFirst) : '') + '</h1>' +
+    '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+      'Your campaigns, your QC queue, today\'s approvals, and your Linear tasks — all on one page.' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
+      '<div>' +
+        section('My campaigns (' + myCamps.length + ')', campsHtml) +
+        section('Approved today', approvalsHtml) +
+      '</div>' +
+      '<div>' +
+        section('QC queue (' + qcQueue.length + ' pending)', qcHtml) +
+        renderLinearTasksPanel() +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
 // ── Linear tasks widget (item #10) ─────────────────────────────────────────
 // Read-only list of the signed-in user's open assigned Linear issues, fetched
 // via the getLinearTasks Cloud Function. Cached in STATE.linearTasks for the
@@ -13775,6 +13972,33 @@ function renderConfigView() {
       '<button class="run-btn" style="margin-top:10px;" onclick="App.openGradesBackupModal()">↺ Restore grades…</button>' +
     '</div>' +
 
+    // Training modules — admin-only CRUD. Modules render for editors in the Training tab.
+    '<div class="section-title" style="margin-top:24px;">Training modules</div>' +
+    '<div class="auto-card">' +
+      '<div class="auto-desc">Add a practice brief editors can start when they\'re idle. Title + brief are required; the URL fields are optional links to a Notion doc, a Loom recording (e.g. a work-together session), or raw footage.</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">' +
+        '<input id="training-mod-title" type="text" class="form-input" placeholder="Title (e.g. Cut a 15s luxury reel)">' +
+        '<input id="training-mod-notion" type="url" class="form-input" placeholder="Notion doc URL (optional)">' +
+        '<input id="training-mod-loom" type="url" class="form-input" placeholder="Loom recording URL (optional)">' +
+        '<input id="training-mod-footage" type="url" class="form-input" placeholder="Raw footage URL (optional)">' +
+      '</div>' +
+      '<textarea id="training-mod-brief" class="form-input" style="margin-top:8px;width:100%;min-height:60px;" placeholder="Brief (short description of what to edit)"></textarea>' +
+      '<button class="btn btn-primary" style="margin-top:8px;" onclick="App.trainingAddModule()">+ Add module</button>' +
+      (function() {
+        var mods = STATE.trainingModules || [];
+        if (mods.length === 0) return '';
+        return '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">' +
+          '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">Existing modules (' + mods.length + ')</div>' +
+          mods.map(function(m) {
+            return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border2);font-size:12.5px;">' +
+              '<span><strong>' + escapeHtml(m.title) + '</strong> <span style="color:var(--text3);">· ' + escapeHtml((m.brief || '').slice(0, 60)) + (m.brief && m.brief.length > 60 ? '…' : '') + '</span></span>' +
+              '<button class="action-btn del-btn" onclick="App.trainingDeleteModule(\'' + m.id + '\')">Del</button>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      })() +
+    '</div>' +
+
     '<div class="section-title" style="color:var(--red-text); margin-top:24px;">Danger Zone</div>' +
     '<div class="auto-card" style="border-color:var(--red); background:rgba(226,75,74,0.03);">' +
       '<div class="auto-header">' +
@@ -15181,6 +15405,8 @@ function render() {
   else if (STATE.tab === 'strategy') body = renderStrategyView();
   else if (STATE.tab === 'clReview') body = renderContentLeadReviewView();
   else if (STATE.tab === 'editorHome') body = renderEditorHomeView();
+  else if (STATE.tab === 'training') body = renderTrainingView();
+  else if (STATE.tab === 'clHome') body = renderContentLeadHomeView();
   else if (STATE.tab === 'editorStats') body = renderEditorStatsView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
@@ -17199,6 +17425,79 @@ var App = {
     if (newVal === 'Approved') a.clQcDateApproved = todayLocalISO();
     else if (old === 'Approved') a.clQcDateApproved = '';
     logAction('updated', 'Asset "' + a.name + '" content-lead QC: ' + old + ' \u2192 ' + newVal);
+    render();
+  },
+
+  // Training library (item #12) handlers — read/write STATE.trainingModules and
+  // STATE.trainingCompletions. Modules keyed by id (short random string). Per-editor
+  // completion path: trainingCompletions[email][moduleId] = { startedAt, completedAt }.
+  trainingStart: function(moduleId) {
+    var email = Auth && Auth.user && Auth.user.email;
+    if (!email) return;
+    STATE.trainingCompletions = STATE.trainingCompletions || {};
+    STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
+    STATE.trainingCompletions[email][moduleId] = {
+      startedAt: (new Date()).toISOString(),
+      completedAt: ''
+    };
+    saveState();
+    render();
+  },
+  trainingComplete: function(moduleId) {
+    var email = Auth && Auth.user && Auth.user.email;
+    if (!email) return;
+    STATE.trainingCompletions = STATE.trainingCompletions || {};
+    STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
+    var existing = STATE.trainingCompletions[email][moduleId] || {};
+    STATE.trainingCompletions[email][moduleId] = {
+      startedAt: existing.startedAt || (new Date()).toISOString(),
+      completedAt: (new Date()).toISOString()
+    };
+    saveState();
+    render();
+    if (typeof toast === 'function') toast('Marked complete', 'success');
+  },
+  trainingUncomplete: function(moduleId) {
+    var email = Auth && Auth.user && Auth.user.email;
+    if (!email) return;
+    if (!(STATE.trainingCompletions && STATE.trainingCompletions[email])) return;
+    var existing = STATE.trainingCompletions[email][moduleId] || {};
+    STATE.trainingCompletions[email][moduleId] = {
+      startedAt: existing.startedAt || '',
+      completedAt: ''
+    };
+    saveState();
+    render();
+  },
+  trainingAddModule: function() {
+    if (!roleAtLeast('admin')) { if (typeof toast === 'function') toast('Admin only', 'error'); return; }
+    var titleEl = document.getElementById('training-mod-title');
+    var briefEl = document.getElementById('training-mod-brief');
+    var notionEl = document.getElementById('training-mod-notion');
+    var loomEl = document.getElementById('training-mod-loom');
+    var footageEl = document.getElementById('training-mod-footage');
+    var title = (titleEl && titleEl.value || '').trim();
+    if (!title) { if (typeof toast === 'function') toast('Module needs a title', 'error'); return; }
+    STATE.trainingModules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
+    STATE.trainingModules.push({
+      id: 'tm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      title: title,
+      brief: (briefEl && briefEl.value || '').trim(),
+      notionUrl: (notionEl && notionEl.value || '').trim(),
+      loomUrl: (loomEl && loomEl.value || '').trim(),
+      footageUrl: (footageEl && footageEl.value || '').trim(),
+      createdAt: (new Date()).toISOString(),
+      createdBy: (Auth && Auth.user && Auth.user.email) || ''
+    });
+    saveState();
+    render();
+    if (typeof toast === 'function') toast('Module added', 'success');
+  },
+  trainingDeleteModule: function(moduleId) {
+    if (!roleAtLeast('admin')) return;
+    if (!confirm('Delete this training module? Completions for it stay in the log but the module disappears.')) return;
+    STATE.trainingModules = (STATE.trainingModules || []).filter(function(m) { return m.id !== moduleId; });
+    saveState();
     render();
   },
 
