@@ -428,6 +428,7 @@ var Fb = {
       editorStatsGroupCollapsed: STATE.editorStatsGroupCollapsed || {},
       gradingVideosCollapsed: !!STATE.gradingVideosCollapsed,
       editingStyleNotionUrl: STATE.editingStyleNotionUrl || '',
+      strategyNotionUrl: STATE.strategyNotionUrl || '',
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedByTab: Fb._tabId,
@@ -2274,6 +2275,7 @@ var STATE = {
   // Editing Style tab: public Notion page URL to embed. Shared across teammates
   // (in the snapshot) so everyone sees the same reference doc.
   editingStyleNotionUrl: '',
+  strategyNotionUrl: '',
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -2763,7 +2765,12 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     // Stays null for seeded data without an assignment event \u2014 those rows won't show up
     // in "To Do Today" by assignment date, only by ETA matching.
     assignedAt: editor ? todayISO() : '',
-    adStatus: ''
+    adStatus: '',
+    // Content Lead QC — Organic-only equivalent of categoryHeadQc/chDateApproved.
+    // Reuses CATEGORY_HEAD_QC_VALUES so the same Draft/For Review/Needs Revisions/
+    // Approved/Cancelled pill palette applies. Approved auto-stamps clQcDateApproved.
+    contentLeadQc: '',
+    clQcDateApproved: ''
   };
 }
 
@@ -3253,6 +3260,26 @@ var EDITABLE_FIELDS = {
     },
     value: function(a) { return a.categoryHeadQc || 'Draft'; },
     appMethod: 'setAssetCategoryHeadQc'
+  },
+  // Content Lead QC — Organic-only equivalent of categoryHeadQc.
+  // On Organic campaigns, CL replaces CH as the reviewer.
+  contentLeadQc: {
+    kind: 'select',
+    options: function() { return CATEGORY_HEAD_QC_VALUES; },
+    display: function(a) {
+      var v = a.contentLeadQc || 'Draft';
+      return '<span class="cat-head-status-badge st-' + v.replace(/ /g, '_') + '">' + v + '</span>';
+    },
+    value: function(a) { return a.contentLeadQc || 'Draft'; },
+    appMethod: 'setAssetContentLeadQc'
+  },
+  // Content Lead QC "Date Approved" — mirrors chDateApproved. Auto-stamped when
+  // contentLeadQc goes to 'Approved'; editable manually otherwise.
+  clQcDateApproved: {
+    kind: 'date',
+    display: function(a) { return '<span class="date-cell">' + (a.clQcDateApproved ? escapeHtml(formatDate(a.clQcDateApproved)) : '—') + '</span>'; },
+    value: function(a) { return toISODate(a.clQcDateApproved); },
+    appMethod: 'setAssetClQcDateApproved'
   }
 };
 
@@ -3574,7 +3601,9 @@ function getFilteredAssets() {
   if (STATE.editorFilter !== 'all') list = list.filter(function(a) { return a.editor === STATE.editorFilter; });
   if (STATE.qcFilter !== 'all') list = list.filter(function(a) { return (a.qc || 'Draft') === STATE.qcFilter; });
   if (STATE.dateApprovedFilter) list = list.filter(function(a) { return a.dateApproved === STATE.dateApprovedFilter; });
-  if (STATE.estDeliveryFilter) list = list.filter(function(a) { return a.estDelivery === STATE.estDeliveryFilter; });
+  // Organic campaigns have no estDelivery — skip the filter (the UI hides it too).
+  var _isOrganicCamp = (camp.type || DEFAULT_CAMPAIGN_TYPE) === 'Organic';
+  if (STATE.estDeliveryFilter && !_isOrganicCamp) list = list.filter(function(a) { return a.estDelivery === STATE.estDeliveryFilter; });
   return list.sort(function(a, b) { return a.pn - b.pn; });
 }
 
@@ -4874,6 +4903,7 @@ var TAB_DEFS = {
   log:              { label: 'Daily Log' },
   grading:          { label: 'Grading' },
   editingStyle:     { label: 'Editing Style' },
+  strategy:         { label: 'Strategy' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
@@ -4882,7 +4912,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -4895,15 +4925,15 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'lo
 // so only Zidni/Sharm/Patty (own view) or the viewer list (Elsa, peer picker)
 // actually see the tab in the nav. Viewers land here on first sign-in — a broad
 // read-mostly set that excludes internal-ops tabs and the Strava page.
-var ALL_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'notifications', 'automations', 'reporting', 'content', 'config'];
-var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'notifications', 'reporting', 'content'];
+var ALL_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
+var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'];
 // 'clips' is admin+editor only — intentionally NOT in ALL_TABS (so it doesn't
 // leak to catHead/contentLead, who otherwise mirror ALL_TABS). Added explicitly
 // to the editor and admin lists only.
 var ROLE_TAB_VISIBILITY = {
   viewer:      VIEWER_TABS.slice(),
-  editor:      ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
-  pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'notifications', 'reporting', 'content'],
+  editor:      ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
+  pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'],
   catHead:     ALL_TABS.slice(),
   contentLead: ALL_TABS.slice(),
   admin:       ALL_TABS.concat(['editorStats', 'clips'])
@@ -5474,10 +5504,15 @@ function renderCampaignsView() {
   // the field was piloted there; product ask is for editors to be able to paste
   // the post URL on any campaign's videos.
   var showIgLink = true;
-  var hideCHQC = ['IT', 'ES'].indexOf(camp.country) !== -1;
+  // Organic campaigns swap the review columns: CH QC (Category Head) is replaced by
+  // CL QC (Content Lead), and Est. Delivery is replaced by Date Assigned. The number
+  // of columns is unchanged — it's a like-for-like swap — but the fields differ.
+  var isOrganic = (camp.type || DEFAULT_CAMPAIGN_TYPE) === 'Organic';
+  var hideCHQC = ['IT', 'ES'].indexOf(camp.country) !== -1 || isOrganic;
   // Total column count for full-width rows (empty state, week-group headers). Mirrors the
-  // conditional columns in the <thead>/row markup below.
-  var colCount = 12 + (hideLinkCols ? 0 : 2) + (showSparksCode ? 1 : 0) + (showIgLink ? 1 : 0) + (hideCHQC ? 0 : 2);
+  // conditional columns in the <thead>/row markup below. Organic adds back 2 slots for
+  // CL QC + CL Date Approved (replacing the hidden CH QC + CH Date Approved).
+  var colCount = 12 + (hideLinkCols ? 0 : 2) + (showSparksCode ? 1 : 0) + (showIgLink ? 1 : 0) + (hideCHQC ? 0 : 2) + (isOrganic ? 2 : 0);
 
   // Build one <tr> for an asset. Extracted so it can be emitted either flat or under
   // weekly group headers.
@@ -5494,14 +5529,16 @@ function renderCampaignsView() {
         '<td>' + renderEditableCell(a, 'editor') + '</td>' +
         '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
         (showSparksCode ? '<td>' + renderEditableCell(a, 'sparksCode') + '</td>' : '') +
-        '<td>' + renderEditableCell(a, 'estDelivery') + '</td>' +
+        // Organic swaps Est. Delivery for Date Assigned (read-only display of assignedAt).
+        (isOrganic
+          ? '<td><span class="date-cell">' + (a.assignedAt ? escapeHtml(formatDate(a.assignedAt)) : '—') + '</span></td>'
+          : '<td>' + renderEditableCell(a, 'estDelivery') + '</td>') +
         '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
         '<td>' + renderEditableCell(a, 'qc') + '</td>' +
         '<td>' + renderStatusSelect(a) + '</td>' +
-        // IG Link sits immediately after CH Date Approved so the CH verdict/date
-        // and the resulting posted IG URL are visually adjacent when reviewing
-        // videos. On IT/ES the CHQC block is hidden, so IG Link falls through
-        // to just before Actions in the same slot.
+        // Review cells: Paid Ads = Category Head QC + CH Date Approved. Organic swaps
+        // both for Content Lead QC + CL QC Date Approved. IT/ES hide review cells
+        // entirely (they don't use category heads); Organic populates them with CL.
         (hideCHQC ? '' :
           '<td>' + (function() {
             var head = getCategoryHead(a.category);
@@ -5511,6 +5548,10 @@ function renderCampaignsView() {
             return '<div class="cat-head-cell">' + nameHtml + renderEditableCell(a, 'categoryHeadQc') + '</div>';
           })() + '</td>' +
           '<td>' + renderEditableCell(a, 'chDateApproved') + '</td>') +
+        (isOrganic
+          ? '<td>' + renderEditableCell(a, 'contentLeadQc') + '</td>' +
+            '<td>' + renderEditableCell(a, 'clQcDateApproved') + '</td>'
+          : '') +
         (showIgLink ? '<td class="link-cell">' + renderEditableCell(a, 'igLink') + '</td>' : '') +
         '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(\'' + a.id + '\')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(\'' + a.id + '\')" title="Duplicate this row">Dup</button><button class="action-btn" onclick="App.openAdReport(\'' + a.id + '\')" title="Open ad report in ForceStaff">Report</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(\'' + a.id + '\')" title="Delete this row">Del</button>' : '') + '</div></td>' +
       '</tr>';
@@ -5679,7 +5720,7 @@ function renderCampaignsView() {
       '</select>' +
       '<select class="filter-select" onchange="App.onEditorFilter(this.value)">' + editorFilterOpts + '</select>' +
       '<input type="date" class="filter-select" title="Filter by Date Approved" value="' + escapeHtml(STATE.dateApprovedFilter) + '" onchange="App.onDateApprovedFilter(this.value)" style="color:' + (STATE.dateApprovedFilter ? 'var(--text1)' : 'var(--text3)') + ';width:148px;">' +
-      '<input type="date" class="filter-select" title="Filter by Est. Delivery" value="' + escapeHtml(STATE.estDeliveryFilter) + '" onchange="App.onEstDeliveryFilter(this.value)" style="color:' + (STATE.estDeliveryFilter ? 'var(--text1)' : 'var(--text3)') + ';width:148px;">' +
+      (isOrganic ? '' : '<input type="date" class="filter-select" title="Filter by Est. Delivery" value="' + escapeHtml(STATE.estDeliveryFilter) + '" onchange="App.onEstDeliveryFilter(this.value)" style="color:' + (STATE.estDeliveryFilter ? 'var(--text1)' : 'var(--text3)') + ';width:148px;">') +
       '<span class="count-chip">' + filtered.length + ' / ' + totalForCamp + ' rows</span>' +
       ((STATE.search || STATE.statusFilter !== 'all' || STATE.editorFilter !== 'all' || STATE.qcFilter !== 'all' || STATE.dateApprovedFilter || STATE.estDeliveryFilter)
         ? '<button class="edit-btn" onclick="App.clearCampaignFilters()" title="Clear all filters">✕ Clear filters</button>'
@@ -5712,7 +5753,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Estimated Delivery</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (showIgLink ? '<th>IG Link</th>' : '') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>' + (isOrganic ? 'Date Assigned' : 'Estimated Delivery') + '</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -8500,6 +8541,69 @@ function renderEditingStyleView() {
       '<h1 style="margin:0 0 6px;font-size:22px;">Editing Style</h1>' +
       '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
         'Reference the shared Notion page below. Paste the published (notion.site) URL to change it — everyone sees the same page.' +
+      '</div>' +
+      inputRow +
+      iframeBlock +
+    '</div>';
+}
+
+// ── Strategy tab ─────────────────────────────────────────────────────────
+// Same shape as Editing Style: a shared Notion page URL that renders in an
+// iframe. Persisted as STATE.strategyNotionUrl so every teammate sees the
+// same page. Same isSafeEmbedUrl guard, same sandbox, same fallback link.
+function renderStrategyView() {
+  var rawUrl = STATE.strategyNotionUrl || '';
+  var url = isSafeEmbedUrl(rawUrl) ? rawUrl : '';
+  var canEdit = (typeof roleAtLeast === 'function') ? roleAtLeast('pm') : false;
+  var safeUrl = escapeHtml(url);
+  var safeRawUrl = escapeHtml(rawUrl);
+  var iframeBlock;
+  if (url) {
+    iframeBlock =
+      '<div style="margin-top:16px;border:1px solid var(--border2);border-radius:12px;overflow:hidden;background:var(--bg2);">' +
+        '<iframe src="' + safeUrl + '" ' +
+          'style="width:100%;height:calc(100vh - 260px);min-height:600px;border:0;display:block;background:#fff;" ' +
+          'referrerpolicy="no-referrer" ' +
+          'sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox">' +
+        '</iframe>' +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:12px;color:var(--text3);">' +
+        'Not loading? Notion only allows embedding pages published via <em>Share → Publish → Publish to web</em> (notion.site URLs). ' +
+        '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Open in new tab ↗</a>' +
+      '</div>';
+  } else {
+    var emptyMsg = rawUrl
+      ? 'Stored URL was rejected (only http:// or https:// links can be embedded). Paste a valid published Notion URL above.'
+      : 'Paste your published Notion strategy page URL above to embed it here.';
+    iframeBlock =
+      '<div style="margin-top:24px;padding:32px;border:1px dashed var(--border2);border-radius:12px;text-align:center;color:var(--text3);background:var(--bg2);">' +
+        escapeHtml(emptyMsg) +
+      '</div>';
+  }
+
+  var inputRow;
+  if (canEdit) {
+    inputRow =
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<input id="strategy-url-input" type="url" class="form-input" ' +
+          'placeholder="https://your-workspace.notion.site/..." ' +
+          'value="' + safeRawUrl + '" ' +
+          'style="flex:1 1 320px;min-width:280px;" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.setStrategyUrl(document.getElementById(\'strategy-url-input\').value)}">' +
+        '<button class="btn btn-primary" onclick="App.setStrategyUrl(document.getElementById(\'strategy-url-input\').value)">Save & Load</button>' +
+        (rawUrl ? '<button class="btn" onclick="App.setStrategyUrl(\'\')">Clear</button>' : '') +
+      '</div>';
+  } else {
+    inputRow = url
+      ? '<div style="font-size:13px;color:var(--text3);">Showing: <a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">' + safeUrl + '</a></div>'
+      : '<div style="font-size:13px;color:var(--text3);">No Notion page set yet. Ask an admin/PM to paste the URL.</div>';
+  }
+
+  return '' +
+    '<div style="padding:24px;max-width:1400px;margin:0 auto;">' +
+      '<h1 style="margin:0 0 6px;font-size:22px;">Strategy</h1>' +
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+        'Reference the shared Notion strategy page below. Paste the published (notion.site) URL to change it — everyone sees the same page.' +
       '</div>' +
       inputRow +
       iframeBlock +
@@ -14856,6 +14960,7 @@ function render() {
   else if (STATE.tab === 'log') body = renderDailyLogView();
   else if (STATE.tab === 'grading') body = renderGradingView();
   else if (STATE.tab === 'editingStyle') body = renderEditingStyleView();
+  else if (STATE.tab === 'strategy') body = renderStrategyView();
   else if (STATE.tab === 'editorStats') body = renderEditorStatsView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
@@ -14988,6 +15093,21 @@ var App = {
       return;
     }
     STATE.editingStyleNotionUrl = v;
+    saveState();
+    render();
+  },
+
+  // Strategy tab: same shape as setEditingStyleUrl — trimmed, http(s)-only,
+  // persisted to Firestore so every teammate sees the same page.
+  setStrategyUrl: function(url) {
+    var v = (url || '').trim();
+    if (v && !isSafeEmbedUrl(v)) {
+      if (typeof toast === 'function') {
+        toast('Only http:// or https:// URLs can be embedded', 'error');
+      }
+      return;
+    }
+    STATE.strategyNotionUrl = v;
     saveState();
     render();
   },
@@ -16846,6 +16966,32 @@ var App = {
     render();
   },
 
+  // Content Lead QC \u2014 same shape as setAssetCategoryHeadQc. On Approved auto-stamps
+  // clQcDateApproved; on other verdicts clears it. Notification wiring not added
+  // here (item #8 CL Review tab will drive verdict flow); this is just field IO.
+  setAssetContentLeadQc: function(id, newVal) {
+    var a = findAssetById(id);
+    if (!a) return;
+    if (CATEGORY_HEAD_QC_VALUES.indexOf(newVal) < 0) { render(); return; }
+    var old = a.contentLeadQc || 'Draft';
+    if (old === newVal) { render(); return; }
+    a.contentLeadQc = newVal;
+    if (newVal === 'Approved') a.clQcDateApproved = todayLocalISO();
+    else if (old === 'Approved') a.clQcDateApproved = '';
+    logAction('updated', 'Asset "' + a.name + '" content-lead QC: ' + old + ' \u2192 ' + newVal);
+    render();
+  },
+
+  setAssetClQcDateApproved: function(id, newDate) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var iso = toISODate(newDate);
+    if (a.clQcDateApproved === iso) { render(); return; }
+    a.clQcDateApproved = iso;
+    logAction('updated', 'Asset "' + a.name + '" CL QC date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    render();
+  },
+
   // URL setters share the same shape: trim, no-op if unchanged, accept empty (clears the
   // link). Non-empty values must pass extractSingleUrl() \u2014 catches typos like "index"
   // that would otherwise end up in Slack messages as broken markdown. On rejection, the
@@ -17430,12 +17576,33 @@ var App = {
   // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
   // hash (#campaign=N) so it doesn't collide with Firebase auth's query-string redirects.
   // Boot logic in attachAuthListener parses this and selects the campaign on load.
+  //
+  // Robustness: navigator.clipboard.writeText is tried first; on failure the fallback
+  // shows the URL in an alert so the user can copy manually. Logs the URL to the
+  // console so it can always be retrieved even if both paths silently fail.
   copyCampaignLink: function(campaignId) {
     var camp = findCampaignById(campaignId);
-    if (!camp) return;
+    if (!camp) { if (typeof toast === 'function') toast('Campaign not found', 'error'); return; }
     var base = location.origin + location.pathname;
-    var url = base + '#campaign=' + campaignId;
-    copyToClipboard(url, 'Link copied');
+    var url = base + '#campaign=' + encodeURIComponent(campaignId);
+    console.log('[copyCampaignLink]', url);
+
+    function onFailure() {
+      // Last-ditch: prompt() puts the URL in front of the user so they can copy it
+      // even when both navigator.clipboard and execCommand refused (private mode,
+      // insecure origin, permission denied).
+      try { window.prompt('Copy this link:', url); } catch (_) {}
+      if (typeof toast === 'function') toast('Copy failed — link shown in prompt', 'error');
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function() {
+        if (typeof toast === 'function') toast('Link copied: ' + camp.name, 'success');
+      }).catch(onFailure);
+    } else {
+      // No modern clipboard API — try the legacy path via copyToClipboard's fallback.
+      copyToClipboard(url, 'Link copied: ' + camp.name);
+    }
     // Close the menu after action
     var menu = document.getElementById('camp-actions-menu');
     if (menu) menu.style.display = 'none';
@@ -19293,33 +19460,43 @@ bootApp = function() {
       }
       var match = (location.hash || '').match(/^#campaign=([^&]+)(?:&asset=([^&]+))?/);
       if (match) {
-        var targetId = match[1];
-        var targetAssetId = match[2] || null;
-        var targetCamp = findCampaignById(targetId);
-        if (targetCamp) {
-          STATE.activeSubCampaignId = targetCamp.id;
-          STATE.expandedCountries[targetCamp.country] = true;
-          STATE.tab = 'campaigns';
-          if (typeof saveState === 'function') saveState();
-          render();
-          setTimeout(function() {
-            if (targetAssetId) {
-              var row = document.querySelector('tr[data-asset-id="' + targetAssetId + '"]');
-              if (row) {
-                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                row.classList.add('row-highlight-flash');
-                setTimeout(function() { row.classList.remove('row-highlight-flash'); }, 2500);
+        var targetId = decodeURIComponent(match[1]);
+        var targetAssetId = match[2] ? decodeURIComponent(match[2]) : null;
+        console.log('[deep-link] resolving #campaign=' + targetId + (targetAssetId ? '&asset=' + targetAssetId : ''));
+        // Retry across a few frames — the first snapshot filter may fire before
+        // STATE.campaigns is populated (assets subcollection loads separately).
+        // Give it ~5 tries at 200ms intervals before surfacing "not found".
+        var _resolveAttempts = 0;
+        function _tryResolveDeepLink() {
+          var targetCamp = findCampaignById(targetId);
+          if (targetCamp) {
+            STATE.activeSubCampaignId = targetCamp.id;
+            STATE.expandedCountries[targetCamp.country] = true;
+            STATE.tab = 'campaigns';
+            if (typeof saveState === 'function') saveState();
+            render();
+            setTimeout(function() {
+              if (targetAssetId) {
+                var row = document.querySelector('tr[data-asset-id="' + targetAssetId + '"]');
+                if (row) {
+                  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  row.classList.add('row-highlight-flash');
+                  setTimeout(function() { row.classList.remove('row-highlight-flash'); }, 2500);
+                }
               }
               if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
-            } else {
-              if (typeof toast === 'function') toast('Opened from link: ' + targetCamp.name, 'success');
-            }
-          }, 400);
-        } else {
-          setTimeout(function() {
+            }, 400);
+            return;
+          }
+          _resolveAttempts++;
+          if (_resolveAttempts < 5) {
+            setTimeout(_tryResolveDeepLink, 200);
+          } else {
+            console.warn('[deep-link] campaign not found after ' + _resolveAttempts + ' attempts: ' + targetId);
             if (typeof toast === 'function') toast('Linked campaign not found (id ' + targetId + ')', 'error');
-          }, 400);
+          }
         }
+        _tryResolveDeepLink();
       }
     }
     if (hadData) {
