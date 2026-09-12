@@ -1169,11 +1169,12 @@ exports.getLinearTasks = onCall(
   async (request) => {
     requireTiltUser(request);
 
-    const email = (request.data && request.data.email)
-      || (request.auth && request.auth.token && request.auth.token.email)
-      || '';
+    // SECURITY: default to the caller's own email. An arbitrary `data.email`
+    // would let any signed-in @tilt.app user enumerate someone else's assigned
+    // Linear issues; only trust the auth token here.
+    const email = (request.auth && request.auth.token && request.auth.token.email) || '';
     if (!email) {
-      throw new HttpsError('invalid-argument', 'email required');
+      throw new HttpsError('invalid-argument', 'auth email required');
     }
 
     const token = LINEAR_API_KEY.value();
@@ -1390,10 +1391,25 @@ exports.biWeeklyKpiScheduled = onSchedule(
 );
 
 // Manual trigger for testing — call from an admin browser console.
+// SECURITY: admin-only. Without this guard any signed-in @tilt.app user could
+// spam every editor's Slack DM by calling this callable from the console.
 exports.runBiWeeklyKpiNow = onCall(
   { secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 540 },
   async (request) => {
     requireTiltUser(request);
+    const email = (request.auth && request.auth.token && request.auth.token.email) || '';
+    // Cross-check the caller is an admin against the users doc. If the users
+    // doc isn't reachable, refuse rather than fall open.
+    try {
+      const userDoc = await db.collection('users').doc(email).get();
+      const role = userDoc.exists ? (userDoc.data().role || '') : '';
+      if (role !== 'admin') {
+        throw new HttpsError('permission-denied', 'admin role required to trigger bi-weekly KPI manually');
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('permission-denied', 'unable to verify admin role');
+    }
     return await biWeeklyKpiCore();
   }
 );

@@ -11999,11 +11999,14 @@ function contentLeadReviewCount() {
 
 function renderContentLeadReviewView() {
   var pending = contentLeadReviewAssets();
-  // Sort: For Review first (waiting on CL), then Needs Revisions, then Draft
+  // Sort: For Review first (waiting on CL), then Needs Revisions, then Draft.
+  // Use !== undefined instead of || to preserve the 0 bucket ('For Review').
   var order = { 'For Review': 0, 'Needs Revisions': 1, 'Draft': 2, '': 3 };
   pending.sort(function(a, b) {
-    var ao = order[a.contentLeadQc || ''] || 3;
-    var bo = order[b.contentLeadQc || ''] || 3;
+    var av = a.contentLeadQc || '';
+    var bv = b.contentLeadQc || '';
+    var ao = (order[av] !== undefined) ? order[av] : 3;
+    var bo = (order[bv] !== undefined) ? order[bv] : 3;
     if (ao !== bo) return ao - bo;
     return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
   });
@@ -12017,8 +12020,12 @@ function renderContentLeadReviewView() {
     var briefLink = a.editingBrief
       ? ' · <a href="' + escapeHtml(a.editingBrief) + '" target="_blank" rel="noopener" style="color:var(--accent);">Brief ↗</a>'
       : '';
+    // Escape single quotes in the raw IDs before interpolating into the inline
+    // onclick — matches the pattern used elsewhere for asset/campaign IDs.
+    var _campIdJs = String(a.campaignId).replace(/'/g, "\\'");
+    var _aIdJs = String(a.id).replace(/'/g, "\\'");
     var trackerLink = ' · <a href="#campaign=' + encodeURIComponent(a.campaignId) + '&asset=' + encodeURIComponent(a.id) +
-      '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + a.campaignId + '\', \'' + a.id + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
+      '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + _campIdJs + '\', \'' + _aIdJs + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
     var qcPill = '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '">' + qc + '</span>';
     return '<div class="auto-card" style="margin-bottom:12px;">' +
       '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
@@ -12248,6 +12255,12 @@ function renderLinearTasksPanel() {
   var loading = STATE._linearTasksLoading;
   var err = STATE._linearTasksError;
   var lastFetched = STATE._linearTasksAt;
+  // Auto-fetch on first render so the widget isn't perpetually "Not fetched yet".
+  // Deferred so we don't call render() from inside another render().
+  if (!tasks && !loading && !err && !STATE._linearTasksAutoFired) {
+    STATE._linearTasksAutoFired = true;
+    setTimeout(function() { if (App && typeof App.fetchLinearTasks === 'function') App.fetchLinearTasks(false); }, 50);
+  }
 
   var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
     '<div style="font-size:13px;font-weight:600;color:var(--text1);">Linear · My open tasks</div>' +
@@ -12352,7 +12365,7 @@ function renderEditorHomeView() {
   if (mine.length === 0) {
     body = '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">' +
       '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">No videos assigned to you right now.</div>' +
-      '<div style="font-size:12.5px;">Great chance to work on a Training module — check the Training tab (once it lands).</div>' +
+      '<div style="font-size:12.5px;">Head to the <strong>Training</strong> tab to practise a module while you\'re quiet.</div>' +
     '</div>';
   } else {
     body = mine.map(renderVideoRow).join('');
@@ -17413,8 +17426,8 @@ var App = {
   },
 
   // Content Lead QC \u2014 same shape as setAssetCategoryHeadQc. On Approved auto-stamps
-  // clQcDateApproved; on other verdicts clears it. Notification wiring not added
-  // here (item #8 CL Review tab will drive verdict flow); this is just field IO.
+  // clQcDateApproved; on other verdicts clears it. Mirrors the CH revisionRounds
+  // bump so CL kickbacks count toward the same first-pass math as CH kickbacks.
   setAssetContentLeadQc: function(id, newVal) {
     var a = findAssetById(id);
     if (!a) return;
@@ -17422,6 +17435,10 @@ var App = {
     var old = a.contentLeadQc || 'Draft';
     if (old === newVal) { render(); return; }
     a.contentLeadQc = newVal;
+    // Parity with setAssetCategoryHeadQc \u2014 a rework counts as a revision round.
+    if (newVal === 'Needs Revisions' && old !== 'Needs Revisions') {
+      a.revisionRounds = (a.revisionRounds || 0) + 1;
+    }
     if (newVal === 'Approved') a.clQcDateApproved = todayLocalISO();
     else if (old === 'Approved') a.clQcDateApproved = '';
     logAction('updated', 'Asset "' + a.name + '" content-lead QC: ' + old + ' \u2192 ' + newVal);
