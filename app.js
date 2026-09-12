@@ -396,8 +396,6 @@ var Fb = {
       categoryHeadOverrides: STATE.categoryHeadOverrides,
       pmSlackIds: STATE.pmSlackIds,
       slackBotToken: STATE.slackBotToken,
-      metaAccessToken: STATE.metaAccessToken,
-      metaAdAccountIds: STATE.metaAdAccountIds,
       dailyThreads: STATE.dailyThreads,
       dailyThreadHistory: STATE.dailyThreadHistory,
       catHeadDailyThreads: STATE.catHeadDailyThreads,
@@ -611,7 +609,6 @@ var Fb = {
       var _localPendingBatches = (STATE.pendingBatches && typeof STATE.pendingBatches === 'object') ? STATE.pendingBatches : {};
       var _localQcDismissed = (STATE.qcDismissed && typeof STATE.qcDismissed === 'object') ? STATE.qcDismissed : {};
       var _localGradingStreak = (STATE.gradingStreak && typeof STATE.gradingStreak === 'object') ? STATE.gradingStreak : { last: null, count: 0, best: 0 };
-      var _localMetaIds = Array.isArray(STATE.metaAdAccountIds) ? STATE.metaAdAccountIds.slice() : [];
       // Config-map fields — string-valued maps keyed by editor/country/category. A stale
       // teammate's routine save uploads the WHOLE map from their in-memory STATE; if
       // they hadn't yet received your Slack-channel or webhook update, their empty
@@ -660,8 +657,8 @@ var Fb = {
         // stale tab's blank slot could otherwise wipe. Merged slot-by-slot below.
         if (k === 'editorSlackChannels' || k === 'editorSlackIds' || k === 'categoryHeadSlackIds' ||
             k === 'pmSlackIds' || k === 'categoryHeadOverrides' || k === 'qcWebhooks' || k === 'countryWebhooks') return;
-        // Notification queue / dismiss ledger / streak / meta ad ids — all bespoke merges below.
-        if (k === 'pendingBatches' || k === 'qcDismissed' || k === 'gradingStreak' || k === 'metaAdAccountIds') return;
+        // Notification queue / dismiss ledger / streak — all bespoke merges below.
+        if (k === 'pendingBatches' || k === 'qcDismissed' || k === 'gradingStreak') return;
         // Campaign delete tombstones — merged (union, newest ts wins) below.
         if (k === 'deletedCampaignIds') return;
 
@@ -850,19 +847,6 @@ var Fb = {
         STATE[name] = mergeStringMap(_localConfigMaps[name], data[name]);
       });
 
-      // metaAdAccountIds: fixed 4-slot array of ids. Per-slot merge — local non-empty
-      // wins over incoming empty. Otherwise incoming.
-      STATE.metaAdAccountIds = (function() {
-        var out = ['', '', '', ''];
-        var inc = Array.isArray(data.metaAdAccountIds) ? data.metaAdAccountIds : [];
-        for (var s = 0; s < 4; s++) {
-          var incV = inc[s] || '';
-          var locV = _localMetaIds[s] || '';
-          out[s] = (!incV && locV) ? locV : incV;
-        }
-        return out;
-      })();
-
       // qcDismissed: {assetId: true} boolean map from Cat Heads Review. Union so a
       // stale save can't undo a dismissal another tab just made. If a value was
       // intentionally UNDISMISSED, that key isn't set (it's deleted from the map),
@@ -1043,20 +1027,6 @@ var Fb = {
       if (Array.isArray(data.assets) && data.assets.length > 0 && !Fb._assetsMigrated) {
         STATE.assets = data.assets;
         setTimeout(function() { Fb.migrateAssetsToSubcollection(); }, 200);
-      }
-      // Migrate old single metaAdAccountId → metaAdAccountIds[0]
-      var _needsMetaMigration = false;
-      if (data.metaAdAccountId && (!STATE.metaAdAccountIds || !STATE.metaAdAccountIds.some(function(id) { return id; }))) {
-        STATE.metaAdAccountIds = [data.metaAdAccountId, '', '', ''];
-        _needsMetaMigration = true;
-      }
-      if (!Array.isArray(STATE.metaAdAccountIds) || STATE.metaAdAccountIds.length !== 4) {
-        var existing = Array.isArray(STATE.metaAdAccountIds) ? STATE.metaAdAccountIds : [];
-        STATE.metaAdAccountIds = [existing[0] || '', existing[1] || '', existing[2] || '', existing[3] || ''];
-        _needsMetaMigration = true;
-      }
-      if (_needsMetaMigration) {
-        setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
       }
       // Backfill categories missing the color sub-object (created before this field existed).
       var backfillColors = function(list) {
@@ -2215,8 +2185,6 @@ var STATE = {
   // to a daily editor thread. Webhook fallback is still used when this is blank
   // or when an editor has no daily thread set for today.
   slackBotToken: '',
-  metaAccessToken: '',
-  metaAdAccountIds: ['', '', '', ''],
   // One daily Slack thread per editor (Zidni/Sharm/Patty/Elsa). Each entry: { date,
   // url, channelId, threadTs }. Cleared at midnight rollover. Notifications
   // routed to that editor land in the thread when set; otherwise webhook.
@@ -5517,7 +5485,7 @@ function renderCampaignsView() {
     return '<tr data-asset-id="' + a.id + '" draggable="true" ondragstart="App.videoDragStart(event,\'' + a.id + '\')" ondragover="App.videoDragOver(event)" ondrop="App.videoDrop(event,\'' + a.id + '\')" ondragend="App.videoDragEnd(event)">' +
         '<td style="width:28px;padding:0 6px;cursor:grab"><span class="drag-handle" title="Drag to reorder">⠿</span></td>' +
         '<td><span class="pn" title="Video #' + a.pn + ' within this campaign">' + (pnOffset + a.pn) + '</span></td>' +
-        '<td><div class="video-name-cell">' + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + '</div></td>' +
+        '<td><div class="video-name-cell">' + (a.igLink ? '<span class="posted-dot" title="Posted (has IG link)"></span>' : '') + renderEditableCell(a, 'name') + renderEditableCell(a, 'version') + '</div></td>' +
         '<td>' + renderEditableCell(a, 'category') + '</td>' +
         '<td>' + renderEditableCell(a, 'difficulty') + '</td>' +
         (hideLinkCols ? '' :
@@ -9805,42 +9773,6 @@ function renderAutomationsView() {
     renderIntlDailyThreadCard() +
     renderOrganicDailyThreadCard() +
     renderCatHeadThreadCard() +
-
-    (function() {
-      // Access token is server-side in the fetchMetaAds / fetchMetaActivities
-      // Cloud Functions now. Only the ad-account IDs live in the browser (they
-      // aren't secrets — you can already see them in Ads Manager URLs).
-      var ids = STATE.metaAdAccountIds || ['', '', '', ''];
-      var anyIdSet = ids.some(function(id) { return (id || '').trim(); });
-      var accountInputs = [0, 1, 2, 3].map(function(i) {
-        var val = (ids[i] || '').trim();
-        var dot = val ? 'ok' : '';
-        return '<div style="display:flex;align-items:center;gap:6px;">' +
-          '<span style="font-size:11px;color:var(--text3);font-family:\'JetBrains Mono\',monospace;width:14px;flex-shrink:0;">' + (i + 1) + '</span>' +
-          '<span class="cwh-dot ' + dot + '" title="' + (val ? 'act_' + escapeHtml(val) : 'empty') + '"></span>' +
-          '<input type="text" id="meta-account-input-' + i + '" class="form-input" style="font-family:monospace;font-size:12px;" placeholder="123456789 or act_123456789" value="' + escapeHtml(val) + '">' +
-        '</div>';
-      }).join('');
-      return '<div class="auto-card">' +
-        '<div class="auto-header"><div class="auto-icon">📡</div><div><div class="auto-title">Meta Ads — Gone Live Sync</div><div class="auto-sub">matches video filenames to Meta ad creatives → stamps gone-live date</div></div></div>' +
-        '<div class="auto-desc">Fetches all active campaigns across up to 4 ad accounts. When a video name in this tracker matches a creative in an <strong style="color:var(--text1);">ACTIVE</strong> campaign, the campaign\'s <strong style="color:var(--text1);">Gone Live</strong> date is automatically set to that campaign\'s start date in Meta. Only campaigns without a gone-live date are updated.</div>' +
-        '<div style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">' +
-          '<div style="padding:10px 12px;background:var(--bg3);border-radius:6px;font-size:11.5px;color:var(--text2);line-height:1.55;">' +
-            '<strong style="color:var(--text1);">Access token</strong> now lives in Cloud Functions (server-side). To rotate it, run in your terminal: ' +
-            '<pre style="margin:6px 0 0;padding:8px 10px;background:var(--bg2);border-radius:5px;font-size:11px;overflow-x:auto;">firebase functions:secrets:set META_ACCESS_TOKEN\nfirebase deploy --only functions</pre>' +
-          '</div>' +
-          '<div>' +
-            '<div style="font-size:12px;font-weight:600;color:var(--text1);margin-bottom:6px;">Ad Account IDs <span style="color:var(--text3);font-weight:400;">(up to 4)</span></div>' +
-            '<div style="display:flex;flex-direction:column;gap:6px;">' + accountInputs + '</div>' +
-            '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Find each ID in <strong>Ads Manager</strong> — the number after <code>act=</code> in the URL.</div>' +
-          '</div>' +
-          '<div style="display:flex;gap:8px;">' +
-            '<button class="save-btn" onclick="App.saveMetaSettings()">Save</button>' +
-            '<button id="meta-sync-btn" class="run-btn" ' + (anyIdSet ? '' : 'disabled style="opacity:0.4;cursor:not-allowed;"') + ' onclick="App.syncMetaLiveDates()">↻ Sync from Meta</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-    })() +
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">01</div><div><div class="auto-title">Auto-reorder Campaigns by Rank</div><div class="auto-sub">trigger: Campaigns.Rank field updated</div></div></div>' +
@@ -17695,8 +17627,6 @@ var App = {
     copyToClipboard(msg, 'Slack message copied');
   },
 
-  // --- Version history panel (Google-Sheets-style) ---
-  // Opens the full-width 2-column version-history modal for an asset. Timeline
   // --- Daily tally actions ---
   // Fire tallies for every country now (manual). Same path as the midnight auto-fire
   // but does not update the TALLY_STORAGE_KEY flag \u2014 a manual send shouldn't suppress
@@ -18136,224 +18066,6 @@ var App = {
     logAction('updated', 'Slack bot token ' + (trimmed === '' ? 'cleared' : 'updated'));
     toast(trimmed === '' ? 'Bot token cleared' : '✓ Bot token saved', 'success');
     render();
-  },
-
-  saveMetaSettings: function() {
-    // Only ad-account IDs are saved from the UI now \u2014 the access token is
-    // stored server-side as a Cloud Function secret (see the info block in
-    // the Meta Ads section).
-    var ids = [0, 1, 2, 3].map(function(i) {
-      var el = document.getElementById('meta-account-input-' + i);
-      return (el ? el.value : '').trim().replace(/^act_/i, '');
-    });
-    if (JSON.stringify(STATE.metaAdAccountIds) === JSON.stringify(ids)) {
-      toast('Meta settings unchanged', '');
-      return;
-    }
-    STATE.metaAdAccountIds = ids;
-    saveState();
-    logAction('updated', 'Meta ad account IDs updated');
-    toast('\u2713 Meta settings saved', 'success');
-    render();
-  },
-
-  syncMetaLiveDates: function() {
-    // Meta access token now lives in the fetchMetaAds / fetchMetaActivities Cloud
-    // Functions — the client only knows WHICH accounts to fetch, never the token.
-    var accountIds = (STATE.metaAdAccountIds || []).map(function(id) {
-      return (id || '').trim().replace(/^act_/i, '');
-    }).filter(function(id) {
-      return id && /^\d+$/.test(id);
-    });
-    if (!accountIds.length) {
-      toast('No valid ad account IDs — IDs must be numeric (e.g. 25954726310862949)', 'error');
-      return;
-    }
-
-    var btn = document.getElementById('meta-sync-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Syncing\u2026'; }
-
-    function resetBtn() {
-      var b = document.getElementById('meta-sync-btn');
-      if (b) { b.disabled = false; b.textContent = '\u21bb Sync from Meta'; }
-    }
-
-    // Build a set of video names from tracker assets (lowercased, no extension) for matching
-    var assetNames = {};
-    STATE.assets.forEach(function(a) {
-      var key = (a.name || '').toLowerCase().replace(/\.[^.]+$/, '').trim();
-      if (key) assetNames[key] = a;
-    });
-
-    // Normalise a name into a comparable key: lowercase, strip extension, collapse separators to spaces
-    function normName(s) {
-      return (s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
-    }
-
-    // Split a normalised name into tokens, filtering out noise words and short fragments
-    var NOISE = { v1:1, v2:1, v3:1, v4:1, final:1, edit:1, cut:1, '15s':1, '30s':1, '60s':1, '9x16':1, '16x9':1, '1x1':1 };
-    function tokens(norm) {
-      return norm.split(' ').filter(function(t) { return t.length > 1 && !NOISE[t]; });
-    }
-
-    // Returns the tracker asset matched to a Meta ad name, using a 3-tier fallback:
-    // 1. Exact key match  2. Substring (one contains the other)  3. Token overlap ≥ 80%
-    function findAssetByName(rawName) {
-      var norm = normName(rawName);
-      if (!norm) return null;
-      // Tier 1: exact
-      if (assetNames[norm]) return assetNames[norm];
-      // Tier 2 & 3: scan all tracker assets
-      var bestAsset = null, bestScore = 0;
-      var metaToks = tokens(norm);
-      Object.keys(assetNames).forEach(function(assetKey) {
-        var assetNorm = normName(assetKey);
-        // Tier 2: substring
-        if (norm.indexOf(assetNorm) !== -1 || assetNorm.indexOf(norm) !== -1) {
-          // Prefer longer (more specific) substring matches
-          if (assetNorm.length > bestScore) { bestScore = assetNorm.length; bestAsset = assetNames[assetKey]; }
-          return;
-        }
-        // Tier 3: token overlap — skip if we already have a substring match
-        if (bestScore > 0) return;
-        var assetToks = tokens(assetNorm);
-        if (!assetToks.length || !metaToks.length) return;
-        var shorter = assetToks.length <= metaToks.length ? assetToks : metaToks;
-        var longer  = assetToks.length <= metaToks.length ? metaToks  : assetToks;
-        var longerSet = {};
-        longer.forEach(function(t) { longerSet[t] = 1; });
-        var matches = shorter.filter(function(t) { return longerSet[t]; }).length;
-        var score = matches / shorter.length;
-        if (score >= 0.8 && score > bestScore) { bestScore = score; bestAsset = assetNames[assetKey]; }
-      });
-      return bestAsset;
-    }
-
-    var totalUpdated = 0;
-    var errors = [];
-    var unmatchedMeta = [];
-
-    var KILLED_STATUSES = ['PAUSED', 'DELETED', 'ARCHIVED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED'];
-
-    // Fetch ads across all accounts via Cloud Function (fetchMetaAds).
-    // Server holds the token, paginates each account, returns the flat list.
-    var _fetchAds = firebase.functions().httpsCallable('fetchMetaAds');
-    _fetchAds({ accountIds: accountIds })
-      .then(function(res) {
-        var allAds  = (res && res.data && res.data.ads)    || [];
-        var fnErrs  = (res && res.data && res.data.errors) || [];
-        fnErrs.forEach(function(e) { errors.push(e); });
-
-        // Pass 1: match ads → tracker campaigns, set goneLive, collect killed campaigns
-        // that need an accurate killedDate from the activities endpoint
-        var killedNeedingDate = {}; // metaCampaignId → tracker camp
-
-        allAds.forEach(function(ad) {
-          if (!ad.campaign) return;
-          var campStatus = ad.campaign.effective_status || ad.campaign.status || '';
-          var isActive = campStatus === 'ACTIVE';
-          var isKilled = KILLED_STATUSES.indexOf(campStatus) !== -1;
-          if (!isActive && !isKilled) return;
-
-          var startDate = ad.campaign.start_time ? ad.campaign.start_time.slice(0, 10) : null;
-          var stopDate  = ad.campaign.stop_time  ? ad.campaign.stop_time.slice(0, 10)  : null;
-
-          var candidateNames = [
-            (ad.creative && ad.creative.name)  || '',
-            (ad.creative && ad.creative.title) || '',
-            ad.name || ''
-          ];
-
-          // Find the first candidate name that matches a tracker campaign (exact → substring → token overlap)
-          var camp = null;
-          candidateNames.forEach(function(rawName) {
-            if (camp) return;
-            var asset = findAssetByName(rawName);
-            if (!asset) return;
-            camp = STATE.campaigns.find(function(c) {
-              return String(c.id) === String(asset.campaignId);
-            }) || null;
-          });
-          if (!camp) {
-            unmatchedMeta.push({
-              adName: ad.name || '',
-              creativeName: (ad.creative && ad.creative.name) || '',
-              creativeTitle: (ad.creative && ad.creative.title) || '',
-              campaignName: ad.campaign.name || '',
-              status: campStatus
-            });
-            return;
-          }
-
-          // Set goneLive once per tracker campaign
-          if (!camp.goneLive && startDate) { camp.goneLive = startDate; totalUpdated++; }
-
-          // Set killedDate — use stop_time if available, otherwise queue for activities lookup
-          if (isKilled && !camp.killedDate) {
-            if (stopDate) { camp.killedDate = stopDate; totalUpdated++; }
-            else if (!killedNeedingDate[ad.campaign.id]) {
-              killedNeedingDate[ad.campaign.id] = camp;
-            }
-          }
-        });
-
-        // Pass 2: fetch activities for killed campaigns with no stop_time via
-        // Cloud Function (fetchMetaActivities). Server handles the Batch API +
-        // pagination; we merge the events map back into local `killedNeedingDate`.
-        var killedIds = Object.keys(killedNeedingDate);
-        var PAUSE_EVENTS = ['UPDATE_CAMPAIGN_RUN_STATUS', 'CAMPAIGN_PAUSED', 'UPDATE_AD_RUN_STATUS'];
-
-        function fetchActivitiesBatch(ids) {
-          if (!ids.length) return Promise.resolve();
-          var _fetchAct = firebase.functions().httpsCallable('fetchMetaActivities');
-          return _fetchAct({ campaignIds: ids }).then(function(actRes) {
-            var actMap  = (actRes && actRes.data && actRes.data.activities) || {};
-            var actErrs = (actRes && actRes.data && actRes.data.errors)     || [];
-            actErrs.forEach(function(e) { errors.push(e); });
-            Object.keys(actMap).forEach(function(campId) {
-              var events = actMap[campId] || [];
-              var killEvent = null;
-              events.forEach(function(ev) {
-                if (PAUSE_EVENTS.indexOf(ev.event_type) === -1) return;
-                if (!killEvent || new Date(ev.event_time) > new Date(killEvent.event_time)) killEvent = ev;
-              });
-              if (killEvent) {
-                var matchedCamp = killedNeedingDate[campId];
-                if (matchedCamp && !matchedCamp.killedDate) {
-                  matchedCamp.killedDate = killEvent.event_time.slice(0, 10);
-                  totalUpdated++;
-                }
-              }
-            });
-          }).catch(function(err) {
-            errors.push('Activities: ' + ((err && (err.message || err.code)) || 'unknown'));
-          });
-        }
-
-        fetchActivitiesBatch(killedIds).then(function() {
-          // Show any errors that accumulated across both passes
-          if (errors.length) toast('Some requests failed: ' + errors.join('; '), 'error');
-          if (totalUpdated > 0) {
-            saveState();
-            logAction('updated', 'Meta sync: ' + totalUpdated + ' campaign(s) updated (live + killed dates)');
-            toast('\u2713 Synced \u2014 ' + totalUpdated + ' campaign' + (totalUpdated === 1 ? '' : 's') + ' updated', 'success');
-            render();
-          } else if (!errors.length) {
-            toast('Sync complete \u2014 no new matches found', '');
-          }
-          if (unmatchedMeta.length) {
-            console.group('%c[Meta Sync] ' + unmatchedMeta.length + ' unmatched ads \u2014 open to see names', 'color:#f59e0b;font-weight:bold');
-            console.log('Tracker asset names (first 20):', Object.keys(assetNames).slice(0, 20));
-            console.table(unmatchedMeta.slice(0, 50));
-            console.groupEnd();
-          }
-          resetBtn();
-        });
-      })
-      .catch(function(err) {
-        toast('Sync failed: ' + err.message, 'error');
-        resetBtn();
-      });
   },
 
   // Category-head webhook \u2014 single URL for ALL category-head batches. Save and test

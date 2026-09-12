@@ -9,12 +9,6 @@
 //   firebase functions:secrets:set SLACK_BOT_TOKEN
 //
 // Auth: every function verifies the caller is a signed-in @tilt.app user.
-//
-// META NOTE: the Meta sync functions (fetchMetaAds / fetchMetaActivities)
-// are intentionally NOT included yet — Meta sync isn't in use. To add them,
-// set the secret (firebase functions:secrets:set META_ACCESS_TOKEN) and
-// paste back the two `onCall` blocks from this session (they call the Meta
-// Graph API server-side, same auth gate as below), then redeploy.
 // =====================================================================
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
