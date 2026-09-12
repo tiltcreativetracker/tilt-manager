@@ -1154,3 +1154,246 @@ exports.generateCaptionsForAsset = onCall(
     };
   }
 );
+
+
+// ── Linear: fetch the caller's open assigned issues ────────────────────
+// Roadmap item #10. Client calls this to render a small "my Linear tasks"
+// widget on the CL dashboard. Read-only: returns { issues: [{id, identifier,
+// title, url, state, dueDate, priority}] }. The Linear API key is server-side
+// (LINEAR_API_KEY secret); caller identifies themselves by their tilt.app
+// email. If the Linear API returns nothing for that email, the widget shows
+// an empty state — set the mapping in Linear or extend this to accept an
+// override email.
+exports.getLinearTasks = onCall(
+  { secrets: [LINEAR_API_KEY], region: 'us-central1', timeoutSeconds: 30 },
+  async (request) => {
+    requireTiltUser(request);
+
+    const email = (request.data && request.data.email)
+      || (request.auth && request.auth.token && request.auth.token.email)
+      || '';
+    if (!email) {
+      throw new HttpsError('invalid-argument', 'email required');
+    }
+
+    const token = LINEAR_API_KEY.value();
+    if (!token) {
+      // Secret not set — surface a friendly empty response rather than 500.
+      return { ok: false, issues: [], error: 'LINEAR_API_KEY secret not set on functions' };
+    }
+
+    // Linear GraphQL: find the user by email, then their non-completed assigned issues.
+    // States with type != 'completed' and != 'canceled' are treated as "open".
+    const gql = `
+      query MyOpenIssues($email: String!) {
+        users(filter: { email: { eq: $email } }, first: 1) {
+          nodes {
+            id
+            assignedIssues(
+              filter: { state: { type: { nin: ["completed", "canceled"] } } },
+              first: 25,
+              orderBy: updatedAt
+            ) {
+              nodes {
+                id
+                identifier
+                title
+                url
+                priority
+                dueDate
+                state { name type }
+              }
+            }
+          }
+        }
+      }
+    `;
+    const res = await fetch('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token,
+      },
+      body: JSON.stringify({ query: gql, variables: { email } }),
+    });
+    const json = await res.json();
+    if (json.errors) {
+      console.warn('[getLinearTasks] linear errors', JSON.stringify(json.errors));
+      return { ok: false, issues: [], error: (json.errors[0] && json.errors[0].message) || 'Linear error' };
+    }
+    const user = (json.data && json.data.users && json.data.users.nodes[0]) || null;
+    if (!user) {
+      return { ok: true, issues: [], warning: 'No Linear user found for ' + email };
+    }
+    const issues = ((user.assignedIssues && user.assignedIssues.nodes) || []).map(function (i) {
+      return {
+        id: i.id,
+        identifier: i.identifier,
+        title: i.title,
+        url: i.url,
+        priority: i.priority,
+        dueDate: i.dueDate,
+        state: i.state ? i.state.name : '',
+        stateType: i.state ? i.state.type : '',
+      };
+    });
+    return { ok: true, issues };
+  }
+);
+
+// ── Bi-weekly KPI DM to editors ──────────────────────────────────────────
+// Roadmap item #7. Every second Monday at 09:00 UK, reads STATE.grades from
+// state/app, computes each editor's 14-day trio (First-Pass Rate, Time to
+// Ship, Video Edits), and DMs each editor via sendSlackScorecardDm. Approach A
+// from the plan: server-only, ports the math from computeScorecard.
+//
+// If you want to trigger it manually for testing, use the HTTPS wrapper
+// exports.runBiWeeklyKpiNow below.
+
+// Port of computeScorecard from app.js. Kept here in server-side JS so the
+// Cloud Function isn't dependent on the client bundle. If the client version
+// changes, update this too.
+function computeScorecardServer(editor, grades, windowDays) {
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - (windowDays || 14));
+  const cutoffIso = cutoff.toISOString().slice(0, 10);
+  const editorGrades = (grades || []).filter(function (g) {
+    if (g.editor !== editor) return false;
+    return (g.date || '') >= cutoffIso;
+  });
+  const videoCount = editorGrades.length;
+  const firstPassCount = editorGrades.filter(function (g) {
+    return (g.rounds || 0) <= 1;
+  }).length;
+  const firstPassRate = videoCount ? (firstPassCount / videoCount) : 0;
+
+  // Time to ship: mean days from assignedAt to dateApproved for videos in window.
+  const shipTimes = editorGrades
+    .filter(function (g) { return g.timeToShipDays != null; })
+    .map(function (g) { return g.timeToShipDays; });
+  const meanTimeToShip = shipTimes.length
+    ? (shipTimes.reduce(function (a, b) { return a + b; }, 0) / shipTimes.length)
+    : null;
+
+  return {
+    editor,
+    videoCount,
+    firstPassRate,
+    firstPassCount,
+    meanTimeToShip,
+  };
+}
+
+async function biWeeklyKpiCore() {
+  const snap = await db.collection('state').doc('app').get();
+  if (!snap.exists) {
+    console.warn('[biWeeklyKpi] state/app not found');
+    return { ok: false, error: 'state/app not found' };
+  }
+  const data = snap.data() || {};
+  const grades = Array.isArray(data.grades) ? data.grades : [];
+  const editorSlackIds = data.editorSlackIds || {};
+
+  const editors = Array.from(new Set(grades.map(function (g) { return g.editor; }).filter(Boolean)));
+  const results = [];
+
+  for (const editor of editors) {
+    const card = computeScorecardServer(editor, grades, 14);
+    if (card.videoCount === 0) continue;
+    const slackId = editorSlackIds[editor];
+    if (!slackId) {
+      console.warn('[biWeeklyKpi] no slack id for ' + editor + ', skipping');
+      results.push({ editor, sent: false, reason: 'no-slack-id' });
+      continue;
+    }
+    const text = [
+      ':bar_chart: *' + editor + '\'s fortnightly KPI*',
+      '• Video edits: *' + card.videoCount + '*',
+      '• First-pass rate: *' + Math.round(card.firstPassRate * 100) + '%* (' + card.firstPassCount + '/' + card.videoCount + ')',
+      card.meanTimeToShip != null
+        ? '• Time to ship (avg): *' + card.meanTimeToShip.toFixed(1) + ' days*'
+        : '• Time to ship: _no data_',
+      '',
+      '_Last 14 days. Full breakdown in the Grading tab._',
+    ].join('\n');
+
+    try {
+      const openRes = await fetch('https://slack.com/api/conversations.open', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Bearer ' + SLACK_BOT_TOKEN.value(),
+        },
+        body: new URLSearchParams({ users: slackId }).toString(),
+      });
+      const openJson = await openRes.json();
+      if (!openJson.ok) {
+        console.warn('[biWeeklyKpi] conversations.open failed for ' + editor, openJson.error);
+        results.push({ editor, sent: false, reason: 'open-failed:' + (openJson.error || 'unknown') });
+        continue;
+      }
+      const channelId = openJson.channel && openJson.channel.id;
+
+      const postRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Bearer ' + SLACK_BOT_TOKEN.value(),
+        },
+        body: new URLSearchParams({
+          channel: channelId,
+          text,
+          unfurl_links: 'false',
+          unfurl_media: 'false',
+        }).toString(),
+      });
+      const postJson = await postRes.json();
+      results.push({ editor, sent: !!postJson.ok, reason: postJson.error || 'ok' });
+    } catch (e) {
+      console.warn('[biWeeklyKpi] send exception for ' + editor, e && e.message);
+      results.push({ editor, sent: false, reason: 'exception:' + (e && e.message) });
+    }
+  }
+
+  console.log('[biWeeklyKpi] done', JSON.stringify({ total: editors.length, results }));
+  return { ok: true, results };
+}
+
+// Cron: every other Monday at 09:00 UK. The schedule uses '0 9 * * 1' and
+// biWeeklyKpiCore's ISO-week-number check keeps it on even weeks only —
+// firebase-functions scheduler doesn't natively support fortnightly cadence.
+exports.biWeeklyKpiScheduled = onSchedule(
+  {
+    schedule: '0 9 * * 1',
+    timeZone: 'Europe/London',
+    secrets: [SLACK_BOT_TOKEN],
+    region: 'us-central1',
+    timeoutSeconds: 540,
+  },
+  async () => {
+    // ISO week number — even weeks only (fortnightly cadence).
+    const now = new Date();
+    const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0
+    target.setUTCDate(target.getUTCDate() - dayNum + 3);
+    const firstThursday = target.valueOf();
+    target.setUTCMonth(0, 1);
+    if (target.getUTCDay() !== 4) target.setUTCMonth(0, 1 + ((4 - target.getUTCDay()) + 7) % 7);
+    const weekNumber = 1 + Math.ceil((firstThursday - target) / (7 * 24 * 3600 * 1000));
+
+    if (weekNumber % 2 !== 0) {
+      console.log('[biWeeklyKpiScheduled] skipping odd ISO week ' + weekNumber);
+      return;
+    }
+    await biWeeklyKpiCore();
+  }
+);
+
+// Manual trigger for testing — call from an admin browser console.
+exports.runBiWeeklyKpiNow = onCall(
+  { secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 540 },
+  async (request) => {
+    requireTiltUser(request);
+    return await biWeeklyKpiCore();
+  }
+);

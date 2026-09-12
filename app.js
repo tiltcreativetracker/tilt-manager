@@ -2770,7 +2770,12 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     // Reuses CATEGORY_HEAD_QC_VALUES so the same Draft/For Review/Needs Revisions/
     // Approved/Cancelled pill palette applies. Approved auto-stamps clQcDateApproved.
     contentLeadQc: '',
-    clQcDateApproved: ''
+    clQcDateApproved: '',
+    // Editor home / EOD: doneToday is an ISO date the editor tags when they wrap
+    // work on the video for the day. decisions is an append-only log of notes the
+    // editor jots about creative choices on this video. Both are Editor Home surface.
+    doneToday: '',
+    decisions: []
   };
 }
 
@@ -4904,6 +4909,8 @@ var TAB_DEFS = {
   grading:          { label: 'Grading' },
   editingStyle:     { label: 'Editing Style' },
   strategy:         { label: 'Strategy' },
+  clReview:         { label: 'CL Review', badge: true },
+  editorHome:       { label: 'My Day' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
@@ -4912,7 +4919,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'clReview', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -4925,14 +4932,14 @@ var DEFAULT_TAB_ORDER = ['campaigns', 'notifications', 'today', 'catReview', 'lo
 // so only Zidni/Sharm/Patty (own view) or the viewer list (Elsa, peer picker)
 // actually see the tab in the nav. Viewers land here on first sign-in — a broad
 // read-mostly set that excludes internal-ops tabs and the Strava page.
-var ALL_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
+var ALL_TABS = ['campaigns', 'today', 'catReview', 'clReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
 var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'];
 // 'clips' is admin+editor only — intentionally NOT in ALL_TABS (so it doesn't
 // leak to catHead/contentLead, who otherwise mirror ALL_TABS). Added explicitly
 // to the editor and admin lists only.
 var ROLE_TAB_VISIBILITY = {
   viewer:      VIEWER_TABS.slice(),
-  editor:      ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
+  editor:      ['editorHome', 'campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
   pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'],
   catHead:     ALL_TABS.slice(),
   contentLead: ALL_TABS.slice(),
@@ -5041,6 +5048,9 @@ function renderTopbar() {
     } else if (def.badge && tabId === 'catReview') {
       var cr = catReviewPendingCount();
       badge = cr > 0 ? '<span class="tab-badge">' + cr + '</span>' : '';
+    } else if (def.badge && tabId === 'clReview') {
+      var clr = contentLeadReviewCount();
+      badge = clr > 0 ? '<span class="tab-badge">' + clr + '</span>' : '';
     }
     return '<div class="tab-btn ' + (STATE.tab === tabId ? 'active' : '') +
       '" role="button" tabindex="0" data-tab-id="' + tabId + '"' +
@@ -11954,6 +11964,214 @@ function catReviewWaitLabel(iso) {
   return 'ready ' + days + ' days ago';
 }
 
+// ── Content Lead Review (Organic-only) ─────────────────────────────────────
+// Simpler cousin of Cat Heads Review. Lists Organic videos where Content Lead
+// QC is unset OR 'Needs Revisions' OR 'For Review'. One card per video with
+// Approve + Rework buttons (verdicts call App.setAssetContentLeadQc).
+function contentLeadReviewAssets() {
+  return STATE.assets.filter(function(a) {
+    var camp = findCampaignById(a.campaignId);
+    if (!camp) return false;
+    if ((camp.type || DEFAULT_CAMPAIGN_TYPE) !== 'Organic') return false;
+    var q = a.contentLeadQc || '';
+    // Show anything not yet approved/cancelled — the queue = "waiting on CL".
+    return q === '' || q === 'Draft' || q === 'For Review' || q === 'Needs Revisions';
+  });
+}
+
+function contentLeadReviewCount() {
+  // Show only "For Review" in the badge — that's the active queue. Draft videos
+  // haven't been sent to CL yet; Needs Revisions is with the editor.
+  return STATE.assets.filter(function(a) {
+    if (a.contentLeadQc !== 'For Review') return false;
+    var camp = findCampaignById(a.campaignId);
+    return camp && (camp.type || DEFAULT_CAMPAIGN_TYPE) === 'Organic';
+  }).length;
+}
+
+function renderContentLeadReviewView() {
+  var pending = contentLeadReviewAssets();
+  // Sort: For Review first (waiting on CL), then Needs Revisions, then Draft
+  var order = { 'For Review': 0, 'Needs Revisions': 1, 'Draft': 2, '': 3 };
+  pending.sort(function(a, b) {
+    var ao = order[a.contentLeadQc || ''] || 3;
+    var bo = order[b.contentLeadQc || ''] || 3;
+    if (ao !== bo) return ao - bo;
+    return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
+  });
+
+  function renderCard(a) {
+    var camp = findCampaignById(a.campaignId);
+    var qc = a.contentLeadQc || 'Draft';
+    var previewLink = a.finalVideo
+      ? '<a href="' + escapeHtml(a.finalVideo) + '" target="_blank" rel="noopener" style="color:var(--accent);">Final video ↗</a>'
+      : '<span style="color:var(--text3);">No final link yet</span>';
+    var briefLink = a.editingBrief
+      ? ' · <a href="' + escapeHtml(a.editingBrief) + '" target="_blank" rel="noopener" style="color:var(--accent);">Brief ↗</a>'
+      : '';
+    var trackerLink = ' · <a href="#campaign=' + encodeURIComponent(a.campaignId) + '&asset=' + encodeURIComponent(a.id) +
+      '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + a.campaignId + '\', \'' + a.id + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
+    var qcPill = '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '">' + qc + '</span>';
+    return '<div class="auto-card" style="margin-bottom:12px;">' +
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
+        '<div style="flex:1 1 320px;min-width:280px;">' +
+          '<div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + escapeHtml(a.name || '') + ' <span style="color:var(--text3);font-weight:400;">· ' + escapeHtml(a.category || '—') + '</span></div>' +
+          '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">' + escapeHtml(camp ? camp.name : '—') + ' · Editor: ' + escapeHtml(a.editor || '—') + '</div>' +
+          '<div style="font-size:12px;">' + qcPill + ' &nbsp; ' + previewLink + briefLink + trackerLink + '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-shrink:0;">' +
+          '<button class="btn btn-primary" style="background:#22c55e;border-color:#22c55e;" onclick="App.clReviewApprove(\'' + a.id + '\')" title="Approve — sets Content Lead QC to Approved and stamps today\'s date">✓ Approve</button>' +
+          '<button class="btn" onclick="App.clReviewRework(\'' + a.id + '\')" title="Send back for rework — prompts for a note">✗ Rework</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var body = pending.length
+    ? pending.map(renderCard).join('')
+    : '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">Nothing waiting on Content Lead review. All Organic videos are approved or in editor hands.</div>';
+
+  return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
+    '<h1 style="margin:0 0 6px;font-size:22px;">Content Lead Review</h1>' +
+    '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+      'Organic videos waiting on your review. Approve stamps today\'s date; Rework asks for a note and sends it back to the editor.' +
+    '</div>' +
+    body +
+  '</div>';
+}
+
+// ── Linear tasks widget (item #10) ─────────────────────────────────────────
+// Read-only list of the signed-in user's open assigned Linear issues, fetched
+// via the getLinearTasks Cloud Function. Cached in STATE.linearTasks for the
+// session; call App.fetchLinearTasks() to refresh. Intended for embedding on
+// the CL dashboard (item #13) — also rendered on the Editor Home for now so
+// it's testable before the CL dashboard lands.
+function renderLinearTasksPanel() {
+  var tasks = STATE._linearTasks || null; // Session-only cache; not persisted.
+  var loading = STATE._linearTasksLoading;
+  var err = STATE._linearTasksError;
+  var lastFetched = STATE._linearTasksAt;
+
+  var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+    '<div style="font-size:13px;font-weight:600;color:var(--text1);">Linear · My open tasks</div>' +
+    '<button class="btn" style="font-size:11px;padding:2px 8px;" onclick="App.fetchLinearTasks(true)" title="Refresh from Linear">' + (loading ? 'Loading…' : '↻ Refresh') + '</button>' +
+  '</div>';
+
+  var body;
+  if (loading && !tasks) {
+    body = '<div style="font-size:12px;color:var(--text3);">Loading…</div>';
+  } else if (err) {
+    body = '<div style="font-size:12px;color:var(--red-text, #ef4444);">' + escapeHtml(err) + '</div>';
+  } else if (!tasks) {
+    body = '<div style="font-size:12px;color:var(--text3);">Not fetched yet. Click Refresh.</div>';
+  } else if (tasks.length === 0) {
+    body = '<div style="font-size:12px;color:var(--text3);">No open Linear tasks assigned to you.</div>';
+  } else {
+    body = tasks.slice(0, 10).map(function(t) {
+      return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border2);font-size:12px;">' +
+        '<span style="color:var(--text3);font-family:\'JetBrains Mono\',monospace;font-size:10.5px;min-width:56px;">' + escapeHtml(t.identifier || '') + '</span>' +
+        '<a href="' + escapeHtml(t.url || '#') + '" target="_blank" rel="noopener" style="flex:1 1 auto;color:var(--text1);text-decoration:none;">' + escapeHtml(t.title || '') + '</a>' +
+        '<span style="color:var(--text3);font-size:10.5px;">' + escapeHtml(t.state || '') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  var footer = lastFetched
+    ? '<div style="font-size:10.5px;color:var(--text3);margin-top:6px;">Fetched ' + escapeHtml((new Date(lastFetched)).toLocaleTimeString()) + '</div>'
+    : '';
+
+  return '<div class="auto-card" style="max-width:520px;">' + header + body + footer + '</div>';
+}
+
+// ── Editor Home ("My Day") ─────────────────────────────────────────────────
+// Combined assigned-videos + EOD tagging surface. Editor sees today's assigned
+// work, ticks "Done today" per video (stamps a.doneToday = today), and jots
+// free-text decision notes (appended to a.decisions[]).
+function renderEditorHomeView() {
+  var currentEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+  var today = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
+
+  if (!currentEditor) {
+    return '<div style="padding:48px;text-align:center;color:var(--text3);">' +
+      '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">My Day</h1>' +
+      '<div>Your account isn\'t mapped to an editor yet. Ask an admin to add your email to the editor list.</div>' +
+    '</div>';
+  }
+
+  // Assigned videos: any asset belonging to this editor that isn't Approved or Cancelled.
+  var mine = STATE.assets.filter(function(a) {
+    if (a.editor !== currentEditor) return false;
+    var s = a.status || 'Draft';
+    return s !== 'Approved' && s !== 'Cancelled';
+  });
+  // Bring "not done today" to the top, then most recently assigned first.
+  mine.sort(function(a, b) {
+    var ad = (a.doneToday === today) ? 1 : 0;
+    var bd = (b.doneToday === today) ? 1 : 0;
+    if (ad !== bd) return ad - bd;
+    return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
+  });
+
+  var doneCount = mine.filter(function(a) { return a.doneToday === today; }).length;
+
+  function renderVideoRow(a) {
+    var camp = findCampaignById(a.campaignId);
+    var doneNow = a.doneToday === today;
+    var lastDecision = (Array.isArray(a.decisions) && a.decisions.length)
+      ? a.decisions[a.decisions.length - 1]
+      : null;
+    var decisionsHtml = (Array.isArray(a.decisions) && a.decisions.length)
+      ? '<div style="margin-top:8px;font-size:11.5px;color:var(--text3);">' +
+          a.decisions.slice(-3).reverse().map(function(d) {
+            var when = d.at ? (new Date(d.at)).toLocaleDateString() : '';
+            return '<div>• <span style="color:var(--text2);">' + escapeHtml(d.note || '') + '</span> <span style="color:var(--text3);">(' + escapeHtml(when) + ')</span></div>';
+          }).join('') +
+        '</div>'
+      : '';
+    return '<div class="auto-card" style="margin-bottom:10px;' + (doneNow ? 'opacity:0.55;' : '') + '">' +
+      '<div style="display:flex;align-items:flex-start;gap:14px;">' +
+        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding-top:2px;flex-shrink:0;">' +
+          '<input type="checkbox"' + (doneNow ? ' checked' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')" title="Mark as done today">' +
+          '<span style="font-size:12px;color:var(--text3);">Done today</span>' +
+        '</label>' +
+        '<div style="flex:1 1 auto;min-width:0;">' +
+          '<div style="font-size:14px;font-weight:600;color:var(--text1);' + (doneNow ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(a.name || '') + '</div>' +
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' +
+            escapeHtml(camp ? camp.name : '—') + ' · ' + escapeHtml(a.category || '—') + ' · ' +
+            '<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>' +
+          '</div>' +
+          decisionsHtml +
+          '<div style="margin-top:8px;display:flex;gap:6px;">' +
+            '<input type="text" class="form-input" id="dec-' + a.id + '" placeholder="Decision note (e.g. cut opener 3s, boosted sat)" style="flex:1 1 auto;font-size:12px;padding:6px 8px;" ' +
+              'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.addAssetDecision(\'' + a.id + '\', this.value);this.value=\'\';}">' +
+            '<button class="btn" style="padding:4px 10px;font-size:12px;" onclick="var el=document.getElementById(\'dec-' + a.id + '\'); App.addAssetDecision(\'' + a.id + '\', el.value); el.value=\'\';">Log</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var body;
+  if (mine.length === 0) {
+    body = '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">' +
+      '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">No videos assigned to you right now.</div>' +
+      '<div style="font-size:12.5px;">Great chance to work on a Training module — check the Training tab (once it lands).</div>' +
+    '</div>';
+  } else {
+    body = mine.map(renderVideoRow).join('');
+  }
+
+  return '<div style="padding:24px;max-width:1000px;margin:0 auto;">' +
+    '<h1 style="margin:0 0 4px;font-size:22px;">My Day — ' + escapeHtml(currentEditor) + '</h1>' +
+    '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+      'Your assigned videos. Tick <strong>Done today</strong> for each one you\'ve wrapped, and jot any creative decisions you made. ' +
+      '<span style="color:var(--text2);">' + doneCount + ' of ' + mine.length + ' marked done today.</span>' +
+    '</div>' +
+    body +
+    '<div style="margin-top:24px;">' + renderLinearTasksPanel() + '</div>' +
+  '</div>';
+}
+
 function renderCatReviewView() {
   var win = STATE.catReviewWindow || 'daily';
   var today = todayLocalISO();
@@ -14961,6 +15179,8 @@ function render() {
   else if (STATE.tab === 'grading') body = renderGradingView();
   else if (STATE.tab === 'editingStyle') body = renderEditingStyleView();
   else if (STATE.tab === 'strategy') body = renderStrategyView();
+  else if (STATE.tab === 'clReview') body = renderContentLeadReviewView();
+  else if (STATE.tab === 'editorHome') body = renderEditorHomeView();
   else if (STATE.tab === 'editorStats') body = renderEditorStatsView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
@@ -16980,6 +17200,86 @@ var App = {
     else if (old === 'Approved') a.clQcDateApproved = '';
     logAction('updated', 'Asset "' + a.name + '" content-lead QC: ' + old + ' \u2192 ' + newVal);
     render();
+  },
+
+  // Linear tasks widget — fetches the signed-in user's open assigned issues via
+  // the getLinearTasks Cloud Function. Cached in STATE._linearTasks (session-only,
+  // not persisted). Silent no-op if firebase.functions() isn't available.
+  fetchLinearTasks: function(userInitiated) {
+    if (!Auth || !Auth.user || !Auth.user.email) return;
+    if (typeof firebase === 'undefined' || !firebase.functions) return;
+    STATE._linearTasksLoading = true;
+    STATE._linearTasksError = null;
+    if (userInitiated) render();
+    var _fn = firebase.functions().httpsCallable('getLinearTasks');
+    _fn({ email: Auth.user.email })
+      .then(function(res) {
+        var data = (res && res.data) || {};
+        STATE._linearTasks = Array.isArray(data.issues) ? data.issues : [];
+        STATE._linearTasksAt = Date.now();
+        STATE._linearTasksLoading = false;
+        STATE._linearTasksError = data.error || null;
+        render();
+      })
+      .catch(function(err) {
+        STATE._linearTasksLoading = false;
+        STATE._linearTasksError = (err && err.message) || 'Fetch failed';
+        render();
+      });
+  },
+
+  // Editor home / EOD handlers.
+  // toggleAssetDoneToday: flips a.doneToday between today and empty. No side effects
+  // beyond the stamp — status flow is separate from the "done for the day" signal.
+  toggleAssetDoneToday: function(id) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var today = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
+    a.doneToday = (a.doneToday === today) ? '' : today;
+    saveState();
+    render();
+  },
+
+  // addAssetDecision: appends a note to a.decisions[]. Editor jots creative choices
+  // ("cut opener 3s", "boosted saturation on B-roll") so they have a log they can
+  // refer to later. Silently no-ops on empty input.
+  addAssetDecision: function(id, note) {
+    var text = String(note || '').trim();
+    if (!text) return;
+    var a = findAssetById(id);
+    if (!a) return;
+    a.decisions = Array.isArray(a.decisions) ? a.decisions : [];
+    a.decisions.push({
+      note: text,
+      at: (new Date()).toISOString(),
+      by: (Auth && Auth.user && Auth.user.email) || ''
+    });
+    saveState();
+    render();
+    if (typeof toast === 'function') toast('Decision logged', 'success');
+  },
+
+  // CL Review tab actions — wrap setAssetContentLeadQc with UX. Approve is one
+  // click; Rework prompts for a comment and (best-effort) appends it to a.comments.
+  clReviewApprove: function(id) {
+    App.setAssetContentLeadQc(id, 'Approved');
+    if (typeof toast === 'function') toast('Approved', 'success');
+  },
+  clReviewRework: function(id) {
+    var note = (window.prompt('Rework note for editor (optional):') || '').trim();
+    var a = findAssetById(id);
+    if (a && note) {
+      a.comments = Array.isArray(a.comments) ? a.comments : [];
+      a.comments.push({
+        id: 'c_' + Date.now(),
+        author: (Auth && Auth.user && Auth.user.displayName) || 'Content Lead',
+        authorEmail: (Auth && Auth.user && Auth.user.email) || '',
+        ts: (new Date()).toISOString(),
+        text: 'CL Rework: ' + note
+      });
+    }
+    App.setAssetContentLeadQc(id, 'Needs Revisions');
+    if (typeof toast === 'function') toast('Sent back for rework', 'success');
   },
 
   setAssetClQcDateApproved: function(id, newDate) {
