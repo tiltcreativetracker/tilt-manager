@@ -4915,10 +4915,9 @@ var TAB_DEFS = {
   grading:          { label: 'Grading' },
   editingStyle:     { label: 'Editing Style' },
   strategy:         { label: 'Strategy' },
-  clReview:         { label: 'CL Review', badge: true },
   editorHome:       { label: 'My Day' },
   training:         { label: 'Training' },
-  clHome:           { label: 'CL Home' },
+  clHome:           { label: 'CL Home', badge: true },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
@@ -4927,7 +4926,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['clHome', 'editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'clReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['clHome', 'editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -4940,7 +4939,7 @@ var DEFAULT_TAB_ORDER = ['clHome', 'editorHome', 'campaigns', 'notifications', '
 // so only Zidni/Sharm/Patty (own view) or the viewer list (Elsa, peer picker)
 // actually see the tab in the nav. Viewers land here on first sign-in — a broad
 // read-mostly set that excludes internal-ops tabs and the Strava page.
-var ALL_TABS = ['campaigns', 'today', 'catReview', 'clReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
+var ALL_TABS = ['campaigns', 'today', 'catReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
 var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'];
 // 'clips' is admin+editor only — intentionally NOT in ALL_TABS (so it doesn't
 // leak to catHead/contentLead, who otherwise mirror ALL_TABS). Added explicitly
@@ -4987,6 +4986,17 @@ function renderTopbar() {
   Object.keys(TAB_DEFS).forEach(function(k) { if (order.indexOf(k) < 0) order.push(k); });
   // Drop any stale ids that no longer exist.
   order = order.filter(function(k) { return TAB_DEFS[k]; });
+  // Migration: place clHome at the very front (default landing for contentLeads
+  // and admins on next load — respects DEFAULT_TAB_ORDER). Same shape as the
+  // editingCalendar/notifications splices below.
+  (function() {
+    var ch = order.indexOf('clHome');
+    if (ch > 0) {
+      order.splice(ch, 1);
+      order.unshift('clHome');
+      STATE.tabOrder = order.slice();
+    }
+  })();
   // Migration: always place editingCalendar immediately after log.
   (function() {
     var ec = order.indexOf('editingCalendar'), lg = order.indexOf('log');
@@ -5042,6 +5052,16 @@ function renderTopbar() {
   if (order.length > 0 && order.indexOf(STATE.tab) < 0) {
     STATE.tab = order[0];
   }
+  // One-time landing: force Content Leads onto CL Home the first time they
+  // load the merged page. Guard flag lives in localStorage (per-browser, per-user)
+  // so we don't override a manual tab choice on subsequent loads and don't leak
+  // the migration state through the shared STATE snapshot.
+  try {
+    if (role === 'contentLead' && order.indexOf('clHome') >= 0 && !localStorage.getItem('_clHomeMigrated_v1')) {
+      STATE.tab = 'clHome';
+      localStorage.setItem('_clHomeMigrated_v1', '1');
+    }
+  } catch (_) { /* localStorage unavailable — skip */ }
 
   // Tabs use the pointer-drag module (pdragStart + pdragCheckClick) rather than
   // HTML5 DnD. The mousedown arms a potential drag; if the mouse moves past the
@@ -5056,9 +5076,9 @@ function renderTopbar() {
     } else if (def.badge && tabId === 'catReview') {
       var cr = catReviewPendingCount();
       badge = cr > 0 ? '<span class="tab-badge">' + cr + '</span>' : '';
-    } else if (def.badge && tabId === 'clReview') {
-      var clr = contentLeadReviewCount();
-      badge = clr > 0 ? '<span class="tab-badge">' + clr + '</span>' : '';
+    } else if (def.badge && tabId === 'clHome') {
+      var clh = contentLeadReviewCount();
+      badge = clh > 0 ? '<span class="tab-badge">' + clh + '</span>' : '';
     }
     return '<div class="tab-btn ' + (STATE.tab === tabId ? 'active' : '') +
       '" role="button" tabindex="0" data-tab-id="' + tabId + '"' +
@@ -11997,64 +12017,6 @@ function contentLeadReviewCount() {
   }).length;
 }
 
-function renderContentLeadReviewView() {
-  var pending = contentLeadReviewAssets();
-  // Sort: For Review first (waiting on CL), then Needs Revisions, then Draft.
-  // Use !== undefined instead of || to preserve the 0 bucket ('For Review').
-  var order = { 'For Review': 0, 'Needs Revisions': 1, 'Draft': 2, '': 3 };
-  pending.sort(function(a, b) {
-    var av = a.contentLeadQc || '';
-    var bv = b.contentLeadQc || '';
-    var ao = (order[av] !== undefined) ? order[av] : 3;
-    var bo = (order[bv] !== undefined) ? order[bv] : 3;
-    if (ao !== bo) return ao - bo;
-    return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
-  });
-
-  function renderCard(a) {
-    var camp = findCampaignById(a.campaignId);
-    var qc = a.contentLeadQc || 'Draft';
-    var previewLink = a.finalVideo
-      ? '<a href="' + escapeHtml(a.finalVideo) + '" target="_blank" rel="noopener" style="color:var(--accent);">Final video ↗</a>'
-      : '<span style="color:var(--text3);">No final link yet</span>';
-    var briefLink = a.editingBrief
-      ? ' · <a href="' + escapeHtml(a.editingBrief) + '" target="_blank" rel="noopener" style="color:var(--accent);">Brief ↗</a>'
-      : '';
-    // Escape single quotes in the raw IDs before interpolating into the inline
-    // onclick — matches the pattern used elsewhere for asset/campaign IDs.
-    var _campIdJs = String(a.campaignId).replace(/'/g, "\\'");
-    var _aIdJs = String(a.id).replace(/'/g, "\\'");
-    var trackerLink = ' · <a href="#campaign=' + encodeURIComponent(a.campaignId) + '&asset=' + encodeURIComponent(a.id) +
-      '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + _campIdJs + '\', \'' + _aIdJs + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
-    var qcPill = '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '">' + qc + '</span>';
-    return '<div class="auto-card" style="margin-bottom:12px;">' +
-      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
-        '<div style="flex:1 1 320px;min-width:280px;">' +
-          '<div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + escapeHtml(a.name || '') + ' <span style="color:var(--text3);font-weight:400;">· ' + escapeHtml(a.category || '—') + '</span></div>' +
-          '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">' + escapeHtml(camp ? camp.name : '—') + ' · Editor: ' + escapeHtml(a.editor || '—') + '</div>' +
-          '<div style="font-size:12px;">' + qcPill + ' &nbsp; ' + previewLink + briefLink + trackerLink + '</div>' +
-        '</div>' +
-        '<div style="display:flex;gap:8px;flex-shrink:0;">' +
-          '<button class="btn btn-primary" style="background:#22c55e;border-color:#22c55e;" onclick="App.clReviewApprove(\'' + a.id + '\')" title="Approve — sets Content Lead QC to Approved and stamps today\'s date">✓ Approve</button>' +
-          '<button class="btn" onclick="App.clReviewRework(\'' + a.id + '\')" title="Send back for rework — prompts for a note">✗ Rework</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-  }
-
-  var body = pending.length
-    ? pending.map(renderCard).join('')
-    : '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">Nothing waiting on Content Lead review. All Organic videos are approved or in editor hands.</div>';
-
-  return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
-    '<h1 style="margin:0 0 6px;font-size:22px;">Content Lead Review</h1>' +
-    '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-      'Organic videos waiting on your review. Approve stamps today\'s date; Rework asks for a note and sends it back to the editor.' +
-    '</div>' +
-    body +
-  '</div>';
-}
-
 // ── Training library (item #12) ────────────────────────────────────────────
 // Modules are admin-authored; each editor sees them in the Training tab and
 // can Start / Complete to log a completion. Admins/CLs see a matrix of who's
@@ -12171,76 +12133,99 @@ function renderContentLeadHomeView() {
   var meFirst = (me || '').split(' ')[0];
   var todayIso = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
 
-  // My campaigns: filter by camp.contentLead === my first name (matches existing picker)
+  // My campaigns: filter by camp.contentLead === my first name (matches picker)
   var myCamps = (STATE.campaigns || []).filter(function(c) { return (c.contentLead || '') === meFirst; });
   var myCampIds = {}; myCamps.forEach(function(c) { myCampIds[c.id] = true; });
 
-  // QC queue on MY campaigns: Organic assets with contentLeadQc unset or Needs Revisions or For Review
-  var qcQueue = STATE.assets.filter(function(a) {
-    if (!myCampIds[a.campaignId]) return false;
-    var q = a.contentLeadQc || '';
-    return q === '' || q === 'Draft' || q === 'For Review' || q === 'Needs Revisions';
-  });
-
-  // Today's approvals across my campaigns (any asset flipped to Approved today OR clQcDateApproved today)
+  // Today's approvals across my campaigns
   var approvedToday = STATE.assets.filter(function(a) {
     if (!myCampIds[a.campaignId]) return false;
     return a.dateApproved === todayIso || a.clQcDateApproved === todayIso;
   });
 
-  // Section: My campaigns list
-  var campsHtml = myCamps.length === 0
-    ? '<div style="font-size:12px;color:var(--text3);">No campaigns are assigned to you yet. Set the Content Lead on a campaign in the campaign edit modal.</div>'
-    : '<div style="display:flex;flex-direction:column;gap:6px;">' +
-        myCamps.slice(0, 12).map(function(c) {
-          var assetCount = STATE.assets.filter(function(a) { return a.campaignId === c.id; }).length;
-          return '<a href="#campaign=' + encodeURIComponent(c.id) + '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + c.id + '\')" style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg2);border-radius:6px;color:var(--text1);text-decoration:none;font-size:12.5px;">' +
-            '<span>' + escapeHtml(c.name) + ' <span style="color:var(--text3);">· ' + escapeHtml(c.country) + '</span></span>' +
-            '<span style="color:var(--text3);">' + assetCount + ' assets</span>' +
-          '</a>';
-        }).join('') +
-      '</div>';
+  // Review queue: same shape as the old CL Review tab (all Organic pending).
+  // Not narrowed to my campaigns — Content Leads share the Organic queue.
+  var pending = contentLeadReviewAssets();
+  var qcOrder = { 'For Review': 0, 'Needs Revisions': 1, 'Draft': 2, '': 3 };
+  pending.sort(function(a, b) {
+    var av = a.contentLeadQc || '';
+    var bv = b.contentLeadQc || '';
+    var ao = (qcOrder[av] !== undefined) ? qcOrder[av] : 3;
+    var bo = (qcOrder[bv] !== undefined) ? qcOrder[bv] : 3;
+    if (ao !== bo) return ao - bo;
+    return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
+  });
 
-  // Section: QC queue
-  var qcHtml = qcQueue.length === 0
-    ? '<div style="font-size:12px;color:var(--text3);">All clear — nothing waiting on your QC.</div>'
-    : qcQueue.slice(0, 10).map(function(a) {
-        var camp = findCampaignById(a.campaignId);
-        var qc = a.contentLeadQc || 'Draft';
-        return '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg2);border-radius:6px;font-size:12.5px;margin-bottom:4px;">' +
-          '<span><a href="#" onclick="event.preventDefault(); App.openAssetInTracker(\'' + a.campaignId + '\', \'' + a.id + '\')" style="color:var(--text1);text-decoration:none;">' + escapeHtml(a.name) + '</a> <span style="color:var(--text3);">· ' + escapeHtml(camp ? camp.name : '—') + '</span></span>' +
-          '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '" style="flex-shrink:0;">' + qc + '</span>' +
-        '</div>';
-      }).join('');
-
-  // Section: today's approvals count
-  var approvalsHtml = approvedToday.length === 0
-    ? '<div style="font-size:12px;color:var(--text3);">No approvals on your campaigns today yet.</div>'
-    : '<div style="font-size:24px;font-weight:700;color:#22c55e;">' + approvedToday.length + '</div>' +
-      '<div style="font-size:12px;color:var(--text3);">videos approved today across your campaigns</div>';
-
-  function section(title, contentHtml) {
-    return '<div class="auto-card" style="margin-bottom:14px;">' +
-      '<div style="font-size:13px;font-weight:600;color:var(--text1);margin-bottom:10px;">' + escapeHtml(title) + '</div>' +
-      contentHtml +
+  // Top strip: 3 compact stat cards.
+  function stat(label, valueHtml, sub) {
+    return '<div class="auto-card" style="text-align:left;">' +
+      '<div style="font-size:11.5px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;">' + escapeHtml(label) + '</div>' +
+      '<div style="margin-top:6px;">' + valueHtml + '</div>' +
+      (sub ? '<div style="font-size:11.5px;color:var(--text3);margin-top:4px;">' + sub + '</div>' : '') +
     '</div>';
   }
 
+  var myCampsStat = stat(
+    'My campaigns',
+    '<div style="font-size:26px;font-weight:700;color:var(--text1);">' + myCamps.length + '</div>',
+    myCamps.length
+      ? '<a href="#" onclick="event.preventDefault(); STATE.tab=\'campaigns\'; render();" style="color:var(--accent);">Open Campaigns tab →</a>'
+      : 'Set the Content Lead on a campaign in the campaign edit modal.'
+  );
+  var approvedStat = stat(
+    'Approved today',
+    '<div style="font-size:26px;font-weight:700;color:' + (approvedToday.length ? '#22c55e' : 'var(--text3)') + ';">' + approvedToday.length + '</div>',
+    approvedToday.length ? 'across your campaigns' : 'nothing yet today'
+  );
+
+  var topStrip = '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-bottom:20px;">' +
+    myCampsStat + approvedStat + renderLinearTasksPanel() +
+  '</div>';
+
+  // Review queue: Approve/Rework cards (merged from the old CL Review tab).
+  function renderReviewCard(a) {
+    var camp = findCampaignById(a.campaignId);
+    var qc = a.contentLeadQc || 'Draft';
+    var previewLink = a.finalVideo
+      ? '<a href="' + escapeHtml(a.finalVideo) + '" target="_blank" rel="noopener" style="color:var(--accent);">Final video ↗</a>'
+      : '<span style="color:var(--text3);">No final link yet</span>';
+    var briefLink = a.editingBrief
+      ? ' · <a href="' + escapeHtml(a.editingBrief) + '" target="_blank" rel="noopener" style="color:var(--accent);">Brief ↗</a>'
+      : '';
+    var _campIdJs = String(a.campaignId).replace(/'/g, "\\'");
+    var _aIdJs = String(a.id).replace(/'/g, "\\'");
+    var trackerLink = ' · <a href="#campaign=' + encodeURIComponent(a.campaignId) + '&asset=' + encodeURIComponent(a.id) +
+      '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + _campIdJs + '\', \'' + _aIdJs + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
+    var qcPill = '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '">' + qc + '</span>';
+    var mine = !!myCampIds[a.campaignId];
+    var mineBadge = mine ? ' <span style="background:var(--accent);color:white;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-left:6px;">MINE</span>' : '';
+    return '<div class="auto-card" style="margin-bottom:12px;' + (mine ? 'border-left:3px solid var(--accent);' : '') + '">' +
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
+        '<div style="flex:1 1 320px;min-width:280px;">' +
+          '<div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + escapeHtml(a.name || '') + mineBadge + ' <span style="color:var(--text3);font-weight:400;">· ' + escapeHtml(a.category || '—') + '</span></div>' +
+          '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">' + escapeHtml(camp ? camp.name : '—') + ' · Editor: ' + escapeHtml(a.editor || '—') + '</div>' +
+          '<div style="font-size:12px;">' + qcPill + ' &nbsp; ' + previewLink + briefLink + trackerLink + '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-shrink:0;">' +
+          '<button class="btn btn-primary" style="background:#22c55e;border-color:#22c55e;" onclick="App.clReviewApprove(\'' + _aIdJs + '\')" title="Approve — sets Content Lead QC to Approved and stamps today\'s date">✓ Approve</button>' +
+          '<button class="btn" onclick="App.clReviewRework(\'' + _aIdJs + '\')" title="Send back for rework — prompts for a note">✗ Rework</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var queueBody = pending.length
+    ? pending.map(renderReviewCard).join('')
+    : '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">Nothing waiting on Content Lead review. All Organic videos are approved or in editor hands.</div>';
+
   return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
-    '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead Home' + (meFirst ? ' — ' + escapeHtml(meFirst) : '') + '</h1>' +
-    '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-      'Your campaigns, your QC queue, today\'s approvals, and your Linear tasks — all on one page.' +
+    '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead' + (meFirst ? ' — ' + escapeHtml(meFirst) : '') + '</h1>' +
+    '<div style="font-size:13px;color:var(--text3);margin-bottom:20px;">' +
+      'Your stats up top; every Organic video waiting on CL review below. Rows on your campaigns are highlighted with a <span style="background:var(--accent);color:white;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;">MINE</span> tag.' +
     '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
-      '<div>' +
-        section('My campaigns (' + myCamps.length + ')', campsHtml) +
-        section('Approved today', approvalsHtml) +
-      '</div>' +
-      '<div>' +
-        section('QC queue (' + qcQueue.length + ' pending)', qcHtml) +
-        renderLinearTasksPanel() +
-      '</div>' +
-    '</div>' +
+    topStrip +
+    '<div style="font-size:13px;font-weight:600;color:var(--text1);margin-bottom:10px;">Review queue (' + pending.length + ' pending)</div>' +
+    queueBody +
   '</div>';
 }
 
@@ -15416,7 +15401,6 @@ function render() {
   else if (STATE.tab === 'grading') body = renderGradingView();
   else if (STATE.tab === 'editingStyle') body = renderEditingStyleView();
   else if (STATE.tab === 'strategy') body = renderStrategyView();
-  else if (STATE.tab === 'clReview') body = renderContentLeadReviewView();
   else if (STATE.tab === 'editorHome') body = renderEditorHomeView();
   else if (STATE.tab === 'training') body = renderTrainingView();
   else if (STATE.tab === 'clHome') body = renderContentLeadHomeView();
