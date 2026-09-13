@@ -1593,7 +1593,7 @@ var Fb = {
   },
 
   // Upsert the user's profile doc on first sign-in. Bootstrap admins listed
-  // below are auto-promoted to 'admin'. Everyone else lands as 'viewer' — the
+  // below are auto-promoted to 'admin'. Everyone else lands as 'visitor' — the
   // safe read-mostly default. An admin promotes them to editor / pm / etc. from
   // Config. Existing docs are left alone; the promotion path is manual.
   BOOTSTRAP_ADMIN_EMAILS: ['elsa@tilt.app'],
@@ -1608,7 +1608,7 @@ var Fb = {
           email: Auth.user.email,
           displayName: Auth.user.displayName,
           photoURL: Auth.user.photoURL || null,
-          role: isBootstrapAdmin ? 'admin' : 'viewer',
+          role: isBootstrapAdmin ? 'admin' : 'visitor',
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
       }
@@ -1700,7 +1700,7 @@ var Fb = {
     if (!Auth.user || Auth.user.role !== 'admin') {
       return Promise.reject(new Error('Only admins can change roles'));
     }
-    if (['editor', 'pm', 'catHead', 'contentLead', 'admin'].indexOf(role) < 0) {
+    if (['visitor', 'editor', 'catHead', 'contentLead', 'admin'].indexOf(role) < 0) {
       return Promise.reject(new Error('Invalid role: ' + role));
     }
     return fbDb.collection('users').doc(uid).update({ role: role });
@@ -4941,39 +4941,59 @@ var DEFAULT_TAB_ORDER = ['clHome', 'editorHome', 'campaigns', 'notifications', '
 // read-mostly set that excludes internal-ops tabs and the Strava page.
 var ALL_TABS = ['campaigns', 'today', 'catReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
 var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'];
-// 'clips' is admin+editor only — intentionally NOT in ALL_TABS (so it doesn't
-// leak to catHead/contentLead, who otherwise mirror ALL_TABS). Added explicitly
-// to the editor and admin lists only.
+// Master list of every tab id the app renders. Individual role sets pick from
+// here; new tabs get added here + explicitly to whichever roles should see them.
+var ALL_TABS_INTERNAL = ['clHome', 'editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+// Back-compat alias — some older comments still reference ALL_TABS.
+var ALL_TABS = ALL_TABS_INTERNAL.slice();
 var ROLE_TAB_VISIBILITY = {
-  viewer:      VIEWER_TABS.slice(),
-  editor:      ['editorHome', 'campaigns', 'today', 'catReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'editorStats', 'notifications', 'reporting', 'content', 'clips'],
-  pm:          ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'],
-  catHead:     ALL_TABS.slice(),
-  contentLead: ALL_TABS.concat(['clHome']),
-  admin:       ALL_TABS.concat(['clHome', 'editorHome', 'editorStats', 'clips'])
+  // Default landing role for brand-new sign-ins. Narrow read-only access to
+  // the four core surfaces. An admin promotes them from Config.
+  visitor:     ['campaigns', 'editingCalendar', 'today', 'reporting'],
+  // Editors see everything except Config (destructive admin panel).
+  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config'; }),
+  // Category Heads: their own review surface + the shared context tabs.
+  catHead:     ['campaigns', 'editingCalendar', 'today', 'catReview', 'reporting'],
+  // Content Leads: CL Home is their landing; the rest are context they might refer to.
+  contentLead: ['campaigns', 'editingCalendar', 'clHome', 'reporting', 'editingStyle', 'strategy'],
+  // Admins see everything except My Day (editor-only surface). Elsa is a bootstrap
+  // admin who ALSO gets My Day added via an email-specific override in tabsForRole.
+  admin:       ALL_TABS_INTERNAL.filter(function(t) { return t !== 'editorHome'; })
 };
 
+// Elsa (the PM / product owner) uses My Day herself even though she's an admin.
+// Rather than granting My Day to every admin, we grant it to her by email.
+var ELSA_EMAIL = 'elsa@tilt.app';
+
 // Human-readable role labels (role keys are camelCase / short; these are what the
-// UI shows in chips, dropdowns, and titles).
-var ROLE_LABELS = { viewer: 'Viewer', editor: 'Editor', pm: 'PM', catHead: 'Cat Head', contentLead: 'Content Lead', admin: 'Admin' };
+// UI shows in chips, dropdowns, and titles). `pm` is removed as a selectable role
+// (see ROLE_RANK note) so it's not in this map.
+var ROLE_LABELS = { visitor: 'Visitor', editor: 'Editor', catHead: 'Cat Head', contentLead: 'Content Lead', admin: 'Admin' };
 function roleLabelFor(role) { return ROLE_LABELS[role] || (role || '').toUpperCase(); }
 
 // Returns the list of tab IDs the given role is allowed to see. Unknown roles
-// (including null while a profile is still loading) get the viewer set \u2014 the
-// safest default: broad read access without editor-only surfaces.
+// (including null while a profile is still loading, or legacy 'viewer'/'pm')
+// get the visitor set — the safest read-only default.
 function tabsForRole(role) {
-  return ROLE_TAB_VISIBILITY[role] || ROLE_TAB_VISIBILITY.viewer;
+  var tabs = ROLE_TAB_VISIBILITY[role] || ROLE_TAB_VISIBILITY.visitor;
+  // Elsa-specific override: as admin she also gets My Day (editorHome). Prepend
+  // so it lands at position 0 for her without touching the shared admin set.
+  if (Auth && Auth.user && Auth.user.email === ELSA_EMAIL && tabs.indexOf('editorHome') < 0) {
+    tabs = ['editorHome'].concat(tabs);
+  }
+  return tabs;
 }
 
 // True if the current signed-in user has the given role (or higher). Hierarchy:
-// admin/editor (3) > pm/catHead/contentLead (2) > viewer (1). Editors are treated
-// as admin-level (Elsa promoted them so they can edit anything freely) — the only
-// difference from admin is the badge colour. Viewers are read-mostly and land here
-// as the first-sign-in default; an admin promotes them from Config.
-var ROLE_RANK = { viewer: 1, editor: 3, pm: 2, catHead: 2, contentLead: 2, admin: 3 };
+// admin/editor (3) > catHead/contentLead (2) > visitor (1). `pm` is kept in the
+// rank map at 2 so any legacy `roleAtLeast('pm')` gates in the codebase still
+// resolve to "at least rank 2" — pm is no longer a selectable or valid role.
+// `viewer` kept in the rank map at 1 for legacy user docs (they're treated as
+// visitor everywhere else in the app, but rank-comparisons still work).
+var ROLE_RANK = { visitor: 1, viewer: 1, editor: 3, pm: 2, catHead: 2, contentLead: 2, admin: 3 };
 function roleAtLeast(required) {
   var u = (typeof Auth !== 'undefined' && Auth.user) ? Auth.user : null;
-  var have = (u && u.role) ? u.role : 'viewer';
+  var have = (u && u.role) ? u.role : 'visitor';
   return (ROLE_RANK[have] || 0) >= (ROLE_RANK[required] || 0);
 }
 
@@ -5031,7 +5051,7 @@ function renderTopbar() {
   })();
   // Role gate: keep only the tabs the current user's role is allowed to see.
   // (See ROLE_TAB_VISIBILITY for the matrix.)
-  var role = (Auth && Auth.user && Auth.user.role) ? Auth.user.role : 'viewer';
+  var role = (Auth && Auth.user && Auth.user.role) ? Auth.user.role : 'visitor';
   var allowedTabs = tabsForRole(role);
   order = order.filter(function(k) { return allowedTabs.indexOf(k) >= 0; });
   // Extra gate for editorStats: role alone isn't enough. Access is granted to
@@ -5062,6 +5082,15 @@ function renderTopbar() {
       localStorage.setItem('_clHomeMigrated_v1', '1');
     }
   } catch (_) { /* localStorage unavailable — skip */ }
+  // One-time landing for Elsa: My Day is her landing tab. Same guard shape as
+  // the CL Home migration — localStorage flag so it fires once per browser and
+  // doesn't override her subsequent manual navigation.
+  try {
+    if (Auth && Auth.user && Auth.user.email === ELSA_EMAIL && order.indexOf('editorHome') >= 0 && !localStorage.getItem('_elsaMyDayLanded_v1')) {
+      STATE.tab = 'editorHome';
+      localStorage.setItem('_elsaMyDayLanded_v1', '1');
+    }
+  } catch (_) {}
 
   // Tabs use the pointer-drag module (pdragStart + pdragCheckClick) rather than
   // HTML5 DnD. The mousedown arms a potential drag; if the mouse moves past the
@@ -12024,7 +12053,7 @@ function contentLeadReviewCount() {
 function renderTrainingView() {
   var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
   var completions = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
-  var role = (Auth && Auth.user && Auth.user.role) || 'viewer';
+  var role = (Auth && Auth.user && Auth.user.role) || 'visitor';
   var isEditor = (role === 'editor');
   var isAdminOrCL = (role === 'admin' || role === 'contentLead');
   var currentEmail = (Auth && Auth.user && Auth.user.email) || '';
@@ -13753,14 +13782,16 @@ function renderConfigView() {
         var disabled = isSelf || isBootstrapAdmin;
         var disabledReason = isSelf ? 'You can\'t change your own role' :
                              isBootstrapAdmin ? 'Founding admin role is locked' : '';
-        var role = usr.role || 'viewer';
+        // Legacy 'viewer' / 'pm' user docs render as their closest current
+        // equivalent so the dropdown always shows a valid option.
+        var _rawRole = usr.role || 'visitor';
+        var role = (_rawRole === 'viewer' || _rawRole === 'pm') ? 'visitor' : _rawRole;
         var roleSelect =
           '<select class="team-role-select" ' +
             (disabled ? 'disabled title="' + escapeHtml(disabledReason) + '"' : '') + ' ' +
             'onchange="App.setUserRole(\'' + escapeHtml(usr.uid) + '\', this.value, \'' + escapeHtml(displayName) + '\')">' +
-            '<option value="viewer"'      + (role === 'viewer'      ? ' selected' : '') + '>Viewer</option>' +
+            '<option value="visitor"'     + (role === 'visitor'     ? ' selected' : '') + '>Visitor</option>' +
             '<option value="editor"'      + (role === 'editor'      ? ' selected' : '') + '>Editor</option>' +
-            '<option value="pm"'          + (role === 'pm'          ? ' selected' : '') + '>PM</option>' +
             '<option value="catHead"'     + (role === 'catHead'     ? ' selected' : '') + '>Cat Head</option>' +
             '<option value="contentLead"' + (role === 'contentLead' ? ' selected' : '') + '>Content Lead</option>' +
             '<option value="admin"'       + (role === 'admin'       ? ' selected' : '') + '>Admin</option>' +
@@ -20010,7 +20041,7 @@ bootApp = function() {
 
   // Subscribe to the broll subcollection (Clips tab). Only fetches for roles that
   // can see the tab (admin/editor) — saves quota + listener count for viewers/PMs.
-  var _role = (Auth.user && Auth.user.role) || 'viewer';
+  var _role = (Auth.user && Auth.user.role) || 'visitor';
   if (_role === 'admin' || _role === 'editor') {
     Fb.subscribeBroll();
   }
