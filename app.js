@@ -411,7 +411,7 @@ var Fb = {
       categoriesOrganic: STATE.categoriesOrganic,
       sellers: Array.isArray(STATE.sellers) ? STATE.sellers : [],
       products: Array.isArray(STATE.products) ? STATE.products : [],
-      brollDailyGoal: (typeof STATE.brollDailyGoal === 'number' && STATE.brollDailyGoal >= 0) ? STATE.brollDailyGoal : 20,
+      brollDailyGoal: (typeof STATE.brollDailyGoal === 'number' && STATE.brollDailyGoal >= 0) ? STATE.brollDailyGoal : 200,
       campaigns: STATE.campaigns,
       pendingBatches: STATE.pendingBatches,
       recentNotifKeys: Array.isArray(STATE.recentNotifKeys) ? STATE.recentNotifKeys.slice(0, 300) : [],
@@ -2331,7 +2331,7 @@ var STATE = {
   // Shared daily tagging goal per editor. Used by the "Daily Clip-Tagging Task"
   // card in Notifications to compute Remaining = goal - taggedToday. Persisted
   // to Firestore so everyone sees the same number.
-  brollDailyGoal: 20,
+  brollDailyGoal: 200,
   campaigns: [
     { id: 1, country: 'UK', rank: 1, name: 'Privilege Supply \u2013 Luxury', brief: 'High-end product showcase, tone = aspirational', driveId: '1a2B3cD4eF5gH6iJ', category: 'Luxury', type: 'Paid Ads', slackOverride: '' },
     { id: 2, country: 'UK', rank: 2, name: 'Privilege Supply \u2013 Essentials', brief: 'Everyday essentials, tone = practical', driveId: '', category: 'Essentials', type: 'Paid Ads', slackOverride: '' },
@@ -14571,7 +14571,7 @@ function sweepStaleDailyThreads() {
 // goal set" (button disables) so nobody accidentally posts "goal 0".
 function getBrollDailyGoal() {
   var g = STATE.brollDailyGoal;
-  if (typeof g !== 'number' || !isFinite(g) || g < 0) return 20;
+  if (typeof g !== 'number' || !isFinite(g) || g < 0) return 200;
   return Math.floor(g);
 }
 
