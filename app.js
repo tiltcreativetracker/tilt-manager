@@ -2782,6 +2782,11 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     // Approved/Cancelled pill palette applies. Approved auto-stamps clQcDateApproved.
     contentLeadQc: '',
     clQcDateApproved: '',
+    // Set to today's UK date whenever the CL sends the asset back for revisions.
+    // Never cleared — reflects "sends made", so the "Sent for revisions today"
+    // counter on CL Home stays truthful even after the editor re-flips to
+    // For Review later that day.
+    clQcDateRevisions: '',
     // Editor home / EOD: doneToday is an ISO date the editor tags when they wrap
     // work on the video for the day. decisions is an append-only log of notes the
     // editor jots about creative choices on this video. Both are Editor Home surface.
@@ -5047,8 +5052,9 @@ var ROLE_TAB_VISIBILITY = {
   // Default landing role for brand-new sign-ins. Narrow read-only access to
   // the four core surfaces. An admin promotes them from Config.
   visitor:     ['campaigns', 'editingCalendar', 'today', 'reporting'],
-  // Editors see everything except Config (destructive admin panel).
-  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config'; }),
+  // Editors see everything except Config (destructive admin panel) and CL Home
+  // (contentLead + admin only — editors have their own My Day landing).
+  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config' && t !== 'clHome'; }),
   // Category Heads: their own review surface + the shared context tabs.
   catHead:     ['campaigns', 'editingCalendar', 'today', 'catReview', 'reporting'],
   // Content Leads: CL Home is their landing; the rest are context they might refer to.
@@ -12252,13 +12258,13 @@ function renderTrainingView() {
           '</div>';
         }).join('');
 
-    return '<div style="padding:24px;max-width:1000px;margin:0 auto;">' +
+    return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;">' +
       '<h1 style="margin:0 0 4px;font-size:22px;">Training</h1>' +
       '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
         'Practice briefs. Start one when you\'re idle, edit the demanded video, then mark complete.' +
       '</div>' +
       cards +
-    '</div>';
+    '</div></div>';
   }
 
   // Admin/CL view: completion matrix
@@ -12294,13 +12300,13 @@ function renderTrainingView() {
           '<tbody>' + rows + '</tbody>' +
         '</table>';
 
-    return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
+    return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;">' +
       '<h1 style="margin:0 0 4px;font-size:22px;">Training — Completion matrix</h1>' +
       '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
         '✓ = completed · … = in progress · — = not started. Add modules in Config → Training modules.' +
       '</div>' +
       matrix +
-    '</div>';
+    '</div></div>';
   }
 
   // Fallback for other roles
@@ -12311,153 +12317,178 @@ function renderTrainingView() {
 }
 
 // ── Content Lead Home (item #13) ───────────────────────────────────────────
-// Assembly of existing widgets — no new data model. My campaigns (filtered by
-// contentLead === current user), QC queue (Organic pending for my campaigns),
-// today's approvals across my campaigns, Linear tasks.
+// Restricted to admin + contentLead roles. Shows only videos ON THE VIEWER'S
+// own Organic campaigns that are actionable now (For Review or Needs Revisions).
+// Yours section + two stat tiles (Approved / Sent-for-revisions today) with
+// per-video breakdowns. Every section is collapsible; the state persists in
+// localStorage so Millie's toggle can't stomp Rivers's.
+
+// Per-user, per-browser collapse state. localStorage bypasses the Firestore
+// snapshot completely so two CLs on the same STATE snapshot keep independent
+// toggles. Falls back to the given default when localStorage is blocked.
+function clHomeSectionOpen(key, defaultOpen) {
+  try {
+    var v = localStorage.getItem(key);
+    return v === null ? !!defaultOpen : v === '1';
+  } catch (_) { return !!defaultOpen; }
+}
+
+// Right-hand chip that reads either "▸ Show N" (collapsed) or "▾ Hide"
+// (expanded). Rendered inside a container whose click handler toggles state;
+// the chip itself is presentational so no per-chip onclick is needed.
+function clHomeCollapseChip(open, itemCount) {
+  var label = open ? '▾ Hide' : '▸ Show ' + itemCount;
+  return '<span style="display:inline-flex; align-items:center; gap:4px; ' +
+    'padding:3px 10px; border-radius:12px; ' +
+    'border:1px solid var(--border2); background:var(--bg3); ' +
+    'color:var(--text2); font-size:11px; font-weight:500; font-family:inherit;">' +
+    escapeHtml(label) +
+  '</span>';
+}
+
 function renderContentLeadHomeView() {
   var me = (Auth && Auth.user && Auth.user.displayName) || '';
   var meFirst = (me || '').split(' ')[0];
-  // Non-CL viewers (e.g. Elsa the PM) land on Millie's dashboard — she's the
-  // primary Content Lead per CATEGORY_HEADS. Real CLs (Millie/Rivers) see their own.
+  // Non-CL viewers (admins like Elsa) default to Millie's view — she's the
+  // primary Content Lead. Real CLs see their own dashboard.
   var viewAs = (CONTENT_LEADS.indexOf(meFirst) >= 0) ? meFirst : 'Millie';
   var todayIso = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
 
-  // My campaigns: filter by camp.contentLead === CL name (matches picker)
   var myCamps = (STATE.campaigns || []).filter(function(c) { return (c.contentLead || '') === viewAs; });
   var myCampIds = {}; myCamps.forEach(function(c) { myCampIds[c.id] = true; });
 
-  // Today's approvals across my campaigns
+  // Actionable = For Review (ball is with the CL) or Needs Revisions (worth
+  // keeping visible until the editor re-flips). Everything else — Draft, empty,
+  // Approved, Cancelled — is either not sent to the CL yet or already handled.
+  var pending = contentLeadReviewAssets().filter(function(a) {
+    var q = a.contentLeadQc || '';
+    if (q !== 'For Review' && q !== 'Needs Revisions') return false;
+    return !!myCampIds[a.campaignId];
+  });
+  pending.sort(function(a, b) {
+    var aq = a.contentLeadQc === 'For Review' ? 0 : 1;
+    var bq = b.contentLeadQc === 'For Review' ? 0 : 1;
+    if (aq !== bq) return aq - bq;
+    return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
+  });
+
+  // Today's activity — feeds the two stat tiles below the queue.
   var approvedToday = STATE.assets.filter(function(a) {
     if (!myCampIds[a.campaignId]) return false;
     return a.dateApproved === todayIso || a.clQcDateApproved === todayIso;
   });
+  var revisionsToday = STATE.assets.filter(function(a) {
+    if (!myCampIds[a.campaignId]) return false;
+    return a.clQcDateRevisions === todayIso;
+  });
 
-  // Review queue: all Organic pending (Content Leads share the Organic queue).
-  // Split into Yours (on my campaigns) vs Team queue (everyone else) so a CL
-  // with 0 assigned campaigns doesn't stare at a scary "81 pending" header
-  // that's not really theirs to clear.
-  var pendingAll = contentLeadReviewAssets();
-  var qcOrder = { 'For Review': 0, 'Needs Revisions': 1, 'Draft': 2, '': 3 };
-  function sortByQcThenAge(a, b) {
-    var av = a.contentLeadQc || '';
-    var bv = b.contentLeadQc || '';
-    var ao = (qcOrder[av] !== undefined) ? qcOrder[av] : 3;
-    var bo = (qcOrder[bv] !== undefined) ? qcOrder[bv] : 3;
-    if (ao !== bo) return ao - bo;
-    return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
-  }
-  var mine = pendingAll.filter(function(a) { return !!myCampIds[a.campaignId]; }).sort(sortByQcThenAge);
-  var others = pendingAll.filter(function(a) { return !myCampIds[a.campaignId]; }).sort(sortByQcThenAge);
-
-  // Top strip: 3 compact stat cards.
-  function stat(label, valueHtml, sub) {
-    return '<div class="auto-card" style="text-align:left;">' +
-      '<div style="font-size:11.5px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;">' + escapeHtml(label) + '</div>' +
-      '<div style="margin-top:6px;">' + valueHtml + '</div>' +
-      (sub ? '<div style="font-size:11.5px;color:var(--text3);margin-top:4px;">' + sub + '</div>' : '') +
-    '</div>';
-  }
-
-  var myCampsStat = stat(
-    'My campaigns',
-    '<div style="font-size:26px;font-weight:700;color:var(--text1);">' + myCamps.length + '</div>',
-    myCamps.length
-      ? '<a href="#" onclick="event.preventDefault(); STATE.tab=\'campaigns\'; render();" style="color:var(--accent);">Open Campaigns tab →</a>'
-      : 'Set the Content Lead on a campaign in the campaign edit modal.'
-  );
-  var approvedStat = stat(
-    'Approved today',
-    '<div style="font-size:26px;font-weight:700;color:' + (approvedToday.length ? '#22c55e' : 'var(--text3)') + ';">' + approvedToday.length + '</div>',
-    approvedToday.length ? 'across your campaigns' : 'nothing yet today'
-  );
-
-  var topStrip = '<div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;margin-bottom:20px;">' +
-    myCampsStat + approvedStat +
-  '</div>';
-
-  // Review queue: Approve/Rework cards (merged from the old CL Review tab).
-  // Button styling mirrors Cat Heads Review (subtle border + theme tokens) so
-  // it fits the rest of the app instead of the old raw-<button> block look.
-  function renderReviewCard(a, isMine) {
+  // ── Review card ──────────────────────────────────────────────────────────
+  // Two-line left column: name · category / campaign · editor.
+  // Right column: Final video pill (or muted placeholder) + Approve + Revisions.
+  function renderReviewCard(a) {
     var camp = findCampaignById(a.campaignId);
-    var qc = a.contentLeadQc || 'Draft';
-    var previewLink = a.finalVideo
-      ? '<a href="' + escapeHtml(a.finalVideo) + '" target="_blank" rel="noopener" style="color:var(--accent);">Final video ↗</a>'
-      : '<span style="color:var(--text3);">No final link yet</span>';
-    var briefLink = a.editingBrief
-      ? ' · <a href="' + escapeHtml(a.editingBrief) + '" target="_blank" rel="noopener" style="color:var(--accent);">Brief ↗</a>'
-      : '';
-    var _campIdJs = String(a.campaignId).replace(/'/g, "\\'");
     var _aIdJs = String(a.id).replace(/'/g, "\\'");
-    var trackerLink = ' · <a href="#campaign=' + encodeURIComponent(a.campaignId) + '&asset=' + encodeURIComponent(a.id) +
-      '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + _campIdJs + '\', \'' + _aIdJs + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
-    var qcPill = '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '">' + qc + '</span>';
-    var mineBadge = isMine ? ' <span style="background:var(--accent);color:white;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-left:6px;">MINE</span>' : '';
+    var videoPill = a.finalVideo
+      ? '<a href="' + escapeHtml(a.finalVideo) + '" target="_blank" rel="noopener"' +
+          ' style="border:1px solid var(--accent); background:var(--accent-dim); color:var(--accent2); padding:6px 12px; font-size:13px; border-radius:6px; text-decoration:none; white-space:nowrap; font-weight:500;">' +
+          '▶ Final video</a>'
+      : '<span style="border:1px dashed var(--border2); background:transparent; color:var(--text3); padding:6px 12px; font-size:12px; border-radius:6px; white-space:nowrap;">no final link yet</span>';
     var approveBtn = '<button onclick="App.clReviewApprove(\'' + _aIdJs + '\')" title="Approve — sets Content Lead QC to Approved and stamps today\'s date"' +
       ' style="border:1px solid var(--border2); background:var(--green-bg); color:var(--green-text); padding:5px 12px; font-size:13px; border-radius:6px; cursor:pointer; white-space:nowrap; font-family:inherit; font-weight:500;">✓ Approve</button>';
-    var reworkBtn = '<button onclick="App.clReviewRework(\'' + _aIdJs + '\')" title="Send back for rework — prompts for a note"' +
-      ' style="border:1px solid var(--border2); background:transparent; color:var(--text2); padding:5px 12px; font-size:13px; border-radius:6px; cursor:pointer; white-space:nowrap; font-family:inherit; font-weight:500;">↺ Rework</button>';
-    return '<div class="auto-card" style="margin-bottom:12px;' + (isMine ? 'border-left:3px solid var(--accent);' : '') + '">' +
-      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
-        '<div style="flex:1 1 320px;min-width:280px;">' +
-          '<div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + escapeHtml(a.name || '') + mineBadge + ' <span style="color:var(--text3);font-weight:400;">· ' + escapeHtml(a.category || '—') + '</span></div>' +
-          '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">' + escapeHtml(camp ? camp.name : '—') + ' · Editor: ' + escapeHtml(a.editor || '—') + '</div>' +
-          '<div style="font-size:12px;">' + qcPill + ' &nbsp; ' + previewLink + briefLink + trackerLink + '</div>' +
+    var revisionsBtn = '<button onclick="App.clReviewRework(\'' + _aIdJs + '\')" title="Send back for revisions — prompts for a note"' +
+      ' style="border:1px solid var(--border2); background:transparent; color:var(--text2); padding:5px 12px; font-size:13px; border-radius:6px; cursor:pointer; white-space:nowrap; font-family:inherit; font-weight:500;">↺ Revisions</button>';
+    return '<div class="auto-card" style="margin-bottom:10px;border-left:3px solid var(--accent);">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
+        '<div style="flex:1 1 320px;min-width:260px;">' +
+          '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(a.name || '') +
+            ' <span style="color:var(--text3);font-weight:400;">· ' + escapeHtml(a.category || '—') + '</span>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' +
+            escapeHtml(camp ? camp.name : '—') + ' · ' + escapeHtml(a.editor || '—') +
+          '</div>' +
         '</div>' +
-        '<div style="display:flex;gap:8px;flex-shrink:0;">' + approveBtn + reworkBtn + '</div>' +
+        '<div style="display:flex;gap:6px;flex-shrink:0;align-items:center;">' + videoPill + approveBtn + revisionsBtn + '</div>' +
       '</div>' +
     '</div>';
   }
 
-  function sectionHeader(title, count, subtitle) {
-    return '<div style="display:flex;align-items:baseline;gap:10px;margin:22px 0 10px;">' +
-      '<div style="font-size:13px;font-weight:600;color:var(--text1);">' + escapeHtml(title) +
-        ' <span style="color:var(--text3);font-weight:400;">(' + count + ')</span>' +
-      '</div>' +
-      (subtitle ? '<div style="font-size:11.5px;color:var(--text3);">' + subtitle + '</div>' : '') +
-    '</div>';
-  }
+  // ── Yours section ────────────────────────────────────────────────────────
+  var yoursOpen = clHomeSectionOpen('clHomeYoursOpen', true);
+  var yoursHeader = '<div onclick="App.toggleClHomeSection(\'clHomeYoursOpen\', true)"' +
+    ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;margin:22px 0 10px;border:1px solid var(--border2);border-radius:8px;cursor:pointer;user-select:none;">' +
+    '<div style="display:flex;align-items:baseline;gap:8px;">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text1);">Yours <span style="color:var(--text3);font-weight:400;">(' + pending.length + ')</span></div>' +
+      '<div style="font-size:11.5px;color:var(--text3);">reviews on ' + escapeHtml(viewAs) + '\'s own campaigns</div>' +
+    '</div>' +
+    clHomeCollapseChip(yoursOpen, pending.length) +
+  '</div>';
 
-  // "Yours" section: pending reviews on campaigns Millie/Rivers owns. Empty
-  // state depends on WHY it's empty — no assigned campaigns is a different
-  // problem than "assigned but nothing pending".
-  var mineEmpty;
+  var yoursEmpty;
   if (myCamps.length === 0) {
-    mineEmpty = '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
+    yoursEmpty = '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
       'No campaigns assigned to ' + escapeHtml(viewAs) + ' yet. Set a Content Lead on a campaign to see reviews here.' +
     '</div>';
   } else {
-    mineEmpty = '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
-      'Nothing waiting on ' + escapeHtml(viewAs) + '\'s own campaigns right now.' +
+    yoursEmpty = '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
+      'Nothing waiting on you right now.' +
     '</div>';
   }
-  var mineBody = mine.length
-    ? mine.map(function(a) { return renderReviewCard(a, true); }).join('')
-    : mineEmpty;
+  var yoursBody = !yoursOpen ? '' : (pending.length ? pending.map(renderReviewCard).join('') : yoursEmpty);
 
-  // Team queue: shared Organic backlog on other CLs' campaigns. Always shown;
-  // no collapse toggle (kept it simple after the earlier caret was a source of
-  // confusion — the split into two sections is already enough visual grouping).
-  var teamBody = others.length
-    ? others.map(function(a) { return renderReviewCard(a, false); }).join('')
-    : '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
-        'Team queue clear — nothing else pending across Organic.' +
+  // ── Stat tiles: Approved today + Sent for revisions today ────────────────
+  // Breakdown lists show "<Campaign> · <Category>" per video, capped at 5.
+  // Only rendered when the tile is expanded AND has items.
+  function statBreakdown(items) {
+    if (!items.length) return '';
+    var rows = items.slice(0, 5).map(function(a) {
+      var camp = findCampaignById(a.campaignId);
+      var campName = camp ? camp.name : '—';
+      var cat = a.category || 'Uncategorised';
+      return '<div style="font-size:11.5px;color:var(--text2);margin-top:3px;">' +
+        escapeHtml(campName) + ' <span style="color:var(--text3);">· ' + escapeHtml(cat) + '</span>' +
       '</div>';
+    }).join('');
+    if (items.length > 5) {
+      rows += '<div style="font-size:11.5px;color:var(--text3);margin-top:3px;">+ ' + (items.length - 5) + ' more</div>';
+    }
+    return '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border2);">' + rows + '</div>';
+  }
 
-  // Wrap in .content so the tab scrolls inside .main (which is overflow:hidden).
-  // Without this the whole view is clipped and users can't reach anything past
-  // the first viewport-height of content.
+  function renderStatTile(label, items, key, numberColor) {
+    var open = clHomeSectionOpen(key, false);
+    var canToggle = items.length > 0;
+    var cursor = canToggle ? 'cursor:pointer;' : '';
+    var onclickAttr = canToggle
+      ? ' onclick="App.toggleClHomeSection(\'' + key + '\', false)"'
+      : '';
+    var chipHtml = canToggle ? clHomeCollapseChip(open, items.length) : '';
+    var bodyHtml = (open && canToggle) ? statBreakdown(items) : '';
+    return '<div class="auto-card" style="text-align:left;' + cursor + '"' + onclickAttr + '>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+        '<div style="font-size:11.5px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;">' + escapeHtml(label) + '</div>' +
+        chipHtml +
+      '</div>' +
+      '<div style="font-size:26px;font-weight:700;color:' + numberColor + ';margin-top:6px;">' + items.length + '</div>' +
+      bodyHtml +
+    '</div>';
+  }
+
+  var approvedTile = renderStatTile('Approved today', approvedToday, 'clHomeApprovedOpen',
+    approvedToday.length ? '#22c55e' : 'var(--text3)');
+  var revisionsTile = renderStatTile('Sent for revisions today', revisionsToday, 'clHomeRevisionsOpen',
+    revisionsToday.length ? '#f59e0b' : 'var(--text3)');
+
+  var statStrip = '<div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;margin-top:24px;">' +
+    approvedTile + revisionsTile +
+  '</div>';
+
+  // Wrap in .content so the tab scrolls inside .main (overflow:hidden).
   return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;">' +
     '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead — ' + escapeHtml(viewAs) + '</h1>' +
-    '<div style="font-size:13px;color:var(--text3);margin-bottom:20px;">' +
-      'Your reviews first, then the shared Organic queue. ' +
-      'Rows on your campaigns are marked with a <span style="background:var(--accent);color:white;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;">MINE</span> tag.' +
-    '</div>' +
-    topStrip +
-    sectionHeader('Yours', mine.length, 'reviews on ' + escapeHtml(viewAs) + '\'s own campaigns') +
-    mineBody +
-    sectionHeader('Team queue', others.length, 'shared Organic backlog · other Content Leads\' campaigns') +
-    teamBody +
+    '<div style="font-size:13px;color:var(--text3);margin-bottom:8px;">Your reviews below.</div>' +
+    yoursHeader +
+    yoursBody +
+    statStrip +
   '</div></div>';
 }
 
@@ -12588,7 +12619,8 @@ function renderEditorHomeView() {
     body = mine.map(renderVideoRow).join('');
   }
 
-  return '<div style="padding:24px;max-width:1000px;margin:0 auto;">' +
+  // Wrap in .content so the tab scrolls inside .main (overflow:hidden).
+  return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;">' +
     '<h1 style="margin:0 0 4px;font-size:22px;">My Day — ' + escapeHtml(currentEditor) + '</h1>' +
     '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
       'Your assigned videos. Tick <strong>Done today</strong> for each one you\'ve wrapped, and jot any creative decisions you made. ' +
@@ -12596,7 +12628,7 @@ function renderEditorHomeView() {
     '</div>' +
     body +
     '<div style="margin-top:24px;">' + renderLinearTasksPanel() + '</div>' +
-  '</div>';
+  '</div></div>';
 }
 
 function renderCatReviewView() {
@@ -12885,12 +12917,20 @@ function renderCatReviewCard(a, hideCatBadge, opts) {
 
   // Comments are collapsed by default (optional) — a toggle reveals the thread and the
   // input box, so the card stays compact until you actually want to discuss a video.
+  // When the caller forces them open (Sent-back-for-revisions block), skip the toggle
+  // button entirely: the OR-shortcircuit would render it inert (click flips STATE but
+  // the display stays locked open), which reads as a dead button. Show a static label
+  // instead so the count is still visible.
   var commentsOpen = !!opts.forceCommentsOpen || !!(STATE.catReviewCommentsOpen && STATE.catReviewCommentsOpen[a.id]);
   var commentCount = comments.length;
-  var commentToggle = '<button onclick="App.toggleCatReviewComments(\'' + id + '\')" style="border:none; background:transparent; color:var(--text3); font-size:12px; padding:0; cursor:pointer; display:flex; align-items:center; gap:6px;">' +
-      '<span style="font-family:\'JetBrains Mono\',monospace; font-size:10px;">' + (commentsOpen ? '▼' : '▶') + '</span>' +
-      '<span>💬 Comment' + (commentCount === 1 ? '' : 's') + (commentCount ? ' (' + commentCount + ')' : '') + '</span>' +
-    '</button>';
+  var commentToggle = opts.forceCommentsOpen
+    ? '<div style="color:var(--text3); font-size:12px; display:flex; align-items:center; gap:6px;">' +
+        '<span>💬 Comment' + (commentCount === 1 ? '' : 's') + (commentCount ? ' (' + commentCount + ')' : '') + '</span>' +
+      '</div>'
+    : '<button onclick="App.toggleCatReviewComments(\'' + id + '\')" style="border:none; background:transparent; color:var(--text3); font-size:12px; padding:0; cursor:pointer; display:flex; align-items:center; gap:6px;">' +
+        '<span style="font-family:\'JetBrains Mono\',monospace; font-size:10px;">' + (commentsOpen ? '▼' : '▶') + '</span>' +
+        '<span>💬 Comment' + (commentCount === 1 ? '' : 's') + (commentCount ? ' (' + commentCount + ')' : '') + '</span>' +
+      '</button>';
 
   var commentHint = '<div style="font-size:11.5px; color:var(--text3); font-style:italic; margin-bottom:10px;">For a more streamlined workflow, please leave your comments inside frame.io</div>';
   var commentPanel = !commentsOpen ? '' :
@@ -15697,7 +15737,14 @@ function render() {
   else if (STATE.tab === 'strategy') body = renderStrategyView();
   else if (STATE.tab === 'editorHome') body = renderEditorHomeView();
   else if (STATE.tab === 'training') body = renderTrainingView();
-  else if (STATE.tab === 'clHome') body = renderContentLeadHomeView();
+  else if (STATE.tab === 'clHome') {
+    // Defense-in-depth: only Admins and Content Leads can render the CL view.
+    // Tab visibility already hides it for other roles, but a hand-set STATE.tab
+    // from the console would still open it — fall through to Config in that case.
+    var _clRole = (Auth && Auth.user && Auth.user.role) || 'visitor';
+    if (_clRole === 'admin' || _clRole === 'contentLead') body = renderContentLeadHomeView();
+    else body = renderConfigView();
+  }
   else if (STATE.tab === 'editorStats') body = renderEditorStatsView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
@@ -17719,6 +17766,8 @@ var App = {
     }
     if (newVal === 'Approved') a.clQcDateApproved = todayLocalISO();
     else if (old === 'Approved') a.clQcDateApproved = '';
+    // Sends made today, not current state \u2014 never cleared on the return trip.
+    if (newVal === 'Needs Revisions') a.clQcDateRevisions = todayLocalISO();
     logAction('updated', 'Asset "' + a.name + '" content-lead QC: ' + old + ' \u2192 ' + newVal);
     render();
   },
@@ -17860,7 +17909,7 @@ var App = {
     if (typeof toast === 'function') toast('Approved', 'success');
   },
   clReviewRework: function(id) {
-    var note = (window.prompt('Rework note for editor (optional):') || '').trim();
+    var note = (window.prompt('Revisions note for editor (optional):') || '').trim();
     var a = findAssetById(id);
     if (a && note) {
       a.comments = Array.isArray(a.comments) ? a.comments : [];
@@ -17869,11 +17918,24 @@ var App = {
         author: (Auth && Auth.user && Auth.user.displayName) || 'Content Lead',
         authorEmail: (Auth && Auth.user && Auth.user.email) || '',
         ts: (new Date()).toISOString(),
-        text: 'CL Rework: ' + note
+        text: 'CL Revisions: ' + note
       });
     }
     App.setAssetContentLeadQc(id, 'Needs Revisions');
-    if (typeof toast === 'function') toast('Sent back for rework', 'success');
+    if (typeof toast === 'function') toast('Sent for revisions', 'success');
+  },
+
+  // Toggle a persisted collapse state on CL Home. Key + default come from the
+  // render call site (Yours header + each stat tile). localStorage-backed so
+  // Millie's toggle can't stomp Rivers's (Firestore snapshot is shared).
+  toggleClHomeSection: function(key, defaultOpen) {
+    var open;
+    try {
+      var v = localStorage.getItem(key);
+      open = v === null ? !!defaultOpen : v === '1';
+    } catch (_) { open = !!defaultOpen; }
+    try { localStorage.setItem(key, open ? '0' : '1'); } catch (_) {}
+    render();
   },
 
   setAssetClQcDateApproved: function(id, newDate) {
