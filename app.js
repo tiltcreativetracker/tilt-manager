@@ -2798,6 +2798,29 @@ function toast(msg, type) {
   setTimeout(function() { t.className = 'toast'; }, 2800);
 }
 
+// Idle tracker: stamps _lastInteractionAt on any real user activity, so the
+// cross-tab pill logic below can tell "actively working here" apart from
+// "tab left open, user walked away." Passive+capture so we catch every event
+// without interfering with normal handling. mousemove is throttled because it
+// fires constantly and would otherwise pin the timestamp forever.
+var _lastInteractionAt = Date.now();
+function _markInteraction() { _lastInteractionAt = Date.now(); }
+['mousedown', 'keydown', 'touchstart', 'scroll'].forEach(function(ev) {
+  window.addEventListener(ev, _markInteraction, { passive: true, capture: true });
+});
+var _mmThrottleAt = 0;
+window.addEventListener('mousemove', function() {
+  var now = Date.now();
+  if (now - _mmThrottleAt < 5000) return;
+  _mmThrottleAt = now;
+  _lastInteractionAt = now;
+}, { passive: true, capture: true });
+// Returning to a hidden tab = they're back at the keyboard; treat as activity
+// so the very first teammate edit after a return doesn't auto-reload.
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden) _lastInteractionAt = Date.now();
+});
+
 // Cross-tab update pill: a persistent chip in the topbar right that appears
 // when another tab (same user in another window OR a teammate) has just written
 // changes to Firestore. Data has already synced via onSnapshot — this is a
@@ -2809,10 +2832,24 @@ function toast(msg, type) {
 // change is already applied. So we (a) cap the visible count at "9+", (b)
 // coalesce bursts inside a 2s window into one pill bump, and (c) auto-dismiss
 // after 2 min of no new events since the signal is stale noise by then.
+//
+// Truly-idle tabs (30+ min of no interaction) skip the pill entirely and
+// auto-reload silently when a new teammate edit lands. Rationale: someone who
+// left the tab open at lunch should return to a fresh page, not a stale
+// listener with a "127 updates" chip. Actively-used tabs are never yanked out
+// from under the user — we bail if a modal or input is focused.
 var _CROSS_TAB_COALESCE_MS = 2000;   // bursts inside this window = 1 bump
 var _CROSS_TAB_AUTO_HIDE_MS = 2 * 60 * 1000;  // idle timeout before pill self-dismisses
 var _CROSS_TAB_COUNT_CAP = 9;         // anything above this renders as "9+"
+var _IDLE_AUTO_RELOAD_MS = 30 * 60 * 1000;  // 30 min of no interaction → auto-reload on next teammate edit
 var _crossTabPill = { count: 0, lastName: null, pendingName: null, coalesceTimer: null, hideTimer: null };
+var _idleReloadScheduled = false;
+function _isBusyForIdleReload() {
+  if (document.querySelector('.modal-overlay.open')) return true;
+  var a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return true;
+  return false;
+}
 function _renderCrossTabPill() {
   var el = document.getElementById('cross-tab-pill');
   if (!el) {
@@ -2837,6 +2874,19 @@ function _renderCrossTabPill() {
   _crossTabPill.hideTimer = setTimeout(dismissCrossTabPill, _CROSS_TAB_AUTO_HIDE_MS);
 }
 function showCrossTabUpdatePill(fromName) {
+  // Idle auto-reload: tab AFK for 30+ min AND not mid-edit → refresh silently
+  // instead of showing the pill. Guarded so a burst of edits only triggers one
+  // reload. If they ARE mid-edit (modal / focused input), fall through to the
+  // pill and try again on the next event once the modal closes.
+  if (!_idleReloadScheduled
+      && (Date.now() - _lastInteractionAt) >= _IDLE_AUTO_RELOAD_MS
+      && !_isBusyForIdleReload()) {
+    _idleReloadScheduled = true;
+    if (typeof reloadPreservingView === 'function') reloadPreservingView();
+    else window.location.reload();
+    return;
+  }
+  if (_idleReloadScheduled) return; // reload imminent — don't render a doomed pill
   if (fromName) _crossTabPill.pendingName = String(fromName).split(' ')[0];
   // Already-visible pill: bump immediately so the count reflects reality, but
   // still (re)start the coalesce timer so a burst arriving right after doesn't
