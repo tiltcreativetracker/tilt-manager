@@ -507,7 +507,6 @@ var Fb = {
         editorFilter: true,
         qcFilter: true,
         catReviewWindow: true,
-        clHomeTeamOpen: true,
         videoWeeklyGroup: true,
         search: true,
         logEditor: true,
@@ -12280,8 +12279,8 @@ function renderContentLeadHomeView() {
     approvedToday.length ? 'across your campaigns' : 'nothing yet today'
   );
 
-  var topStrip = '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-bottom:20px;">' +
-    myCampsStat + approvedStat + renderLinearTasksPanel() +
+  var topStrip = '<div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;margin-bottom:20px;">' +
+    myCampsStat + approvedStat +
   '</div>';
 
   // Review queue: Approve/Rework cards (merged from the old CL Review tab).
@@ -12344,38 +12343,30 @@ function renderContentLeadHomeView() {
     ? mine.map(function(a) { return renderReviewCard(a, true); }).join('')
     : mineEmpty;
 
-  // "Team queue" section: shared Organic backlog on other CLs' campaigns.
-  // Collapsed by default when Yours has work — Yours is the priority.
-  var teamKey = 'clHomeTeamOpen';
-  var teamOpen = (mine.length === 0) ? true : !!STATE[teamKey];
-  var caretGlyph = teamOpen ? '▾' : '▸';
-  var teamHeader = '<div style="display:flex;align-items:baseline;gap:10px;margin:22px 0 10px;cursor:pointer;user-select:none;" onclick="App.toggleClHomeTeam()">' +
-    '<div style="font-size:13px;font-weight:600;color:var(--text1);">' + caretGlyph + ' Team queue' +
-      ' <span style="color:var(--text3);font-weight:400;">(' + others.length + ')</span>' +
-    '</div>' +
-    '<div style="font-size:11.5px;color:var(--text3);">shared Organic backlog · other Content Leads\' campaigns</div>' +
-  '</div>';
-  var teamBody = '';
-  if (teamOpen) {
-    teamBody = others.length
-      ? others.map(function(a) { return renderReviewCard(a, false); }).join('')
-      : '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
-          'Team queue clear — nothing else pending across Organic.' +
-        '</div>';
-  }
+  // Team queue: shared Organic backlog on other CLs' campaigns. Always shown;
+  // no collapse toggle (kept it simple after the earlier caret was a source of
+  // confusion — the split into two sections is already enough visual grouping).
+  var teamBody = others.length
+    ? others.map(function(a) { return renderReviewCard(a, false); }).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
+        'Team queue clear — nothing else pending across Organic.' +
+      '</div>';
 
-  return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
+  // Wrap in .content so the tab scrolls inside .main (which is overflow:hidden).
+  // Without this the whole view is clipped and users can't reach anything past
+  // the first viewport-height of content.
+  return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;">' +
     '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead — ' + escapeHtml(viewAs) + '</h1>' +
     '<div style="font-size:13px;color:var(--text3);margin-bottom:20px;">' +
-      'Your stats up top; your own reviews first, then the shared Organic queue below. ' +
+      'Your reviews first, then the shared Organic queue. ' +
       'Rows on your campaigns are marked with a <span style="background:var(--accent);color:white;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;">MINE</span> tag.' +
     '</div>' +
     topStrip +
     sectionHeader('Yours', mine.length, 'reviews on ' + escapeHtml(viewAs) + '\'s own campaigns') +
     mineBody +
-    teamHeader +
+    sectionHeader('Team queue', others.length, 'shared Organic backlog · other Content Leads\' campaigns') +
     teamBody +
-  '</div>';
+  '</div></div>';
 }
 
 // ── Linear tasks widget (item #10) ─────────────────────────────────────────
@@ -17791,14 +17782,6 @@ var App = {
     }
     App.setAssetContentLeadQc(id, 'Needs Revisions');
     if (typeof toast === 'function') toast('Sent back for rework', 'success');
-  },
-
-  // Collapse/expand the "Team queue" section on CL Home. Per-user UI toggle;
-  // not persisted to Firestore (state key is intentionally omitted from the
-  // upload path, same as other transient viewer flags).
-  toggleClHomeTeam: function() {
-    STATE.clHomeTeamOpen = !STATE.clHomeTeamOpen;
-    render();
   },
 
   setAssetClQcDateApproved: function(id, newDate) {
