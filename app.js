@@ -507,6 +507,7 @@ var Fb = {
         editorFilter: true,
         qcFilter: true,
         catReviewWindow: true,
+        clHomeTeamOpen: true,
         videoWeeklyGroup: true,
         search: true,
         logEditor: true,
@@ -12240,18 +12241,22 @@ function renderContentLeadHomeView() {
     return a.dateApproved === todayIso || a.clQcDateApproved === todayIso;
   });
 
-  // Review queue: same shape as the old CL Review tab (all Organic pending).
-  // Not narrowed to my campaigns — Content Leads share the Organic queue.
-  var pending = contentLeadReviewAssets();
+  // Review queue: all Organic pending (Content Leads share the Organic queue).
+  // Split into Yours (on my campaigns) vs Team queue (everyone else) so a CL
+  // with 0 assigned campaigns doesn't stare at a scary "81 pending" header
+  // that's not really theirs to clear.
+  var pendingAll = contentLeadReviewAssets();
   var qcOrder = { 'For Review': 0, 'Needs Revisions': 1, 'Draft': 2, '': 3 };
-  pending.sort(function(a, b) {
+  function sortByQcThenAge(a, b) {
     var av = a.contentLeadQc || '';
     var bv = b.contentLeadQc || '';
     var ao = (qcOrder[av] !== undefined) ? qcOrder[av] : 3;
     var bo = (qcOrder[bv] !== undefined) ? qcOrder[bv] : 3;
     if (ao !== bo) return ao - bo;
     return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
-  });
+  }
+  var mine = pendingAll.filter(function(a) { return !!myCampIds[a.campaignId]; }).sort(sortByQcThenAge);
+  var others = pendingAll.filter(function(a) { return !myCampIds[a.campaignId]; }).sort(sortByQcThenAge);
 
   // Top strip: 3 compact stat cards.
   function stat(label, valueHtml, sub) {
@@ -12280,7 +12285,9 @@ function renderContentLeadHomeView() {
   '</div>';
 
   // Review queue: Approve/Rework cards (merged from the old CL Review tab).
-  function renderReviewCard(a) {
+  // Button styling mirrors Cat Heads Review (subtle border + theme tokens) so
+  // it fits the rest of the app instead of the old raw-<button> block look.
+  function renderReviewCard(a, isMine) {
     var camp = findCampaignById(a.campaignId);
     var qc = a.contentLeadQc || 'Draft';
     var previewLink = a.finalVideo
@@ -12294,35 +12301,80 @@ function renderContentLeadHomeView() {
     var trackerLink = ' · <a href="#campaign=' + encodeURIComponent(a.campaignId) + '&asset=' + encodeURIComponent(a.id) +
       '" onclick="event.preventDefault(); App.openAssetInTracker(\'' + _campIdJs + '\', \'' + _aIdJs + '\')" style="color:var(--accent);">Open in Campaigns ↗</a>';
     var qcPill = '<span class="cat-head-status-badge st-' + qc.replace(/ /g, '_') + '">' + qc + '</span>';
-    var mine = !!myCampIds[a.campaignId];
-    var mineBadge = mine ? ' <span style="background:var(--accent);color:white;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-left:6px;">MINE</span>' : '';
-    return '<div class="auto-card" style="margin-bottom:12px;' + (mine ? 'border-left:3px solid var(--accent);' : '') + '">' +
+    var mineBadge = isMine ? ' <span style="background:var(--accent);color:white;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-left:6px;">MINE</span>' : '';
+    var approveBtn = '<button onclick="App.clReviewApprove(\'' + _aIdJs + '\')" title="Approve — sets Content Lead QC to Approved and stamps today\'s date"' +
+      ' style="border:1px solid var(--border2); background:var(--green-bg); color:var(--green-text); padding:5px 12px; font-size:13px; border-radius:6px; cursor:pointer; white-space:nowrap; font-family:inherit; font-weight:500;">✓ Approve</button>';
+    var reworkBtn = '<button onclick="App.clReviewRework(\'' + _aIdJs + '\')" title="Send back for rework — prompts for a note"' +
+      ' style="border:1px solid var(--border2); background:transparent; color:var(--text2); padding:5px 12px; font-size:13px; border-radius:6px; cursor:pointer; white-space:nowrap; font-family:inherit; font-weight:500;">↺ Rework</button>';
+    return '<div class="auto-card" style="margin-bottom:12px;' + (isMine ? 'border-left:3px solid var(--accent);' : '') + '">' +
       '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
         '<div style="flex:1 1 320px;min-width:280px;">' +
           '<div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + escapeHtml(a.name || '') + mineBadge + ' <span style="color:var(--text3);font-weight:400;">· ' + escapeHtml(a.category || '—') + '</span></div>' +
           '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">' + escapeHtml(camp ? camp.name : '—') + ' · Editor: ' + escapeHtml(a.editor || '—') + '</div>' +
           '<div style="font-size:12px;">' + qcPill + ' &nbsp; ' + previewLink + briefLink + trackerLink + '</div>' +
         '</div>' +
-        '<div style="display:flex;gap:8px;flex-shrink:0;">' +
-          '<button class="btn btn-primary" style="background:#22c55e;border-color:#22c55e;" onclick="App.clReviewApprove(\'' + _aIdJs + '\')" title="Approve — sets Content Lead QC to Approved and stamps today\'s date">✓ Approve</button>' +
-          '<button class="btn" onclick="App.clReviewRework(\'' + _aIdJs + '\')" title="Send back for rework — prompts for a note">✗ Rework</button>' +
-        '</div>' +
+        '<div style="display:flex;gap:8px;flex-shrink:0;">' + approveBtn + reworkBtn + '</div>' +
       '</div>' +
     '</div>';
   }
 
-  var queueBody = pending.length
-    ? pending.map(renderReviewCard).join('')
-    : '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">Nothing waiting on Content Lead review. All Organic videos are approved or in editor hands.</div>';
+  function sectionHeader(title, count, subtitle) {
+    return '<div style="display:flex;align-items:baseline;gap:10px;margin:22px 0 10px;">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text1);">' + escapeHtml(title) +
+        ' <span style="color:var(--text3);font-weight:400;">(' + count + ')</span>' +
+      '</div>' +
+      (subtitle ? '<div style="font-size:11.5px;color:var(--text3);">' + subtitle + '</div>' : '') +
+    '</div>';
+  }
+
+  // "Yours" section: pending reviews on campaigns Millie/Rivers owns. Empty
+  // state depends on WHY it's empty — no assigned campaigns is a different
+  // problem than "assigned but nothing pending".
+  var mineEmpty;
+  if (myCamps.length === 0) {
+    mineEmpty = '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
+      'No campaigns assigned to ' + escapeHtml(viewAs) + ' yet. Set a Content Lead on a campaign to see reviews here.' +
+    '</div>';
+  } else {
+    mineEmpty = '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
+      'Nothing waiting on ' + escapeHtml(viewAs) + '\'s own campaigns right now.' +
+    '</div>';
+  }
+  var mineBody = mine.length
+    ? mine.map(function(a) { return renderReviewCard(a, true); }).join('')
+    : mineEmpty;
+
+  // "Team queue" section: shared Organic backlog on other CLs' campaigns.
+  // Collapsed by default when Yours has work — Yours is the priority.
+  var teamKey = 'clHomeTeamOpen';
+  var teamOpen = (mine.length === 0) ? true : !!STATE[teamKey];
+  var caretGlyph = teamOpen ? '▾' : '▸';
+  var teamHeader = '<div style="display:flex;align-items:baseline;gap:10px;margin:22px 0 10px;cursor:pointer;user-select:none;" onclick="App.toggleClHomeTeam()">' +
+    '<div style="font-size:13px;font-weight:600;color:var(--text1);">' + caretGlyph + ' Team queue' +
+      ' <span style="color:var(--text3);font-weight:400;">(' + others.length + ')</span>' +
+    '</div>' +
+    '<div style="font-size:11.5px;color:var(--text3);">shared Organic backlog · other Content Leads\' campaigns</div>' +
+  '</div>';
+  var teamBody = '';
+  if (teamOpen) {
+    teamBody = others.length
+      ? others.map(function(a) { return renderReviewCard(a, false); }).join('')
+      : '<div style="padding:20px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:10px;background:var(--bg2);font-size:12.5px;">' +
+          'Team queue clear — nothing else pending across Organic.' +
+        '</div>';
+  }
 
   return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
     '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead — ' + escapeHtml(viewAs) + '</h1>' +
     '<div style="font-size:13px;color:var(--text3);margin-bottom:20px;">' +
-      'Your stats up top; every Organic video waiting on CL review below. Rows on your campaigns are highlighted with a <span style="background:var(--accent);color:white;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;">MINE</span> tag.' +
+      'Your stats up top; your own reviews first, then the shared Organic queue below. ' +
+      'Rows on your campaigns are marked with a <span style="background:var(--accent);color:white;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;">MINE</span> tag.' +
     '</div>' +
     topStrip +
-    '<div style="font-size:13px;font-weight:600;color:var(--text1);margin-bottom:10px;">Review queue (' + pending.length + ' pending)</div>' +
-    queueBody +
+    sectionHeader('Yours', mine.length, 'reviews on ' + escapeHtml(viewAs) + '\'s own campaigns') +
+    mineBody +
+    teamHeader +
+    teamBody +
   '</div>';
 }
 
@@ -17739,6 +17791,14 @@ var App = {
     }
     App.setAssetContentLeadQc(id, 'Needs Revisions');
     if (typeof toast === 'function') toast('Sent back for rework', 'success');
+  },
+
+  // Collapse/expand the "Team queue" section on CL Home. Per-user UI toggle;
+  // not persisted to Firestore (state key is intentionally omitted from the
+  // upload path, same as other transient viewer flags).
+  toggleClHomeTeam: function() {
+    STATE.clHomeTeamOpen = !STATE.clHomeTeamOpen;
+    render();
   },
 
   setAssetClQcDateApproved: function(id, newDate) {
