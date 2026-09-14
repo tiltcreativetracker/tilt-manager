@@ -411,6 +411,7 @@ var Fb = {
       categoriesOrganic: STATE.categoriesOrganic,
       sellers: Array.isArray(STATE.sellers) ? STATE.sellers : [],
       products: Array.isArray(STATE.products) ? STATE.products : [],
+      brollDailyGoal: (typeof STATE.brollDailyGoal === 'number' && STATE.brollDailyGoal >= 0) ? STATE.brollDailyGoal : 20,
       campaigns: STATE.campaigns,
       pendingBatches: STATE.pendingBatches,
       recentNotifKeys: Array.isArray(STATE.recentNotifKeys) ? STATE.recentNotifKeys.slice(0, 300) : [],
@@ -2327,6 +2328,10 @@ var STATE = {
   brollBulkSelection: {},      // { <id>: true } — transient bulk-select state (shift-click)
   brollLastSyncStats: null,    // last { added, updated, archived } stashed after Sync-now
   brollSyncBusy: false,        // true while a manual sync is running
+  // Shared daily tagging goal per editor. Used by the "Daily Clip-Tagging Task"
+  // card in Notifications to compute Remaining = goal - taggedToday. Persisted
+  // to Firestore so everyone sees the same number.
+  brollDailyGoal: 20,
   campaigns: [
     { id: 1, country: 'UK', rank: 1, name: 'Privilege Supply \u2013 Luxury', brief: 'High-end product showcase, tone = aspirational', driveId: '1a2B3cD4eF5gH6iJ', category: 'Luxury', type: 'Paid Ads', slackOverride: '' },
     { id: 2, country: 'UK', rank: 2, name: 'Privilege Supply \u2013 Essentials', brief: 'Everyday essentials, tone = practical', driveId: '', category: 'Essentials', type: 'Paid Ads', slackOverride: '' },
@@ -9694,6 +9699,66 @@ function renderNotificationsView() {
       '<div class="batch-grid">' + chaCards + '</div>' +
     '</div>' +
     (function() {
+      // Daily Clip-Tagging Task \u2014 morning nudge posted in each editor's daily
+      // Slack thread. Count is auto-derived from STATE.broll (taggedBy + taggedAt
+      // today UK). No auto-send \u2014 Elsa clicks Send per editor. Thread must be
+      // set today; no webhook fallback here (webhook would broadcast to the main
+      // channel, and this message is meant to be a private-ish nudge in-thread).
+      var TAG_EDS = ['Zidni', 'Sharm', 'Patty'];
+      var goal = getBrollDailyGoal();
+      var tagCards = TAG_EDS.map(function(ed) {
+        var tagged = brollTaggedByEditorToday(ed);
+        var remaining = Math.max(0, goal - tagged);
+        var pct = goal > 0 ? Math.min(100, Math.round((tagged / goal) * 100)) : 0;
+        var thread = resolveDailyThreadForEditor(ed);
+        var hasThread = !!thread;
+        var canSend = hasThread && goal > 0;
+        var threadDot = hasThread
+          ? '<span style="color:var(--green-text);" title="Daily thread set for today">\u2022 thread</span>'
+          : '<span style="color:var(--text3);" title="No thread today \u2014 set it in Automations">\u2022 no thread</span>';
+        var statusLine = goal <= 0
+          ? '<span style="color:var(--text3);">goal off</span>'
+          : (tagged >= goal
+              ? '<span style="color:var(--green-text);">\u{1F389} ' + tagged + '/' + goal + ' \u2014 done for the day</span>'
+              : '<span style="color:var(--text2);">' + tagged + ' tagged \u00b7 <strong style="color:var(--text1);">' + remaining + '</strong> left of ' + goal + '</span>');
+        var sendTitle = !hasThread
+          ? 'No daily thread set for ' + ed + ' \u2014 set it in Automations first'
+          : (goal <= 0 ? 'Set a daily goal above zero to enable sending' : 'Post today\'s task in ' + ed + '\'s thread');
+        var sendAttrs = canSend
+          ? 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '"'
+          : 'class="sent-copy-btn" title="' + escapeHtml(sendTitle) + '" disabled style="opacity:0.45; cursor:not-allowed;"';
+        var barColor = tagged >= goal ? 'var(--green-text)' : 'var(--accent2)';
+        var barHtml = '<div style="margin-top:6px; height:4px; background:var(--bg3); border-radius:3px; overflow:hidden;">' +
+          '<div style="height:100%; width:' + pct + '%; background:' + barColor + '; transition:width 0.3s;"></div>' +
+        '</div>';
+        return '<div class="batch-card">' +
+          '<div class="batch-card-header">' +
+            '<div class="editor-avatar av-' + ed + '">' + editorInitials(ed) + '</div>' +
+            '<div style="flex:1; min-width:0;">' +
+              '<div style="font-size:13px; font-weight:600; color:var(--text1);">' + ed + ' \u00b7 ' + threadDot + '</div>' +
+              '<div style="font-size:11px; margin-top:2px;">' + statusLine + '</div>' +
+              barHtml +
+            '</div>' +
+            '<button ' + sendAttrs + ' onclick="App.sendClipTaggingTask(\'' + ed + '\')">\u{1F680}</button>' +
+            '<button class="sent-copy-btn" title="Copy today\'s task message" onclick="App.copyClipTaggingTask(\'' + ed + '\')">\u{1F4CB}</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      var goalRow = '<div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">' +
+        '<span style="font-size:12px; color:var(--text2);">Daily goal per editor:</span>' +
+        '<input type="number" id="broll-daily-goal-input" min="0" max="500" value="' + goal + '" ' +
+          'style="width:70px; padding:4px 8px; font-size:12px; border:1px solid var(--border2); background:var(--bg3); color:var(--text1); border-radius:4px;">' +
+        '<button class="save-btn" style="padding:4px 12px;" onclick="App.setBrollDailyGoal()">Save</button>' +
+        '<span style="font-size:11px; color:var(--text3);">clips</span>' +
+      '</div>';
+      return '<div class="section-title">Daily Clip-Tagging Task <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(post in each editor\'s daily Slack thread \u00b7 count auto-updates as they tag)</span></div>' +
+        '<div class="auto-card">' +
+          '<div class="auto-desc" style="margin:0 0 10px; font-size:11.5px; color:var(--text3);">One nudge per editor with today\'s tagging goal and how many they\'ve done so far (counted from the Clips tab \u2014 <code>taggedBy</code> \u00b7 <code>taggedAt</code>). \u{1F680} posts inside that editor\'s daily Slack thread. Disabled if no thread is set today or the goal is 0. No webhook fallback \u2014 skipped rather than broadcast to the main channel.</div>' +
+          goalRow +
+          '<div class="batch-grid">' + tagCards + '</div>' +
+        '</div>';
+    })() +
+    (function() {
       // Daily tally \u2014 one card per editor (Zidni, Sharm, Patty) summarising the
       // videos that editor approved today, with each video's CH QC status. Routes
       // into the editor's daily Slack thread when set; otherwise webhook fallback.
@@ -14495,6 +14560,66 @@ function sweepStaleDailyThreads() {
   return changed;
 }
 
+// ===================== CLIP TAGGING TASK (daily) =====================
+// Elsa's morning workflow: for each editor with a Slack thread today, see how
+// many clips they tagged so far, how many are left in the shared goal, and
+// post the "today's tagging task" message straight into their thread. Count is
+// derived from STATE.broll (taggedBy = editor's email, taggedAt within today UK).
+// No new backend — reuses postToSlackThread() and the existing dailyThreads slot.
+
+// Resolves the shared goal with a safe default. Callers should treat 0 as "no
+// goal set" (button disables) so nobody accidentally posts "goal 0".
+function getBrollDailyGoal() {
+  var g = STATE.brollDailyGoal;
+  if (typeof g !== 'number' || !isFinite(g) || g < 0) return 20;
+  return Math.floor(g);
+}
+
+// Count clips whose LAST tag write is by this editor AND landed today (UK).
+// A subsequent editor re-tagging a clip re-attributes it, matching what the
+// Clips tab already shows in the tag panel. taggedAt is a Firestore Timestamp
+// on live data and can arrive as a JS Date on cache — handle both.
+function brollTaggedByEditorToday(editor) {
+  if (!editor) return 0;
+  if (!Array.isArray(STATE.broll) || !STATE.broll.length) return 0;
+  var today = todayUK();
+  var count = 0;
+  STATE.broll.forEach(function(c) {
+    if (!c || !c.taggedBy || !c.taggedAt) return;
+    if (emailToEditor(c.taggedBy) !== editor) return;
+    var d = null;
+    try {
+      d = (typeof c.taggedAt.toDate === 'function') ? c.taggedAt.toDate() : new Date(c.taggedAt);
+    } catch (_) { return; }
+    if (!d || isNaN(d.getTime())) return;
+    var isoUK = d.toLocaleDateString('en-CA', { timeZone: BIZ_TZ });
+    if (isoUK === today) count += 1;
+  });
+  return count;
+}
+
+// Build the Slack message posted into the editor's daily thread. Two shapes:
+// - Goal not yet met: prompt with tagged/goal/remaining and where to work.
+// - Goal met: a short "done for the day" nudge (still handy if Elsa wants to
+//   acknowledge in-thread instead of leaving them wondering).
+function buildClipTaggingMessageForEditor(editor) {
+  var goal = getBrollDailyGoal();
+  var tagged = brollTaggedByEditorToday(editor);
+  var remaining = Math.max(0, goal - tagged);
+  var mention = mentionEditor(editor);
+  if (tagged >= goal && goal > 0) {
+    return ':tada: ' + mention + ' — ' + tagged + '/' + goal + ' clips tagged today. Nice, you\'re done for the day!';
+  }
+  var lines = [
+    ':clapper: ' + mention + ' — daily clip-tagging task',
+    'Goal: tag *' + goal + '* clips today',
+    'Tagged so far: *' + tagged + '* · Remaining: *' + remaining + '*',
+    '',
+    'Head to the *Clips* tab → filter *Untagged* → J/K to move, 1–5 for type. Thanks!'
+  ];
+  return lines.join('\n');
+}
+
 // ===================== DAILY TALLY (per-editor) =====================
 // Per-editor list of videos that the editor approved today. Each entry carries the
 // asset's CH QC status so the message can read "CH QC: <status>" beside each video.
@@ -18451,6 +18576,68 @@ var App = {
       var ta = document.createElement('textarea');
       ta.value = msg; document.body.appendChild(ta); ta.select();
       try { document.execCommand('copy'); toast('Copied ' + editor + ' tally', 'success'); }
+      catch (e) { toast('Copy failed', 'error'); }
+      document.body.removeChild(ta);
+    }
+  },
+
+  // Save the shared daily clip-tagging goal. Clamps to 0..500 and re-renders so
+  // the Remaining/progress bars update immediately.
+  setBrollDailyGoal: function() {
+    var input = document.getElementById('broll-daily-goal-input');
+    if (!input) return;
+    var n = parseInt(input.value, 10);
+    if (!isFinite(n) || n < 0) { toast('Enter a number 0 or higher', 'error'); return; }
+    if (n > 500) n = 500;
+    STATE.brollDailyGoal = n;
+    saveState();
+    logAction('updated', 'Clip-tagging daily goal set to ' + n);
+    toast('Goal saved: ' + n + ' clips/day', 'success');
+    render();
+  },
+
+  // Post today's clip-tagging task into the editor's daily Slack thread. Refuses
+  // when no thread is set today (webhook fallback would broadcast to the main
+  // channel, which is not what this message is for).
+  sendClipTaggingTask: function(editor) {
+    var thread = resolveDailyThreadForEditor(editor);
+    if (!thread) { toast('No daily thread set for ' + editor + ' — set it in Automations', 'error'); return; }
+    var msg = buildClipTaggingMessageForEditor(editor);
+    if (!msg) { toast('Nothing to send', 'error'); return; }
+    toast('Sending tagging task for ' + editor + '…', '');
+    postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+      if (r && r.ok) {
+        STATE.sentNotifications.unshift({
+          time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
+          reason: 'clip-tag-task', body: msg
+        });
+        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+        logAction('notified', 'Clip-tagging task sent for ' + editor + ' (thread)');
+        toast('✓ Task posted in ' + editor + '\'s thread', 'success');
+        render();
+      } else {
+        var reason = (r && r.body) || 'unknown error';
+        logAction('deleted', 'Clip-tagging task failed for ' + editor + ': ' + reason);
+        toast('Post failed for ' + editor + ': ' + reason, 'error');
+      }
+    }).catch(function(err) {
+      var reason = (err && (err.message || err.code)) || 'network error';
+      logAction('deleted', 'Clip-tagging task failed for ' + editor + ': ' + reason);
+      toast('Post failed for ' + editor + ': ' + reason, 'error');
+    });
+  },
+
+  // Copy today's clip-tagging task message to the clipboard (in case the thread
+  // isn't set or Elsa wants to paste it manually).
+  copyClipTaggingTask: function(editor) {
+    var msg = buildClipTaggingMessageForEditor(editor);
+    if (!msg) { toast('Nothing to copy', 'error'); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(msg).then(function() { toast('Copied ' + editor + ' task', 'success'); });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = msg; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('Copied ' + editor + ' task', 'success'); }
       catch (e) { toast('Copy failed', 'error'); }
       document.body.removeChild(ta);
     }
