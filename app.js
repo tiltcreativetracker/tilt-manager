@@ -12160,10 +12160,13 @@ function renderTrainingView() {
 function renderContentLeadHomeView() {
   var me = (Auth && Auth.user && Auth.user.displayName) || '';
   var meFirst = (me || '').split(' ')[0];
+  // Non-CL viewers (e.g. Elsa the PM) land on Millie's dashboard — she's the
+  // primary Content Lead per CATEGORY_HEADS. Real CLs (Millie/Rivers) see their own.
+  var viewAs = (CONTENT_LEADS.indexOf(meFirst) >= 0) ? meFirst : 'Millie';
   var todayIso = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
 
-  // My campaigns: filter by camp.contentLead === my first name (matches picker)
-  var myCamps = (STATE.campaigns || []).filter(function(c) { return (c.contentLead || '') === meFirst; });
+  // My campaigns: filter by camp.contentLead === CL name (matches picker)
+  var myCamps = (STATE.campaigns || []).filter(function(c) { return (c.contentLead || '') === viewAs; });
   var myCampIds = {}; myCamps.forEach(function(c) { myCampIds[c.id] = true; });
 
   // Today's approvals across my campaigns
@@ -12248,7 +12251,7 @@ function renderContentLeadHomeView() {
     : '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">Nothing waiting on Content Lead review. All Organic videos are approved or in editor hands.</div>';
 
   return '<div style="padding:24px;max-width:1200px;margin:0 auto;">' +
-    '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead' + (meFirst ? ' — ' + escapeHtml(meFirst) : '') + '</h1>' +
+    '<h1 style="margin:0 0 4px;font-size:22px;">Content Lead — ' + escapeHtml(viewAs) + '</h1>' +
     '<div style="font-size:13px;color:var(--text3);margin-bottom:20px;">' +
       'Your stats up top; every Organic video waiting on CL review below. Rows on your campaigns are highlighted with a <span style="background:var(--accent);color:white;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;">MINE</span> tag.' +
     '</div>' +
