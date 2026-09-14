@@ -2802,14 +2802,18 @@ function toast(msg, type) {
 // when another tab (same user in another window OR a teammate) has just written
 // changes to Firestore. Data has already synced via onSnapshot — this is a
 // comfort signal so the user knows their view was updated, with a Reload
-// button for the (rare) case where the sync missed something. Increments a
-// counter for repeated changes so the user sees activity. Stays visible until
-// the user clicks Reload or × (no auto-hide — Elsa asked for a persistent
-// reminder so she doesn't miss it while heads-down in another window).
-var _crossTabPill = { count: 0, lastName: null };
-function showCrossTabUpdatePill(fromName) {
-  _crossTabPill.count += 1;
-  if (fromName) _crossTabPill.lastName = String(fromName).split(' ')[0];
+// button for the (rare) case where the sync missed something.
+//
+// Anti-spam: an idle tab can accumulate 90+ teammate edits in a session, and a
+// counter climbing that high reads as "the app is broken" when actually every
+// change is already applied. So we (a) cap the visible count at "9+", (b)
+// coalesce bursts inside a 2s window into one pill bump, and (c) auto-dismiss
+// after 2 min of no new events since the signal is stale noise by then.
+var _CROSS_TAB_COALESCE_MS = 2000;   // bursts inside this window = 1 bump
+var _CROSS_TAB_AUTO_HIDE_MS = 2 * 60 * 1000;  // idle timeout before pill self-dismisses
+var _CROSS_TAB_COUNT_CAP = 9;         // anything above this renders as "9+"
+var _crossTabPill = { count: 0, lastName: null, pendingName: null, coalesceTimer: null, hideTimer: null };
+function _renderCrossTabPill() {
   var el = document.getElementById('cross-tab-pill');
   if (!el) {
     el = document.createElement('div');
@@ -2817,21 +2821,59 @@ function showCrossTabUpdatePill(fromName) {
     el.className = 'cross-tab-pill';
     document.body.appendChild(el);
   }
+  var shownCount = _crossTabPill.count > _CROSS_TAB_COUNT_CAP
+    ? (_CROSS_TAB_COUNT_CAP + '+')
+    : _crossTabPill.count;
   var label = _crossTabPill.count === 1
     ? ('New updates' + (_crossTabPill.lastName ? ' from ' + escapeHtml(_crossTabPill.lastName) : ''))
-    : (_crossTabPill.count + ' updates' + (_crossTabPill.lastName ? ' · latest from ' + escapeHtml(_crossTabPill.lastName) : ''));
+    : (shownCount + ' updates' + (_crossTabPill.lastName ? ' · latest from ' + escapeHtml(_crossTabPill.lastName) : ''));
   el.innerHTML =
     '<span class="cross-tab-pill-dot"></span>' +
     '<span class="cross-tab-pill-label">' + label + '</span>' +
     '<button type="button" class="cross-tab-pill-reload" onclick="reloadPreservingView()" title="Reload to get the latest (keeps you on the same tab and campaign)">Reload</button>' +
     '<button type="button" class="cross-tab-pill-dismiss" onclick="dismissCrossTabPill()" title="Dismiss (data has already synced)" aria-label="Dismiss">×</button>';
   el.classList.add('visible');
+  if (_crossTabPill.hideTimer) clearTimeout(_crossTabPill.hideTimer);
+  _crossTabPill.hideTimer = setTimeout(dismissCrossTabPill, _CROSS_TAB_AUTO_HIDE_MS);
+}
+function showCrossTabUpdatePill(fromName) {
+  if (fromName) _crossTabPill.pendingName = String(fromName).split(' ')[0];
+  // Already-visible pill: bump immediately so the count reflects reality, but
+  // still (re)start the coalesce timer so a burst arriving right after doesn't
+  // trigger another render per event.
+  if (_crossTabPill.count > 0 && !_crossTabPill.coalesceTimer) {
+    _crossTabPill.count += 1;
+    if (_crossTabPill.pendingName) _crossTabPill.lastName = _crossTabPill.pendingName;
+    _crossTabPill.pendingName = null;
+    _renderCrossTabPill();
+  }
+  if (_crossTabPill.coalesceTimer) clearTimeout(_crossTabPill.coalesceTimer);
+  _crossTabPill.coalesceTimer = setTimeout(function() {
+    _crossTabPill.coalesceTimer = null;
+    // First-ever pill for this quiet stretch: promote the pending name and count.
+    if (_crossTabPill.count === 0) {
+      _crossTabPill.count = 1;
+      if (_crossTabPill.pendingName) _crossTabPill.lastName = _crossTabPill.pendingName;
+      _crossTabPill.pendingName = null;
+      _renderCrossTabPill();
+    } else if (_crossTabPill.pendingName) {
+      // Trailing edits inside the coalesce window that were pending: fold them
+      // into a single bump so a burst = one increment, not one-per-event.
+      _crossTabPill.count += 1;
+      _crossTabPill.lastName = _crossTabPill.pendingName;
+      _crossTabPill.pendingName = null;
+      _renderCrossTabPill();
+    }
+  }, _CROSS_TAB_COALESCE_MS);
 }
 function dismissCrossTabPill() {
   var el = document.getElementById('cross-tab-pill');
   if (el) el.classList.remove('visible');
   _crossTabPill.count = 0;
   _crossTabPill.lastName = null;
+  _crossTabPill.pendingName = null;
+  if (_crossTabPill.coalesceTimer) { clearTimeout(_crossTabPill.coalesceTimer); _crossTabPill.coalesceTimer = null; }
+  if (_crossTabPill.hideTimer) { clearTimeout(_crossTabPill.hideTimer); _crossTabPill.hideTimer = null; }
 }
 
 // Per-user UI prefs (tab, active campaign, calendar month) are excluded from
