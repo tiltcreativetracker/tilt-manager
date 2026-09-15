@@ -1413,3 +1413,108 @@ exports.runBiWeeklyKpiNow = onCall(
     return await biWeeklyKpiCore();
   }
 );
+
+// ── Daily editor threads: post the parent Slack message from the server ──
+// A test-only callable that mirrors what the future scheduler will do for
+// one editor: post the parent message into the editor's channel and write
+// the {date, channelId, threadTs, url} slot into state/app.dailyThreads so
+// the existing reply-routing at postToSlackThread() picks it up unchanged.
+//
+// Channel is derived from state/app.editorSlackChannels[editor], which is
+// stored as a URL. Accepts both a bare channel URL (…/archives/CID) and a
+// message permalink (…/archives/CID/pXXX).
+function extractChannelIdFromUrl(u) {
+  if (!u) return null;
+  const m = String(u).match(/\/archives\/([A-Z0-9]+)/i);
+  return m ? m[1] : null;
+}
+
+function ukDateISO() {
+  // Matches client's todayUK(): en-CA locale in Europe/London → YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+}
+
+function ukDateLabel() {
+  // Human label for the parent message opener, e.g. "Tue 16 Sep".
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short',
+  }).format(new Date());
+}
+
+async function postDailyThreadForEditorCore(editor) {
+  const snap = await db.collection('state').doc('app').get();
+  if (!snap.exists) throw new HttpsError('failed-precondition', 'state/app not found');
+  const data = snap.data() || {};
+  const channels = data.editorSlackChannels || {};
+  const channelUrl = channels[editor];
+  const channelId = extractChannelIdFromUrl(channelUrl);
+  if (!channelId) {
+    return { ok: false, editor, reason: 'no-channel-configured', channelUrl: channelUrl || null };
+  }
+
+  const dateISO = ukDateISO();
+
+  // Idempotency guard: if today's slot is already set, don't double-post.
+  const existing = (data.dailyThreads || {})[editor];
+  if (existing && existing.date === dateISO && existing.channelId && existing.threadTs) {
+    return { ok: true, editor, alreadySet: true, slot: existing };
+  }
+
+  const text = ':thread: *' + editor + ' · ' + ukDateLabel() + '* — daily thread';
+
+  const postRes = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': 'Bearer ' + SLACK_BOT_TOKEN.value(),
+    },
+    body: new URLSearchParams({
+      channel: channelId,
+      text,
+      unfurl_links: 'false',
+      unfurl_media: 'false',
+    }).toString(),
+  });
+  const postJson = await postRes.json();
+  if (!postJson.ok) {
+    return { ok: false, editor, reason: 'post-failed:' + (postJson.error || 'unknown'), channelId };
+  }
+  const threadTs = postJson.ts;
+
+  // Get the canonical permalink so the slot's url matches the manual-paste shape.
+  let permalink = null;
+  try {
+    const linkRes = await fetch('https://slack.com/api/chat.getPermalink?' + new URLSearchParams({
+      channel: channelId, message_ts: threadTs,
+    }).toString(), {
+      headers: { 'Authorization': 'Bearer ' + SLACK_BOT_TOKEN.value() },
+    });
+    const linkJson = await linkRes.json();
+    if (linkJson.ok) permalink = linkJson.permalink;
+  } catch (e) {
+    // Non-fatal — the slot still works from channelId + threadTs; url is UI-only.
+    console.warn('[postDailyThreadForEditor] getPermalink failed', e && e.message);
+  }
+
+  const slot = {
+    date: dateISO,
+    url: permalink || '',
+    channelId,
+    threadTs,
+    setAt: Date.now(),
+    postedBy: 'scheduler',
+  };
+  await db.doc('state/app').set({ dailyThreads: { [editor]: slot } }, { merge: true });
+
+  return { ok: true, editor, channelId, threadTs, permalink, slot };
+}
+
+exports.postDailyThreadForEditor = onCall(
+  { secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 60 },
+  async (request) => {
+    requireTiltUser(request);
+    const editor = request.data && request.data.editor;
+    if (!editor) throw new HttpsError('invalid-argument', 'editor is required');
+    return await postDailyThreadForEditorCore(String(editor));
+  }
+);
