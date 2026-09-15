@@ -1435,9 +1435,9 @@ function ukDateISO() {
 }
 
 function ukDateLabel() {
-  // Human label for the parent message opener, e.g. "Tue 16 Sep".
+  // Human label for the parent message opener, e.g. "15 Sep 2026".
   return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short',
+    timeZone: 'Europe/London', day: 'numeric', month: 'short', year: 'numeric',
   }).format(new Date());
 }
 
@@ -1455,12 +1455,18 @@ async function postDailyThreadForEditorCore(editor) {
   const dateISO = ukDateISO();
 
   // Idempotency guard: if today's slot is already set, don't double-post.
+  // Scheduler and the Post-now button share this guard so a manual test earlier
+  // in the day won't get overwritten by the 9am cron, and vice versa.
   const existing = (data.dailyThreads || {})[editor];
   if (existing && existing.date === dateISO && existing.channelId && existing.threadTs) {
     return { ok: true, editor, alreadySet: true, slot: existing };
   }
 
-  const text = ':thread: *' + editor + ' · ' + ukDateLabel() + '* — daily thread';
+  // Message shape: "<@U01ABC> - 15 Sep 2026" when we have the editor's Slack
+  // member ID (a real ping), otherwise "@Zidni - 15 Sep 2026" as plain text.
+  const slackId = (data.editorSlackIds || {})[editor];
+  const mention = slackId ? ('<@' + slackId + '>') : ('@' + editor);
+  const text = mention + ' - ' + ukDateLabel();
 
   const postRes = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
@@ -1516,5 +1522,40 @@ exports.postDailyThreadForEditor = onCall(
     const editor = request.data && request.data.editor;
     if (!editor) throw new HttpsError('invalid-argument', 'editor is required');
     return await postDailyThreadForEditorCore(String(editor));
+  }
+);
+
+// Cron: 9am UK, Mon–Fri. Posts a fresh daily thread into every editor's
+// configured Slack channel (state/app.editorSlackChannels). Editors with no
+// channel configured are skipped silently. The core's idempotency guard means
+// a re-fire (or a manual "Post now" earlier the same day) will not double-post.
+exports.postDailyThreadsScheduled = onSchedule(
+  {
+    schedule: '0 9 * * 1-5',
+    timeZone: 'Europe/London',
+    secrets: [SLACK_BOT_TOKEN],
+    region: 'us-central1',
+    timeoutSeconds: 300,
+  },
+  async () => {
+    const snap = await db.collection('state').doc('app').get();
+    if (!snap.exists) {
+      console.warn('[postDailyThreadsScheduled] state/app not found');
+      return;
+    }
+    const channels = (snap.data() || {}).editorSlackChannels || {};
+    const editors = Object.keys(channels).filter(function (e) {
+      return e !== 'Seller' && extractChannelIdFromUrl(channels[e]);
+    });
+    const results = [];
+    for (const editor of editors) {
+      try {
+        const r = await postDailyThreadForEditorCore(editor);
+        results.push(r);
+      } catch (e) {
+        results.push({ ok: false, editor, reason: 'exception:' + (e && e.message) });
+      }
+    }
+    console.log('[postDailyThreadsScheduled] done', JSON.stringify({ total: editors.length, results }));
   }
 );
