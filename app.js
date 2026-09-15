@@ -778,10 +778,46 @@ var Fb = {
         });
         return out;
       }
+      // Drop obvious junk that the type-to-tag pattern kept accumulating in
+      // STATE.products: mid-typing fragments, category names duplicated as
+      // products, backslash typos, and a small hand-picked list of survivors.
+      // Runs post-merge so any client's polluted local list converges on clean
+      // (works around mergeStringList being union-only, which would otherwise
+      // block shrinks from ever propagating).
+      function sanitizeProductList(list) {
+        var handDrop = {'csarg':1,'sthit':1,'sthi':1,'hlome ap':1,'ban':1,'bian':1};
+        var cats = {};
+        try {
+          (typeof brollCategoryOptions === 'function' ? brollCategoryOptions() : [])
+            .forEach(function(c){ cats[String(c).toLowerCase()] = 1; });
+        } catch (_) {}
+        // Sort long → short so a shorter entry that's a prefix of a longer
+        // kept entry gets dropped rather than vice versa.
+        var sorted = (list || []).slice().sort(function(a, b){ return b.length - a.length; });
+        var keptLower = {};
+        var keep = [];
+        sorted.forEach(function(p) {
+          if (!p) return;
+          var lp = String(p).toLowerCase();
+          if (lp.length < 3) return;
+          if (cats[lp]) return;
+          if (handDrop[lp]) return;
+          if (String(p).indexOf('\\') >= 0) return;
+          if (keptLower[lp]) return;
+          var isPrefix = false;
+          for (var k in keptLower) {
+            if (k !== lp && k.indexOf(lp) === 0) { isPrefix = true; break; }
+          }
+          if (isPrefix) return;
+          keep.push(p);
+          keptLower[lp] = 1;
+        });
+        return keep;
+      }
       STATE.categories        = mergeCategoryList(_localCategories,        data.categories);
       STATE.categoriesOrganic = mergeCategoryList(_localCategoriesOrganic, data.categoriesOrganic);
       STATE.sellers           = mergeStringList(_localSellers,             data.sellers);
-      STATE.products          = mergeStringList(_localProducts,            data.products);
+      STATE.products          = sanitizeProductList(mergeStringList(_localProducts, data.products));
 
       // Grades: array of {id, updatedAt, ...} objects. Merge by id — when both sides
       // have the same grade, prefer whichever was edited more recently. When only one
@@ -16233,8 +16269,17 @@ var App = {
     if (field === 'product' && val) {
       if (!Array.isArray(STATE.products)) STATE.products = [];
       var lowerP = String(val).toLowerCase();
+      // Reject tiny/partial values that are almost always mid-typing fragments
+      // (re-renders from Firestore snapshots can blur the input mid-word and
+      // commit a partial value). Skip if <3 chars, or if the value is a prefix
+      // of something already in the list (e.g. "carg" when "cargo" exists).
+      var isFragment = val.length < 3
+        || STATE.products.some(function(p) {
+             var lp = String(p).toLowerCase();
+             return lp !== lowerP && lp.indexOf(lowerP) === 0;
+           });
       var knownP = STATE.products.some(function(p) { return String(p).toLowerCase() === lowerP; });
-      if (!knownP) STATE.products.push(val);
+      if (!knownP && !isFragment) STATE.products.push(val);
     }
 
     // Optimistic local update so the UI reflects the change immediately.
