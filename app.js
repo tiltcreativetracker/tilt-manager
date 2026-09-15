@@ -12406,7 +12406,7 @@ function renderTrainingView() {
 
   function moduleLinks(m) {
     var parts = [];
-    if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Tasks Brief ↗</a>');
+    if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Task Brief ↗</a>');
     var g = moduleGdrive(m);
     if (g) parts.push('<a href="' + escapeHtml(g) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">GDrive ↗</a>');
     if (m.footageUrl) parts.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Assets ↗</a>');
