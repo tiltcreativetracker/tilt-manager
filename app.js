@@ -14053,7 +14053,7 @@ function renderClipTagPanel(c, visibleList) {
       '</div>' +
       '<div class="clip-field">' +
         '<div class="clip-field-label">Notes</div>' +
-        '<textarea class="form-input" rows="2" ' +
+        '<textarea id="clip-field-notes" class="form-input" rows="2" ' +
           'onchange="App.setBrollField(\'' + escapeAttr(c.id) + '\', \'notes\', this.value)" ' +
           'placeholder="Anything worth remembering (used in ad X, seller was on-set, etc.)">' + escapeHtml(c.notes || '') + '</textarea>' +
       '</div>' +
