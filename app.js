@@ -8808,32 +8808,54 @@ function isSafeEmbedUrl(u) {
   return /^https?:\/\//i.test(u.trim());
 }
 
-function renderEditingStyleView() {
-  var rawUrl = STATE.editingStyleNotionUrl || '';
+// Both Editing Style and Strategy tabs share the same shape: a header row, a
+// URL input (admins only), and either an iframe or an empty placeholder. Rather
+// than duplicate the ~60 lines of markup twice, both call this and pass the
+// stored URL, page title, and body copy. The scroll wrapper (overflow:auto,
+// height:100%) is what makes the tab scroll — .main has overflow:hidden, so
+// without it any content taller than the viewport gets clipped with no way to
+// reach it.
+function renderNotionEmbedTab(opts) {
+  var rawUrl = opts.rawUrl || '';
   var url = isSafeEmbedUrl(rawUrl) ? rawUrl : '';
   var canEdit = (typeof roleAtLeast === 'function') ? roleAtLeast('pm') : false;
   var safeUrl = escapeHtml(url);
-  // The input mirrors the raw stored value so an admin can see and correct a
-  // rejected URL rather than have it silently disappear.
   var safeRawUrl = escapeHtml(rawUrl);
+  var inputId = opts.inputId;
+  var setterFn = opts.setterFn;
+  // Notion published pages live on notion.site (or notion.so/…-XXXXX for
+  // private workspace URLs). Only notion.site — via Share → Publish → Publish
+  // to web — historically supported iframe embedding; a notion.so link fails
+  // immediately with "refused to connect". Detecting the host lets us surface a
+  // pointed warning instead of a silent blank frame. This is a heuristic hint,
+  // not a security check — the isSafeEmbedUrl gate above is what enforces
+  // http(s) only.
+  var isNotionSo = /^https?:\/\/(www\.)?notion\.so\//i.test(url);
+
   var iframeBlock;
   if (url) {
+    var warnBanner = isNotionSo
+      ? '<div style="margin-top:16px;padding:10px 14px;border:1px solid var(--amber-text);background:rgba(250,199,117,0.10);color:var(--amber-text);border-radius:8px;font-size:12.5px;line-height:1.5;">' +
+          '<strong>This is a notion.so URL, which Notion blocks from being embedded.</strong> Open the page in Notion, use <em>Share → Publish → Publish to web</em>, then paste the <code>notion.site</code> URL here instead.' +
+        '</div>'
+      : '';
     iframeBlock =
+      warnBanner +
       '<div style="margin-top:16px;border:1px solid var(--border2);border-radius:12px;overflow:hidden;background:var(--bg2);">' +
         '<iframe src="' + safeUrl + '" ' +
-          'style="width:100%;height:calc(100vh - 260px);min-height:600px;border:0;display:block;background:#fff;" ' +
+          'style="width:100%;height:calc(100vh - 260px);min-height:520px;border:0;display:block;background:#fff;" ' +
           'referrerpolicy="no-referrer" ' +
           'sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox">' +
         '</iframe>' +
       '</div>' +
-      '<div style="margin-top:8px;font-size:12px;color:var(--text3);">' +
-        'Not loading? Notion only allows embedding pages published via <em>Share → Publish → Publish to web</em> (notion.site URLs). ' +
-        '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Open in new tab ↗</a>' +
+      '<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text3);">' +
+        '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="text-decoration:none;">Open in Notion ↗</a>' +
+        '<span>If the frame above is blank, Notion is refusing the embed — use the button to open the page in a new tab.</span>' +
       '</div>';
   } else {
     var emptyMsg = rawUrl
       ? 'Stored URL was rejected (only http:// or https:// links can be embedded). Paste a valid published Notion URL above.'
-      : 'Paste your published Notion page URL above to embed it here.';
+      : opts.emptyPlaceholder;
     iframeBlock =
       '<div style="margin-top:24px;padding:32px;border:1px dashed var(--border2);border-radius:12px;text-align:center;color:var(--text3);background:var(--bg2);">' +
         escapeHtml(emptyMsg) +
@@ -8844,13 +8866,13 @@ function renderEditingStyleView() {
   if (canEdit) {
     inputRow =
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-        '<input id="editing-style-url-input" type="url" class="form-input" ' +
+        '<input id="' + inputId + '" type="url" class="form-input" ' +
           'placeholder="https://your-workspace.notion.site/..." ' +
           'value="' + safeRawUrl + '" ' +
-          'style="flex:1 1 320px;min-width:280px;" ' +
-          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.setEditingStyleUrl(document.getElementById(\'editing-style-url-input\').value)}">' +
-        '<button class="btn btn-primary" onclick="App.setEditingStyleUrl(document.getElementById(\'editing-style-url-input\').value)">Save & Load</button>' +
-        (rawUrl ? '<button class="btn" onclick="App.setEditingStyleUrl(\'\')">Clear</button>' : '') +
+          'style="flex:1 1 320px;min-width:0;" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.' + setterFn + '(document.getElementById(\'' + inputId + '\').value)}">' +
+        '<button class="btn btn-primary" onclick="App.' + setterFn + '(document.getElementById(\'' + inputId + '\').value)">Save & Load</button>' +
+        (rawUrl ? '<button class="btn" onclick="App.' + setterFn + '(\'\')">Clear</button>' : '') +
       '</div>';
   } else {
     inputRow = url
@@ -8858,78 +8880,46 @@ function renderEditingStyleView() {
       : '<div style="font-size:13px;color:var(--text3);">No Notion page set yet. Ask an admin/PM to paste the URL.</div>';
   }
 
+  // Outer wrapper: overflow:auto + height:100% so the tab scrolls when its
+  // content is taller than the viewport (small laptop screens, or the 520px
+  // min iframe + toolbar). Without this wrap, .main's overflow:hidden clips
+  // the bottom of the page and there's no way to scroll to it.
   return '' +
-    '<div style="padding:24px;max-width:1400px;margin:0 auto;">' +
-      '<h1 style="margin:0 0 6px;font-size:22px;">Editing Style</h1>' +
-      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-        'Reference the shared Notion page below. Paste the published (notion.site) URL to change it — everyone sees the same page.' +
+    '<div style="height:100%;overflow:auto;">' +
+      '<div style="padding:24px;max-width:1400px;margin:0 auto;">' +
+        '<h1 style="margin:0 0 6px;font-size:22px;">' + escapeHtml(opts.title) + '</h1>' +
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
+          escapeHtml(opts.subtitle) +
+        '</div>' +
+        inputRow +
+        iframeBlock +
       '</div>' +
-      inputRow +
-      iframeBlock +
     '</div>';
 }
 
+function renderEditingStyleView() {
+  return renderNotionEmbedTab({
+    rawUrl: STATE.editingStyleNotionUrl || '',
+    title: 'Editing Style',
+    subtitle: 'Reference the shared Notion page below. Paste the published (notion.site) URL to change it — everyone sees the same page.',
+    emptyPlaceholder: 'Paste your published Notion page URL above to embed it here.',
+    inputId: 'editing-style-url-input',
+    setterFn: 'setEditingStyleUrl'
+  });
+}
+
 // ── Strategy tab ─────────────────────────────────────────────────────────
-// Same shape as Editing Style: a shared Notion page URL that renders in an
-// iframe. Persisted as STATE.strategyNotionUrl so every teammate sees the
-// same page. Same isSafeEmbedUrl guard, same sandbox, same fallback link.
+// Same shape as Editing Style, so it shares renderNotionEmbedTab. Persisted as
+// STATE.strategyNotionUrl so every teammate sees the same page.
 function renderStrategyView() {
-  var rawUrl = STATE.strategyNotionUrl || '';
-  var url = isSafeEmbedUrl(rawUrl) ? rawUrl : '';
-  var canEdit = (typeof roleAtLeast === 'function') ? roleAtLeast('pm') : false;
-  var safeUrl = escapeHtml(url);
-  var safeRawUrl = escapeHtml(rawUrl);
-  var iframeBlock;
-  if (url) {
-    iframeBlock =
-      '<div style="margin-top:16px;border:1px solid var(--border2);border-radius:12px;overflow:hidden;background:var(--bg2);">' +
-        '<iframe src="' + safeUrl + '" ' +
-          'style="width:100%;height:calc(100vh - 260px);min-height:600px;border:0;display:block;background:#fff;" ' +
-          'referrerpolicy="no-referrer" ' +
-          'sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox">' +
-        '</iframe>' +
-      '</div>' +
-      '<div style="margin-top:8px;font-size:12px;color:var(--text3);">' +
-        'Not loading? Notion only allows embedding pages published via <em>Share → Publish → Publish to web</em> (notion.site URLs). ' +
-        '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Open in new tab ↗</a>' +
-      '</div>';
-  } else {
-    var emptyMsg = rawUrl
-      ? 'Stored URL was rejected (only http:// or https:// links can be embedded). Paste a valid published Notion URL above.'
-      : 'Paste your published Notion strategy page URL above to embed it here.';
-    iframeBlock =
-      '<div style="margin-top:24px;padding:32px;border:1px dashed var(--border2);border-radius:12px;text-align:center;color:var(--text3);background:var(--bg2);">' +
-        escapeHtml(emptyMsg) +
-      '</div>';
-  }
-
-  var inputRow;
-  if (canEdit) {
-    inputRow =
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-        '<input id="strategy-url-input" type="url" class="form-input" ' +
-          'placeholder="https://your-workspace.notion.site/..." ' +
-          'value="' + safeRawUrl + '" ' +
-          'style="flex:1 1 320px;min-width:280px;" ' +
-          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.setStrategyUrl(document.getElementById(\'strategy-url-input\').value)}">' +
-        '<button class="btn btn-primary" onclick="App.setStrategyUrl(document.getElementById(\'strategy-url-input\').value)">Save & Load</button>' +
-        (rawUrl ? '<button class="btn" onclick="App.setStrategyUrl(\'\')">Clear</button>' : '') +
-      '</div>';
-  } else {
-    inputRow = url
-      ? '<div style="font-size:13px;color:var(--text3);">Showing: <a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">' + safeUrl + '</a></div>'
-      : '<div style="font-size:13px;color:var(--text3);">No Notion page set yet. Ask an admin/PM to paste the URL.</div>';
-  }
-
-  return '' +
-    '<div style="padding:24px;max-width:1400px;margin:0 auto;">' +
-      '<h1 style="margin:0 0 6px;font-size:22px;">Strategy</h1>' +
-      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-        'Reference the shared Notion strategy page below. Paste the published (notion.site) URL to change it — everyone sees the same page.' +
-      '</div>' +
-      inputRow +
-      iframeBlock +
-    '</div>';
+  return renderNotionEmbedTab({
+    rawUrl: STATE.strategyNotionUrl || '',
+    title: 'Strategy',
+    subtitle: 'Reference the shared Notion strategy page below. Paste the published (notion.site) URL to change it — everyone sees the same page.',
+    emptyPlaceholder: 'Paste your published Notion strategy page URL above to embed it here.',
+    inputId: 'strategy-url-input',
+    setterFn: 'setStrategyUrl'
+  });
 }
 
 function renderGradingView() {
