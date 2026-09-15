@@ -12221,37 +12221,66 @@ function renderTrainingView() {
   var isAdminOrCL = (role === 'admin' || role === 'contentLead');
   var currentEmail = (Auth && Auth.user && Auth.user.email) || '';
 
+  // Backward-compat read: the field was called `loomUrl` before it got repurposed
+  // for Google Drive walkthroughs. Existing modules still have the old key.
+  function moduleGdrive(m) { return (m && (m.gdriveUrl || m.loomUrl)) || ''; }
+
   function moduleLinks(m) {
     var parts = [];
     if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Brief ↗</a>');
-    if (m.loomUrl) parts.push('<a href="' + escapeHtml(m.loomUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Loom ↗</a>');
+    var g = moduleGdrive(m);
+    if (g) parts.push('<a href="' + escapeHtml(g) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">GDrive ↗</a>');
     if (m.footageUrl) parts.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Footage ↗</a>');
     return parts.join(' · ');
+  }
+
+  // Return inline <iframe> HTML for any Drive-file URLs on the module (uses the
+  // existing driveEmbedUrl helper, which normalises /view / open?id= / uc?id=
+  // shapes to /preview — the form Drive lets us embed without forcing download).
+  // Folder links can't be embedded; those fall through as plain links above.
+  function moduleEmbeds(m) {
+    var embeds = [];
+    [{label: 'GDrive walkthrough', url: moduleGdrive(m)}, {label: 'Raw footage', url: m.footageUrl}].forEach(function(row) {
+      if (!row.url) return;
+      var src = driveEmbedUrl(row.url);
+      if (!src) return;
+      embeds.push('<div class="training-embed"><div class="training-embed-label">' + escapeHtml(row.label) + '</div>' +
+        '<div class="training-embed-frame"><iframe src="' + escapeHtml(src) + '" allow="autoplay" allowfullscreen loading="lazy"></iframe></div></div>');
+    });
+    return embeds.join('');
   }
 
   // Editor view: practice cards
   if (isEditor && currentEmail) {
     var mine = completions[currentEmail] || {};
-    var cards = modules.length === 0
-      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules yet. Ask an admin to add one in Config.</div>'
-      : modules.map(function(m) {
+    // Hide modules that have no links at all — editors have nothing to work with
+    // on those. Admin/CL view keeps the full list so admins can still see empty
+    // rows and either fill them in or delete them.
+    var visibleModules = modules.filter(function(m) {
+      return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl);
+    });
+    var cards = visibleModules.length === 0
+      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules with files yet. Ask an admin to add one in Config.</div>'
+      : visibleModules.map(function(m) {
           var c = mine[m.id] || {};
           var badge = c.completedAt
-            ? '<span style="background:#22c55e;color:white;padding:2px 8px;border-radius:12px;font-size:10.5px;font-weight:600;">✓ Completed ' + escapeHtml((c.completedAt || '').slice(0, 10)) + '</span>'
+            ? '<span class="training-status-pill training-status-done">✓ Completed ' + escapeHtml((c.completedAt || '').slice(0, 10)) + '</span>'
             : c.startedAt
-              ? '<span style="background:var(--amber-bg, #fbbf24);color:var(--text1);padding:2px 8px;border-radius:12px;font-size:10.5px;font-weight:600;">In progress</span>'
-              : '<span style="background:var(--bg3);color:var(--text3);padding:2px 8px;border-radius:12px;font-size:10.5px;">Not started</span>';
+              ? '<span class="training-status-pill training-status-progress">In progress</span>'
+              : '<span class="training-status-pill training-status-idle">Not started</span>';
           var actions = c.completedAt
-            ? '<button class="btn" style="font-size:11.5px;padding:4px 10px;" onclick="App.trainingUncomplete(\'' + m.id + '\')">Undo</button>'
+            ? '<button class="training-action-pill" onclick="App.trainingUncomplete(\'' + m.id + '\')">Undo</button>'
             : c.startedAt
-              ? '<button class="btn btn-primary" style="font-size:11.5px;padding:4px 10px;background:#22c55e;border-color:#22c55e;" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark Complete</button>'
-              : '<button class="btn btn-primary" style="font-size:11.5px;padding:4px 10px;" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
+              ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark complete</button>'
+              : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
+          var embeds = moduleEmbeds(m);
           return '<div class="auto-card" style="margin-bottom:10px;">' +
             '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
               '<div style="flex:1 1 320px;min-width:280px;">' +
                 '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + ' &nbsp; ' + badge + '</div>' +
                 '<div style="font-size:12px;color:var(--text2);margin-top:6px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
                 '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
+                (embeds ? '<div class="training-embeds">' + embeds + '</div>' : '') +
               '</div>' +
               '<div style="flex-shrink:0;">' + actions + '</div>' +
             '</div>' +
@@ -14258,11 +14287,11 @@ function renderConfigView() {
     // Training modules — admin-only CRUD. Modules render for editors in the Training tab.
     '<div class="section-title" style="margin-top:24px;">Training modules</div>' +
     '<div class="auto-card">' +
-      '<div class="auto-desc">Add a practice brief editors can start when they\'re idle. Title + brief are required; the URL fields are optional links to a Notion doc, a Loom recording (e.g. a work-together session), or raw footage.</div>' +
+      '<div class="auto-desc">Add a practice brief editors can start when they\'re idle. Title + brief are required; the URL fields are optional links to a Notion doc, a Google Drive walkthrough (e.g. a work-together recording), or raw footage. Drive file links preview inline for editors — no download needed.</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">' +
         '<input id="training-mod-title" type="text" class="form-input" placeholder="Title (e.g. Cut a 15s luxury reel)">' +
         '<input id="training-mod-notion" type="url" class="form-input" placeholder="Notion doc URL (optional)">' +
-        '<input id="training-mod-loom" type="url" class="form-input" placeholder="Loom recording URL (optional)">' +
+        '<input id="training-mod-gdrive" type="url" class="form-input" placeholder="Google Drive URL (optional)">' +
         '<input id="training-mod-footage" type="url" class="form-input" placeholder="Raw footage URL (optional)">' +
       '</div>' +
       '<textarea id="training-mod-brief" class="form-input" style="margin-top:8px;width:100%;min-height:60px;" placeholder="Brief (short description of what to edit)"></textarea>' +
@@ -17870,7 +17899,7 @@ var App = {
     var titleEl = document.getElementById('training-mod-title');
     var briefEl = document.getElementById('training-mod-brief');
     var notionEl = document.getElementById('training-mod-notion');
-    var loomEl = document.getElementById('training-mod-loom');
+    var gdriveEl = document.getElementById('training-mod-gdrive');
     var footageEl = document.getElementById('training-mod-footage');
     var title = (titleEl && titleEl.value || '').trim();
     if (!title) { if (typeof toast === 'function') toast('Module needs a title', 'error'); return; }
@@ -17880,7 +17909,7 @@ var App = {
       title: title,
       brief: (briefEl && briefEl.value || '').trim(),
       notionUrl: (notionEl && notionEl.value || '').trim(),
-      loomUrl: (loomEl && loomEl.value || '').trim(),
+      gdriveUrl: (gdriveEl && gdriveEl.value || '').trim(),
       footageUrl: (footageEl && footageEl.value || '').trim(),
       createdAt: (new Date()).toISOString(),
       createdBy: (Auth && Auth.user && Auth.user.email) || ''

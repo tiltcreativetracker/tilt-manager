@@ -1937,6 +1937,27 @@
   .pill-seller  { background: var(--green-bg); color: var(--green-text); }
   .pill-product { background: var(--pink-bg); color: var(--pink-text); }
 
+  /* Training tab — pill-shaped status badges and action buttons for the editor
+     view. Buttons match the badge shape so the whole row reads as one system. */
+  .training-status-pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 10.5px; font-weight: 600; line-height: 1.4; }
+  .training-status-done { background: #22c55e; color: white; }
+  .training-status-progress { background: var(--amber-bg, #fbbf24); color: var(--text1); }
+  .training-status-idle { background: var(--bg3); color: var(--text3); font-weight: 500; }
+  .training-action-pill { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text1); font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.12s, border-color 0.12s, transform 0.06s; white-space: nowrap; }
+  .training-action-pill:hover { background: var(--bg2); border-color: var(--accent2); }
+  .training-action-pill:active { transform: translateY(1px); }
+  .training-action-pill.training-action-start { background: var(--accent-dim); border-color: var(--accent2); color: var(--accent2); }
+  .training-action-pill.training-action-start:hover { background: var(--accent2); color: white; }
+  .training-action-pill.training-action-complete { background: #22c55e; border-color: #22c55e; color: white; }
+  .training-action-pill.training-action-complete:hover { background: #16a34a; border-color: #16a34a; }
+  /* Inline Drive previews stack under the module description. Fixed aspect ratio
+     so the layout stays predictable regardless of the source video's shape. */
+  .training-embeds { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .training-embed { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg3); max-width: 560px; }
+  .training-embed-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+  .training-embed-frame { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+  .training-embed-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
   .clip-panel-nav { display: flex; gap: 6px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg2); z-index: 2; }
   .clip-panel-pos { font-size: 11px; color: var(--text3); margin: 0 4px; }
   .clip-panel-nav button:last-of-type { margin-left: auto; }
