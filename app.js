@@ -2372,7 +2372,7 @@ var STATE = {
   brollCategoryFilter: 'all',
   brollSellerFilter: 'all',
   brollProductFilter: 'all',
-  brollTaggedFilter: 'all',   // 'all' | 'tagged' | 'untagged'
+  brollTaggedFilter: 'untagged',   // 'all' | 'tagged' | 'untagged' — default 'untagged' so parallel taggers don't collide by re-touching each other's clips (which re-attributes taggedBy and steals from the other editor's tally)
   brollShowArchived: false,
   brollShowDismissed: false,   // true = also show clips the tagger marked unusable
   brollDoneH: 180,             // height (px) of the horizontal "Done" strip beneath the topbar — user-draggable
@@ -13879,13 +13879,28 @@ function renderClipCard(c) {
     : '';
   var untaggedFlag = (!c.type && !c.category && !c.seller && !c.product && !(c.tags && c.tags.length))
     ? '<span class="clip-untagged-dot" title="Untagged"></span>' : '';
+  // Collision-avoidance chip: if another editor has already tagged this clip,
+  // show their initials on the card so a teammate self-avoids re-touching it
+  // (any field write re-attributes taggedBy, silently stealing from their tally).
+  // Only shown when the tagger maps to a known editor and the viewer is NOT
+  // that editor — an editor seeing their own initials on every card is noise.
+  var taggerChip = '';
+  if (c.taggedBy) {
+    var taggerEd = (typeof emailToEditor === 'function') ? emailToEditor(c.taggedBy) : null;
+    var viewerEd = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : null;
+    if (taggerEd && taggerEd !== viewerEd) {
+      taggerChip = '<span class="clip-tagger-chip av-' + escapeAttr(taggerEd) + '" ' +
+        'title="Last tagged by ' + escapeHtml(taggerEd) + ' — retagging will move this to your tally and out of theirs">' +
+        escapeHtml(editorInitials(taggerEd)) + '</span>';
+    }
+  }
   return '<div class="clip-card' + (selected ? ' clip-card-selected' : '') + (bulk ? ' clip-card-bulk' : '') +
     (c.archived ? ' clip-card-archived' : '') + (c.dismissed ? ' clip-card-dismissed' : '') +
     (c.taggedComplete ? ' clip-card-done' : '') + '" ' +
     'data-clip-id="' + escapeAttr(c.id) + '" ' +
     'onclick="App.onClipCardClick(event, \'' + escapeAttr(c.id) + '\')" ' +
     'title="' + escapeHtml((c.folderPath || '') + ' / ' + (c.name || '')) + '">' +
-    '<div class="clip-thumb">' + thumb + untaggedFlag + '</div>' +
+    '<div class="clip-thumb">' + thumb + untaggedFlag + taggerChip + '</div>' +
     '<div class="clip-card-name">' + escapeHtml(c.name || '(untitled)') + '</div>' +
     (pills.length ? '<div class="clip-card-pills">' + pills.join('') + '</div>' : '') +
     '</div>';
