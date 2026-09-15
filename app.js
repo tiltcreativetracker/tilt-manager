@@ -5105,15 +5105,16 @@ var ROLE_TAB_VISIBILITY = {
   // Default landing role for brand-new sign-ins. Narrow read-only access to
   // the four core surfaces. An admin promotes them from Config.
   visitor:     ['campaigns', 'editingCalendar', 'today', 'reporting'],
-  // Editors see everything except Config (destructive admin panel) and CL Home
-  // (contentLead + admin only — editors have their own My Day landing).
-  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config' && t !== 'clHome'; }),
+  // Editors see everything except Config (destructive admin panel), CL Home
+  // (contentLead + admin only), and My Day (Elsa-only surface — see the email
+  // override in tabsForRole).
+  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config' && t !== 'clHome' && t !== 'editorHome'; }),
   // Category Heads: their own review surface + the shared context tabs.
   catHead:     ['campaigns', 'editingCalendar', 'today', 'catReview', 'reporting'],
   // Content Leads: CL Home is their landing; the rest are context they might refer to.
   contentLead: ['campaigns', 'editingCalendar', 'clHome', 'reporting', 'editingStyle', 'strategy'],
-  // Admins see everything except My Day (editor-only surface). Elsa is a bootstrap
-  // admin who ALSO gets My Day added via an email-specific override in tabsForRole.
+  // Admins see everything except My Day (Elsa-only surface — an email-specific
+  // override in tabsForRole adds it back for her).
   admin:       ALL_TABS_INTERNAL.filter(function(t) { return t !== 'editorHome'; })
 };
 
