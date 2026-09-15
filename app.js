@@ -14954,8 +14954,8 @@ function renderClipsTaggingLeaderboard() {
       showEds = [me];
     } else if (isRealAdmin) {
       // Admin previewing the editor view whose own email isn't in TAG_EDS —
-      // show Zidni's real live card as a stand-in so the preview isn't empty.
-      showEds = [TAG_EDS[0]];
+      // show Sharm's real live card as a stand-in so the preview isn't empty.
+      showEds = ['Sharm'];
       isDemo = true;
     } else {
       return '';
