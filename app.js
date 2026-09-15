@@ -14929,18 +14929,31 @@ function buildClipTaggingMessageForEditor(editor) {
   return lines.join('\n');
 }
 
-// Admin-only leaderboard strip on the Clips tab. One card per editor in
-// TAG_EDS with today's tag count vs. shared daily goal + progress bar. Renders
-// only for admins so editors don't get a live scoreboard of each other, and
-// re-renders on every broll update because the Fb.subscribeBroll callback
-// already fires render() when STATE.tab === 'clips'.
+// Live tagging leaderboard strip on the Clips tab. Two flavours:
+//   - Admin: sees all three TAG_EDS cards (full scoreboard).
+//   - Editor: sees only their own row so they can watch their count climb,
+//     without turning it into a public race between the three of them.
+// Anyone else (catHead, contentLead, visitor) gets nothing — this strip is
+// meaningless outside the tagging squad. Re-renders on every broll update
+// because Fb.subscribeBroll already fires render() when STATE.tab === 'clips'.
 function renderClipsTaggingLeaderboard() {
-  var isAdmin = !!(Auth && Auth.user && Auth.user.role === 'admin');
-  if (!isAdmin) return '';
+  var role = (Auth && Auth.user && Auth.user.role) || 'visitor';
+  var isAdmin = role === 'admin';
   var TAG_EDS = ['Zidni', 'Sharm', 'Patty'];
+  // Decide which editors to render for.
+  var showEds;
+  if (isAdmin) {
+    showEds = TAG_EDS;
+  } else if (role === 'editor') {
+    var me = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : null;
+    if (!me || TAG_EDS.indexOf(me) < 0) return '';
+    showEds = [me];
+  } else {
+    return '';
+  }
   var goal = getBrollDailyGoal();
   var totalToday = 0;
-  var cards = TAG_EDS.map(function(ed) {
+  var cards = showEds.map(function(ed) {
     var tagged = brollTaggedByEditorToday(ed);
     totalToday += tagged;
     var remaining = Math.max(0, goal - tagged);
@@ -14960,11 +14973,16 @@ function renderClipsTaggingLeaderboard() {
         '</div>' +
       '</div>';
   }).join('');
+  // Header label + right-side hint adapt to the audience so the strip reads
+  // right regardless of who's looking at it.
+  var title = isAdmin ? 'Today’s tagging' : 'Your tagging today';
+  var totalLine = isAdmin ? (totalToday + ' tagged today') : '';
+  var hint = isAdmin ? 'admin view · live' : 'live';
   return '<div class="clips-tagboard">' +
       '<div class="clips-tagboard-header">' +
-        '<span class="clips-tagboard-title">Today’s tagging</span>' +
-        '<span class="clips-tagboard-total">' + totalToday + ' tagged today</span>' +
-        '<span class="clips-tagboard-hint">admin view · live</span>' +
+        '<span class="clips-tagboard-title">' + title + '</span>' +
+        (totalLine ? '<span class="clips-tagboard-total">' + totalLine + '</span>' : '') +
+        '<span class="clips-tagboard-hint">' + hint + '</span>' +
       '</div>' +
       '<div class="clips-tagboard-cards">' + cards + '</div>' +
     '</div>';
