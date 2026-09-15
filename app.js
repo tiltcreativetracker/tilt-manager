@@ -15092,17 +15092,15 @@ function brollTaggedByEditorToday(editor) {
 function buildTrainingModuleMessage(editor, m) {
   if (!m) return '';
   var mention = editor ? (mentionEditor(editor) + ' ') : '';
-  var lines = [':mortar_board: ' + mention + '— training task', '*' + (m.title || 'Untitled module') + '*'];
-  var brief = (m.brief || '').trim();
-  if (brief) { lines.push(''); lines.push(brief); }
+  var lines = [mention + '— Training Task', '*' + (m.title || 'Untitled module') + '*'];
   var gdrive = (m.gdriveUrl || m.loomUrl || '').trim();
   var linkBits = [];
-  if (m.notionUrl) linkBits.push('<' + m.notionUrl + '|Brief>');
-  if (gdrive) linkBits.push('<' + gdrive + '|GDrive walkthrough>');
-  if (m.footageUrl) linkBits.push('<' + m.footageUrl + '|Raw footage>');
+  if (m.notionUrl) linkBits.push('<' + m.notionUrl + '|Task Brief>');
+  if (gdrive) linkBits.push('<' + gdrive + '|Walkthrough>');
+  if (m.footageUrl) linkBits.push('<' + m.footageUrl + '|Assets>');
   if (linkBits.length) { lines.push(''); lines.push(linkBits.join('  ·  ')); }
   lines.push('');
-  lines.push('Head to the *Training* tab when you\'re idle, edit it, then mark complete.');
+  lines.push('Head to the *Training* tab, watch the video, execute the tasks, then mark complete.');
   return lines.join('\n');
 }
 
