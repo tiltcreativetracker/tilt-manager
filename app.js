@@ -13927,10 +13927,18 @@ function renderClipTagPanel(c, visibleList) {
       return '<option value="' + escapeHtml(n) + '"' + (c.category === n ? ' selected' : '') + '>' + escapeHtml(n) + '</option>';
     }).join('');
 
-  // Seller: combobox — datalist auto-completes existing sellers, but any new
-  // value is accepted and auto-added to STATE.sellers.
-  var sellerListId = 'clip-sellers-datalist';
+  // Seller: closed <select>, options come from Paid Ads campaigns. If a clip's
+  // current seller isn't in that list (legacy tag from before the switch),
+  // it's kept as an extra option so opening the panel never silently drops it.
   var productListId = 'clip-products-datalist';
+  var campaignSellers = brollPaidCampaignSellers();
+  var sellerOpts = '<option value="">— No seller —</option>';
+  if (c.seller && campaignSellers.indexOf(c.seller) < 0) {
+    sellerOpts += '<option value="' + escapeHtml(c.seller) + '" selected>' + escapeHtml(c.seller) + ' (legacy)</option>';
+  }
+  sellerOpts += campaignSellers.map(function(n) {
+    return '<option value="' + escapeHtml(n) + '"' + (c.seller === n ? ' selected' : '') + '>' + escapeHtml(n) + '</option>';
+  }).join('');
 
   var tagsHtml = (c.tags || []).map(function(t, i) {
     return '<span class="clip-tag-chip">' + escapeHtml(t) +
@@ -13960,9 +13968,6 @@ function renderClipTagPanel(c, visibleList) {
     '<div class="clip-panel-body">' +
       playerHtml +
       meta +
-      '<datalist id="' + sellerListId + '">' +
-        brollPaidCampaignSellers().map(function(n) { return '<option value="' + escapeHtml(n) + '"></option>'; }).join('') +
-      '</datalist>' +
       '<datalist id="' + productListId + '">' +
         (STATE.products || []).map(function(n) { return '<option value="' + escapeHtml(n) + '"></option>'; }).join('') +
       '</datalist>' +
@@ -13975,11 +13980,11 @@ function renderClipTagPanel(c, visibleList) {
         '<select id="clip-field-category" class="form-select" onchange="App.setBrollField(\'' + escapeAttr(c.id) + '\', \'category\', this.value)">' + catOpts + '</select>' +
       '</div>' +
       '<div class="clip-field">' +
-        '<div class="clip-field-label">Seller <kbd>S</kbd> · type or pick</div>' +
-        '<input id="clip-field-seller" class="form-input" list="' + sellerListId + '" ' +
-          'value="' + escapeHtml(c.seller || '') + '" ' +
-          'onchange="App.setBrollField(\'' + escapeAttr(c.id) + '\', \'seller\', this.value)" ' +
-          'placeholder="e.g. RStreetwear">' +
+        '<div class="clip-field-label">Seller <kbd>S</kbd></div>' +
+        '<select id="clip-field-seller" class="form-select" ' +
+          'onchange="App.setBrollField(\'' + escapeAttr(c.id) + '\', \'seller\', this.value)">' +
+          sellerOpts +
+        '</select>' +
       '</div>' +
       '<div class="clip-field">' +
         '<div class="clip-field-label">Product <kbd>P</kbd> · type or pick</div>' +
