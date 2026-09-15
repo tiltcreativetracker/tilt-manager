@@ -13614,6 +13614,56 @@ function brollClipMatches(c) {
   return true;
 }
 
+// Sellers derived from Paid Ads campaign names, cleaned up for the Clips
+// filter dropdown. Order of operations per campaign name:
+//   1. trim; skip empty
+//   2. drop if the raw name is a month bucket (Jan 2026, Aug - 2026, …)
+//   3. strip trailing digits (Kameleon Vintage 2 → Kameleon Vintage)
+//   4. drop if the base (lowercased) is in EXCLUDE
+//   5. dedupe by a key that ignores case AND whitespace, so 'Card Halo'
+//      and 'CardHalo' collapse. First spelling seen wins.
+// To hide a name that isn't a seller, add its lowercased base to EXCLUDE;
+// to surface one you removed, delete it.
+function brollPaidCampaignSellers() {
+  var EXCLUDE = {
+    'uk ads':1, 'us ads':1, 'us buyers ads':1, 'us seller ads':1,
+    'luxury retargeting campaign':1, 'mixed deals retargeting creatives':1,
+    'sneakers retargeting campaign':1, 'stone island retargeting campaign':1,
+    'tcg retargeting campaign':1,
+    'cta re-edits':1, 'stone island cta re-edits':1, 'tcg re-edits':1,
+    'rs livestream re-edit':1, 'winning ads remixes':1,
+    'shopable product clips':1,
+    'livestream':1, 'livestream cta test':1,
+    'livestream luxury (clips)':1, 'livestream sneakers (clips)':1,
+    'livestream sneakers (rs clips)':1, 'sneakers livestream':1,
+    'clearance':1, 'clearance guys':1,
+    'privilege supply':1, 'privilege supply – codzienny':1,
+    'privilege supply – essentials':1, 'privilege supply – luxury':1,
+    'privilege supply – moda':1, 'lujo privilegio – primavera':1,
+    'womenswear':1, 'y2k ugc':1, 'jungle, vintage & god packs':1,
+    'app store revamp':1, 'product launch':1,
+    'rivers':1
+  };
+  var monthBucket = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*-?\s*\d{4}$/i;
+  var seen = Object.create(null);
+  var out = [];
+  (STATE.campaigns || []).forEach(function(c) {
+    if (!c || c.type !== 'Paid Ads') return;
+    var raw = (c.name || '').trim();
+    if (!raw) return;
+    if (monthBucket.test(raw)) return;
+    var base = raw.replace(/\s*\d+$/, '').trim();
+    if (!base) return;
+    if (EXCLUDE[base.toLowerCase()]) return;
+    var key = base.toLowerCase().replace(/\s+/g, '');
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(base);
+  });
+  out.sort(function(a, b) { return a.localeCompare(b); });
+  return out;
+}
+
 // Sort visible clips: newest Drive-modification first (matches how editors think
 // about their own recent work). Archived slide to the bottom.
 function brollSortedClips() {
@@ -13649,7 +13699,7 @@ function renderClipsView() {
   var catOptions = [ opt('all', STATE.brollCategoryFilter, 'All categories'),
                      opt('uncategorised', STATE.brollCategoryFilter, '— No category —') ]
     .concat(brollCategoryOptions().map(function(n) { return opt(n, STATE.brollCategoryFilter, n); })).join('');
-  var sellerList = (STATE.sellers || []).slice().sort();
+  var sellerList = brollPaidCampaignSellers();
   var sellerOptions = [ opt('all', STATE.brollSellerFilter, 'All sellers'),
                         opt('unset', STATE.brollSellerFilter, '— No seller —') ]
     .concat(sellerList.map(function(n) { return opt(n, STATE.brollSellerFilter, n); })).join('');
