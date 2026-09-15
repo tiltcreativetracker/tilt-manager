@@ -273,10 +273,58 @@ var Auth = {
         uid: fbUser.uid,
         email: email,
         displayName: fbUser.displayName || email.split('@')[0],
-        photoURL: fbUser.photoURL || null
+        photoURL: fbUser.photoURL || null,
+        _realRole: null
       };
+      Auth._installRoleShadow(Auth.user);
       hideSigninOverlay();
       bootApp();
+    });
+  },
+
+  // View-as override plumbing. The picker (admin-only, in the topbar user chip)
+  // lets an admin see the app through another role's eyes without changing
+  // their actual Firestore role. Implementation: shadow `user.role` with a
+  // getter that returns the override when one is set and the real role
+  // otherwise. All existing role reads (roleAtLeast, direct comparisons,
+  // rendering gates) Just Work. Writes to `user.role` — including the profile
+  // snapshot at Fb.subscribeMyProfile — hit the setter and land on `_realRole`
+  // so the real role stays authoritative. Override is stored in localStorage
+  // per-browser so it survives refresh but doesn't leak across devices.
+  VIEW_AS_KEY: '_viewAsRole_v1',
+  ALLOWED_VIEW_AS_ROLES: ['visitor', 'editor', 'catHead', 'contentLead'],
+  getViewAs: function() {
+    try {
+      var v = localStorage.getItem(Auth.VIEW_AS_KEY);
+      if (v && Auth.ALLOWED_VIEW_AS_ROLES.indexOf(v) >= 0) return v;
+    } catch (_) {}
+    return null;
+  },
+  setViewAs: function(role) {
+    try {
+      if (!role || role === 'admin' || role === 'self') {
+        localStorage.removeItem(Auth.VIEW_AS_KEY);
+      } else if (Auth.ALLOWED_VIEW_AS_ROLES.indexOf(role) >= 0) {
+        localStorage.setItem(Auth.VIEW_AS_KEY, role);
+      }
+    } catch (_) {}
+  },
+  _installRoleShadow: function(u) {
+    if (!u) return;
+    Object.defineProperty(u, 'role', {
+      enumerable: true,
+      configurable: true,
+      get: function() {
+        // Only real admins can impersonate. If a demoted user still has an
+        // override in localStorage from a past admin session, it silently
+        // no-ops here so they can't escalate their view.
+        if (u._realRole === 'admin') {
+          var vo = Auth.getViewAs();
+          if (vo) return vo;
+        }
+        return u._realRole;
+      },
+      set: function(v) { u._realRole = v; }
     });
   },
 
@@ -1638,14 +1686,17 @@ var Fb = {
     Fb._myProfileUnsub = fbDb.collection('users').doc(Auth.user.uid).onSnapshot(function(doc) {
       if (!doc.exists) return;
       var data = doc.data() || {};
-      var prevRole = Auth.user.role;
+      // Compare REAL roles (bypassing the view-as shadow) so listener toggles
+      // reflect actual privilege changes, not impersonation flips.
+      var prevRole = Auth.user._realRole;
       Auth.user.role = data.role || 'editor';
+      var newRole = Auth.user._realRole;
       // Dynamically attach / detach the all-users listener when role flips
       // across the admin boundary, so promotions and demotions take effect
       // without a refresh.
-      if (Auth.user.role === 'admin' && prevRole !== 'admin') {
+      if (newRole === 'admin' && prevRole !== 'admin') {
         Fb.subscribeAllUsers();
-      } else if (Auth.user.role !== 'admin' && prevRole === 'admin') {
+      } else if (newRole !== 'admin' && prevRole === 'admin') {
         Fb.unsubscribeAllUsers();
       }
       // Same dynamic attach for the broll (Clips) listener: admin + editor
@@ -1653,7 +1704,7 @@ var Fb = {
       // release the listener when it leaves. Handles the boot-time race where
       // Auth.user.role is still undefined when bootAfterAuth's synchronous
       // subscribeBroll gate at ~line 18180 first evaluates.
-      var canSeeClips = Auth.user.role === 'admin' || Auth.user.role === 'editor';
+      var canSeeClips = newRole === 'admin' || newRole === 'editor';
       var couldSeeClips = prevRole === 'admin' || prevRole === 'editor';
       if (canSeeClips && !couldSeeClips) {
         Fb.subscribeBroll();
@@ -1662,7 +1713,7 @@ var Fb = {
       }
       // If the role actually changed and the app is booted, re-render so tab
       // visibility / role chip update immediately.
-      if (prevRole !== Auth.user.role && Auth._booted && typeof render === 'function') {
+      if (prevRole !== newRole && Auth._booted && typeof render === 'function') {
         render();
       }
     });
@@ -1697,8 +1748,10 @@ var Fb = {
   },
 
   // Update another user's role. Admin-only (Firestore rules enforce this in Phase D).
+  // Uses _realRole so an admin currently viewing as another role can still
+  // change other people's roles from Config → Team without exiting view-as.
   setUserRole: function(uid, role) {
-    if (!Auth.user || Auth.user.role !== 'admin') {
+    if (!Auth.user || Auth.user._realRole !== 'admin') {
       return Promise.reject(new Error('Only admins can change roles'));
     }
     if (['visitor', 'editor', 'catHead', 'contentLead', 'admin'].indexOf(role) < 0) {
@@ -5236,13 +5289,52 @@ function renderTopbar() {
     var roleChip = u.role
       ? '<span class="' + roleClass + '" title="Your role">' + escapeHtml(roleLabel) + '</span>'
       : '';
+    // View-as picker \u2014 visible only to real admins. Uses _realRole (bypassing
+    // the shadow) so an admin currently viewing as another role still sees the
+    // picker and can exit or switch to yet another role.
+    var viewAsPicker = '';
+    if (Auth.user && Auth.user._realRole === 'admin') {
+      var active = Auth.getViewAs();
+      function vaOpt(v, label) {
+        return '<option value="' + v + '"' + (active === v || (!active && v === 'self') ? ' selected' : '') + '>' + label + '</option>';
+      }
+      viewAsPicker =
+        '<div class="view-as-picker" title="Preview the tracker as another role">' +
+          '<span class="view-as-label">View as</span>' +
+          '<select class="view-as-select" onchange="App.setViewAs(this.value)">' +
+            vaOpt('self', 'Admin (you)') +
+            vaOpt('contentLead', 'Content Lead') +
+            vaOpt('catHead', 'Cat Head') +
+            vaOpt('editor', 'Editor') +
+            vaOpt('visitor', 'Visitor') +
+          '</select>' +
+        '</div>';
+    }
     userChip =
       '<div class="user-chip" title="' + escapeHtml(u.email) + (u.role ? ' \u00B7 role: ' + u.role : '') + '">' +
+        viewAsPicker +
         roleChip +
         '<span class="user-chip-name">' + escapeHtml(firstName) + '</span>' +
         '<span class="user-chip-avatar">' + avatarInner + '</span>' +
         '<button class="user-signout-btn" onclick="Auth.signOut()" title="Sign out">Sign out</button>' +
       '</div>';
+  }
+
+  // View-as banner: persistent strip pinned under the topbar while the admin
+  // is impersonating another role. Loud enough to remind them nothing is real
+  // (writes still go through with their real admin identity, so this is a
+  // display-only preview).
+  var viewAsBanner = '';
+  if (Auth && Auth.user && Auth.user._realRole === 'admin') {
+    var vaActive = Auth.getViewAs();
+    if (vaActive) {
+      viewAsBanner =
+        '<div class="view-as-banner">' +
+          '<span class="view-as-banner-dot"></span>' +
+          '<span>You\u2019re viewing the tracker as <strong>' + escapeHtml(roleLabelFor(vaActive)) + '</strong>. UI only \u2014 your real role is still Admin.</span>' +
+          '<button class="view-as-exit-btn" onclick="App.setViewAs(\'self\')">Exit view</button>' +
+        '</div>';
+    }
   }
 
   return '' +
@@ -5263,7 +5355,8 @@ function renderTopbar() {
         '<span>' + STATE.countries.length + ' countries \u00B7 ' + STATE.campaigns.length + ' campaigns \u00B7 ' + STATE.assets.length + ' assets</span>' +
         userChip +
       '</div>' +
-    '</div>';
+    '</div>' +
+    viewAsBanner;
 }
 
 function renderSidebar() {
@@ -16790,8 +16883,22 @@ var App = {
   // Admin-only: change another user's role from the Team table in Config.
   // Confirms before promoting to admin (highest privilege) since that grants
   // access to webhooks, hard-deletes, and role management itself.
+  // Admin-only preview: view the tracker as another role. Persists per-browser
+  // in localStorage (see Auth.VIEW_AS_KEY) so a refresh doesn't drop you back
+  // into your admin view mid-audit. Real Firestore role is untouched — every
+  // write still goes through as you. Only real admins pass the gate; a demoted
+  // ex-admin cannot re-enable an override.
+  setViewAs: function(role) {
+    if (!Auth.user || Auth.user._realRole !== 'admin') {
+      toast('View as is admin-only', 'error');
+      render();
+      return;
+    }
+    Auth.setViewAs(role);
+    render();
+  },
   setUserRole: function(uid, role, displayName) {
-    if (!Auth.user || Auth.user.role !== 'admin') {
+    if (!Auth.user || Auth.user._realRole !== 'admin') {
       toast('Only admins can change roles', 'error');
       render(); // re-render to reset the dropdown to its previous value
       return;

@@ -1252,6 +1252,25 @@
   .role-chip-contentLead { background: rgba(111,168,220,0.15); color: #6FA8DC; border-color: rgba(111,168,220,0.35); }
   /* Viewer = neutral / low-key so it reads as "unpromoted default". */
   .role-chip-viewer { background: var(--bg2); color: var(--text3); border-color: var(--border); }
+  .role-chip-visitor { background: var(--bg2); color: var(--text3); border-color: var(--border); }
+
+  /* Admin-only "View as" picker in the user chip. Lets an admin preview the
+     tracker through another role's eyes; the shadowed role getter on Auth.user
+     makes every render path pick up the impersonation automatically. */
+  .view-as-picker { display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: 100px; margin-right: 4px; font-size: 11px; color: var(--text3); }
+  .view-as-picker .view-as-label { text-transform: uppercase; letter-spacing: 0.06em; font-size: 9.5px; font-weight: 700; }
+  .view-as-select { background: transparent; border: 0; color: var(--text2); font-size: 11.5px; font-family: inherit; cursor: pointer; padding: 2px 4px; border-radius: 8px; }
+  .view-as-select:hover { background: var(--bg3); color: var(--text1); }
+  .view-as-select:focus { outline: 1px solid var(--accent2); outline-offset: 0; color: var(--text1); }
+  /* Persistent banner while an override is active — loud so nobody forgets
+     they're in preview mode. Colour lifted from role-chip-admin's accent so
+     it visually ties back to the picker in the top-right. */
+  .view-as-banner { display: flex; align-items: center; gap: 10px; padding: 8px 18px; background: var(--accent-dim); border-bottom: 1px solid rgba(126,99,250,0.4); color: var(--accent2); font-size: 12px; font-weight: 500; }
+  .view-as-banner strong { color: var(--accent2); font-weight: 700; }
+  .view-as-banner-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent2); box-shadow: 0 0 0 3px rgba(126,99,250,0.25); animation: viewAsPulse 1.6s ease-in-out infinite; flex-shrink: 0; }
+  @keyframes viewAsPulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(126,99,250,0.25); } 50% { box-shadow: 0 0 0 6px rgba(126,99,250,0.08); } }
+  .view-as-exit-btn { margin-left: auto; padding: 4px 12px; border-radius: 100px; border: 1px solid var(--accent2); background: transparent; color: var(--accent2); font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.12s, color 0.12s; }
+  .view-as-exit-btn:hover { background: var(--accent2); color: white; }
 
   /* Team management rows in Config */
   .team-row { display: grid; grid-template-columns: 32px 1fr 200px 140px 28px; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
