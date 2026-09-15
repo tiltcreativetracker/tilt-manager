@@ -14939,15 +14939,27 @@ function buildClipTaggingMessageForEditor(editor) {
 function renderClipsTaggingLeaderboard() {
   var role = (Auth && Auth.user && Auth.user.role) || 'visitor';
   var isAdmin = role === 'admin';
+  // Real admins can be in view-as mode — used to preview one of TAG_EDS'
+  // cards when the admin's own email doesn't map to a tagging editor.
+  var isRealAdmin = !!(Auth && Auth.user && Auth.user._realRole === 'admin');
   var TAG_EDS = ['Zidni', 'Sharm', 'Patty'];
   // Decide which editors to render for.
   var showEds;
+  var isDemo = false;
   if (isAdmin) {
     showEds = TAG_EDS;
   } else if (role === 'editor') {
     var me = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : null;
-    if (!me || TAG_EDS.indexOf(me) < 0) return '';
-    showEds = [me];
+    if (me && TAG_EDS.indexOf(me) >= 0) {
+      showEds = [me];
+    } else if (isRealAdmin) {
+      // Admin previewing the editor view whose own email isn't in TAG_EDS —
+      // show Zidni's real live card as a stand-in so the preview isn't empty.
+      showEds = [TAG_EDS[0]];
+      isDemo = true;
+    } else {
+      return '';
+    }
   } else {
     return '';
   }
@@ -14974,10 +14986,15 @@ function renderClipsTaggingLeaderboard() {
       '</div>';
   }).join('');
   // Header label + right-side hint adapt to the audience so the strip reads
-  // right regardless of who's looking at it.
-  var title = isAdmin ? 'Today’s tagging' : 'Your tagging today';
+  // right regardless of who's looking at it. `isDemo` covers the admin-view-as
+  // case where we're rendering another editor's card as a preview.
+  var title = isAdmin
+    ? 'Today’s tagging'
+    : (isDemo ? 'Your tagging today (preview)' : 'Your tagging today');
   var totalLine = isAdmin ? (totalToday + ' tagged today') : '';
-  var hint = isAdmin ? 'admin view · live' : 'live';
+  var hint = isAdmin
+    ? 'admin view · live'
+    : (isDemo ? 'preview · showing ' + showEds[0] + '’s card' : 'live');
   return '<div class="clips-tagboard">' +
       '<div class="clips-tagboard-header">' +
         '<span class="clips-tagboard-title">' + title + '</span>' +
