@@ -12406,10 +12406,10 @@ function renderTrainingView() {
 
   function moduleLinks(m) {
     var parts = [];
-    if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Brief ↗</a>');
+    if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Tasks Brief ↗</a>');
     var g = moduleGdrive(m);
-    if (g) parts.push('<a href="' + escapeHtml(g) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">GDrive ↗</a>');
-    if (m.footageUrl) parts.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:11.5px;">Footage ↗</a>');
+    if (g) parts.push('<a href="' + escapeHtml(g) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">GDrive ↗</a>');
+    if (m.footageUrl) parts.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Assets ↗</a>');
     return parts.join(' · ');
   }
 
@@ -12481,7 +12481,7 @@ function renderTrainingView() {
   // training brief into each editor's daily Slack thread. Matches what Elsa
   // wants: "same list as the editors" instead of the old matrix.
   if (isAdminOrCL) {
-    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty'];
+    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
     // Map editor display name → the email that carries the completion record.
     // Uses EDITOR_EMAILS aliases (e.g. Sharm has both 'sharm' and 'sharmaine').
     // Picks whichever alias has any completion record, else the first alias.
@@ -12512,7 +12512,7 @@ function renderTrainingView() {
             return '<span style="color:var(--text2);">' + escapeHtml(ed) + '</span> ' +
                    '<span style="color:' + color + ';font-weight:700;">' + mark + '</span>';
           }).join(' &nbsp;·&nbsp; ');
-          var statusStrip = '<div style="margin-top:4px;font-size:11.5px;">' + statusBits + '</div>';
+          var statusStrip = '<div style="margin-top:6px;font-size:14px;">' + statusBits + '</div>';
 
           var embeds = moduleEmbeds(m);
           var perEditorSend = TRAINING_EDS.map(function(ed) {
@@ -12522,7 +12522,7 @@ function renderTrainingView() {
           return '<div class="auto-card" style="margin-bottom:10px;">' +
             '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
               '<div style="flex:1 1 320px;min-width:280px;">' +
-                '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + '</div>' +
+                '<div style="font-size:18px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + '</div>' +
                 statusStrip +
                 '<div style="font-size:12px;color:var(--text2);margin-top:8px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
                 '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
@@ -18311,7 +18311,7 @@ var App = {
   sendTrainingToAllEditors: function(moduleId) {
     var m = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
     if (!m) { toast('Module not found', 'error'); return; }
-    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty'];
+    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
     var sentCount = 0, failCount = 0, skippedCount = 0;
     var jobs = [];
     TRAINING_EDS.forEach(function(editor) {
