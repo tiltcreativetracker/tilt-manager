@@ -5135,7 +5135,11 @@ function tabsForRole(role) {
   var tabs = ROLE_TAB_VISIBILITY[role] || ROLE_TAB_VISIBILITY.visitor;
   // Elsa-specific override: as admin she also gets My Day (editorHome). Prepend
   // so it lands at position 0 for her without touching the shared admin set.
-  if (Auth && Auth.user && Auth.user.email === ELSA_EMAIL && tabs.indexOf('editorHome') < 0) {
+  // Skipped while she's in view-as mode so the preview reflects the target role
+  // faithfully — My Day is email-gated, not role-gated, so it would otherwise
+  // leak through every preview.
+  var viewingAs = (Auth && typeof Auth.getViewAs === 'function') ? Auth.getViewAs() : null;
+  if (!viewingAs && Auth && Auth.user && Auth.user.email === ELSA_EMAIL && tabs.indexOf('editorHome') < 0) {
     tabs = ['editorHome'].concat(tabs);
   }
   return tabs;
