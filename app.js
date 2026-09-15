@@ -12269,15 +12269,27 @@ function renderTrainingView() {
 
   // Admin/CL view: completion matrix
   if (isAdminOrCL) {
-    var editorEmails = Object.keys(completions).sort();
-    // Also include any known editors from EDITOR_EMAILS map even if they have no completions yet
+    // Build editor roster from EDITOR_EMAILS aliases → display name. Skip entries
+    // with no aliases (e.g. Seller placeholder), otherwise they render as a
+    // phantom blank row. Include any extra emails that already have completions.
+    var emailToName = {};
     if (typeof EDITOR_EMAILS !== 'undefined') {
-      Object.keys(EDITOR_EMAILS).forEach(function(prefix) {
-        var email = prefix + '@tilt.app';
-        if (editorEmails.indexOf(email) < 0) editorEmails.push(email);
+      Object.keys(EDITOR_EMAILS).forEach(function(name) {
+        var aliases = EDITOR_EMAILS[name] || [];
+        aliases.forEach(function(alias) {
+          emailToName[alias + '@tilt.app'] = name;
+        });
       });
-      editorEmails.sort();
     }
+    Object.keys(completions).forEach(function(email) {
+      if (!emailToName[email]) {
+        var prefix = String(email).split('@')[0];
+        emailToName[email] = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+      }
+    });
+    var editorEmails = Object.keys(emailToName).sort(function(a, b) {
+      return emailToName[a].localeCompare(emailToName[b]);
+    });
 
     var moduleHeaders = modules.map(function(m) {
       return '<th style="padding:6px 8px;font-size:11px;text-align:center;">' + escapeHtml((m.title || '').slice(0, 30)) + '</th>';
@@ -12289,8 +12301,7 @@ function renderTrainingView() {
         var color = c.completedAt ? '#22c55e' : c.startedAt ? '#f59e0b' : 'var(--text3)';
         return '<td style="text-align:center;color:' + color + ';font-weight:600;">' + mark + '</td>';
       }).join('');
-      var editorName = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[email.split('@')[0]]) || email.split('@')[0];
-      return '<tr><td style="padding:6px 10px;font-size:12px;color:var(--text1);">' + escapeHtml(editorName) + '</td>' + cells + '</tr>';
+      return '<tr><td style="padding:6px 10px;font-size:12px;color:var(--text1);">' + escapeHtml(emailToName[email]) + '</td>' + cells + '</tr>';
     }).join('');
 
     var matrix = modules.length === 0
