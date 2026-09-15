@@ -12431,56 +12431,74 @@ function renderTrainingView() {
     '</div></div>';
   }
 
-  // Admin/CL view: completion matrix
+  // Admin/CL view: same card list editors see (module title, brief, links,
+  // embeds), plus a per-card completion strip so we can still tell at a glance
+  // who's done what, and a "Send to editor threads" button that posts the
+  // training brief into each editor's daily Slack thread. Matches what Elsa
+  // wants: "same list as the editors" instead of the old matrix.
   if (isAdminOrCL) {
-    // Build editor roster from EDITOR_EMAILS aliases → display name. Skip entries
-    // with no aliases (e.g. Seller placeholder), otherwise they render as a
-    // phantom blank row. Include any extra emails that already have completions.
-    var emailToName = {};
-    if (typeof EDITOR_EMAILS !== 'undefined') {
-      Object.keys(EDITOR_EMAILS).forEach(function(name) {
-        var aliases = EDITOR_EMAILS[name] || [];
-        aliases.forEach(function(alias) {
-          emailToName[alias + '@tilt.app'] = name;
-        });
-      });
-    }
-    Object.keys(completions).forEach(function(email) {
-      if (!emailToName[email]) {
-        var prefix = String(email).split('@')[0];
-        emailToName[email] = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty'];
+    // Map editor display name → the email that carries the completion record.
+    // Uses EDITOR_EMAILS aliases (e.g. Sharm has both 'sharm' and 'sharmaine').
+    // Picks whichever alias has any completion record, else the first alias.
+    function completionForEditor(name, moduleId) {
+      var aliases = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[name]) || [];
+      for (var i = 0; i < aliases.length; i++) {
+        var email = aliases[i] + '@tilt.app';
+        var c = (completions[email] || {})[moduleId];
+        if (c && (c.startedAt || c.completedAt)) return c;
       }
+      return {};
+    }
+
+    var visibleModules = modules.filter(function(m) {
+      return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl);
     });
-    var editorEmails = Object.keys(emailToName).sort(function(a, b) {
-      return emailToName[a].localeCompare(emailToName[b]);
-    });
 
-    var moduleHeaders = modules.map(function(m) {
-      return '<th style="padding:6px 8px;font-size:11px;text-align:center;">' + escapeHtml((m.title || '').slice(0, 30)) + '</th>';
-    }).join('');
-    var rows = editorEmails.map(function(email) {
-      var cells = modules.map(function(m) {
-        var c = ((completions[email] || {})[m.id]) || {};
-        var mark = c.completedAt ? '✓' : c.startedAt ? '…' : '—';
-        var color = c.completedAt ? '#22c55e' : c.startedAt ? '#f59e0b' : 'var(--text3)';
-        return '<td style="text-align:center;color:' + color + ';font-weight:600;">' + mark + '</td>';
-      }).join('');
-      return '<tr><td style="padding:6px 10px;font-size:12px;color:var(--text1);">' + escapeHtml(emailToName[email]) + '</td>' + cells + '</tr>';
-    }).join('');
+    var cards = visibleModules.length === 0
+      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules with files yet. Add one in Config → Training modules.</div>'
+      : visibleModules.map(function(m) {
+          // Per-editor status strip: "Zidni ✓ · Sharm … · Patty —"
+          var statusBits = TRAINING_EDS.map(function(ed) {
+            var c = completionForEditor(ed, m.id);
+            var mark, color;
+            if (c.completedAt) { mark = '✓'; color = '#22c55e'; }
+            else if (c.startedAt) { mark = '…'; color = '#f59e0b'; }
+            else { mark = '—'; color = 'var(--text3)'; }
+            return '<span style="color:var(--text2);">' + escapeHtml(ed) + '</span> ' +
+                   '<span style="color:' + color + ';font-weight:700;">' + mark + '</span>';
+          }).join(' &nbsp;·&nbsp; ');
+          var statusStrip = '<div style="margin-top:4px;font-size:11.5px;">' + statusBits + '</div>';
 
-    var matrix = modules.length === 0
-      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules yet. Add one in Config → Training modules.</div>'
-      : '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
-          '<thead><tr><th style="text-align:left;padding:6px 10px;">Editor</th>' + moduleHeaders + '</tr></thead>' +
-          '<tbody>' + rows + '</tbody>' +
-        '</table>';
+          var embeds = moduleEmbeds(m);
+          var perEditorSend = TRAINING_EDS.map(function(ed) {
+            return '<button class="training-action-pill" onclick="App.sendTrainingToEditor(\'' + m.id + '\',\'' + ed + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ ' + escapeHtml(ed) + '</button>';
+          }).join(' ');
 
-    return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;">' +
-      '<h1 style="margin:0 0 4px;font-size:22px;">Training — Completion matrix</h1>' +
+          return '<div class="auto-card" style="margin-bottom:10px;">' +
+            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
+              '<div style="flex:1 1 320px;min-width:280px;">' +
+                '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + '</div>' +
+                statusStrip +
+                '<div style="font-size:12px;color:var(--text2);margin-top:8px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
+                '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
+                (embeds ? '<div class="training-embeds">' + embeds + '</div>' : '') +
+              '</div>' +
+              '<div style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' +
+                '<button class="training-action-pill training-action-start" onclick="App.sendTrainingToAllEditors(\'' + m.id + '\')" title="Post to every editor\'s daily Slack thread">→ Send to all editor threads</button>' +
+                '<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">' + perEditorSend + '</div>' +
+                '<button class="training-action-pill" onclick="App.copyTrainingModule(\'' + m.id + '\')" title="Copy the message to paste anywhere">Copy message</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+
+    return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;">' +
+      '<h1 style="margin:0 0 4px;font-size:22px;">Training</h1>' +
       '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-        '✓ = completed · … = in progress · — = not started. Add modules in Config → Training modules.' +
+        'Same list the editors see. Use the send buttons to push a module into each editor\'s daily Slack thread.' +
       '</div>' +
-      matrix +
+      cards +
     '</div></div>';
   }
 
@@ -15022,6 +15040,28 @@ function brollTaggedByEditorToday(editor) {
 // - Goal not yet met: prompt with tagged/goal/remaining and where to work.
 // - Goal met: a short "done for the day" nudge (still handy if Elsa wants to
 //   acknowledge in-thread instead of leaving them wondering).
+// Slack message for a training module targeted at one editor. Mentions them,
+// names the module + brief, and lists whichever brief/GDrive/footage links are
+// set on the module so they can click straight through. `Head to the *Training*
+// tab` closer mirrors the clip-tagging task closer so the editor knows where to
+// go to mark it complete.
+function buildTrainingModuleMessage(editor, m) {
+  if (!m) return '';
+  var mention = editor ? (mentionEditor(editor) + ' ') : '';
+  var lines = [':mortar_board: ' + mention + '— training task', '*' + (m.title || 'Untitled module') + '*'];
+  var brief = (m.brief || '').trim();
+  if (brief) { lines.push(''); lines.push(brief); }
+  var gdrive = (m.gdriveUrl || m.loomUrl || '').trim();
+  var linkBits = [];
+  if (m.notionUrl) linkBits.push('<' + m.notionUrl + '|Brief>');
+  if (gdrive) linkBits.push('<' + gdrive + '|GDrive walkthrough>');
+  if (m.footageUrl) linkBits.push('<' + m.footageUrl + '|Raw footage>');
+  if (linkBits.length) { lines.push(''); lines.push(linkBits.join('  ·  ')); }
+  lines.push('');
+  lines.push('Head to the *Training* tab when you\'re idle, edit it, then mark complete.');
+  return lines.join('\n');
+}
+
 function buildClipTaggingMessageForEditor(editor) {
   var goal = getBrollDailyGoal();
   var tagged = brollTaggedByEditorToday(editor);
@@ -18187,6 +18227,108 @@ var App = {
     STATE.trainingModules = (STATE.trainingModules || []).filter(function(m) { return m.id !== moduleId; });
     saveState();
     render();
+  },
+
+  // Post a training module into one editor's daily Slack thread. Refuses if no
+  // thread is set for today (webhook fallback would leak to the main channel).
+  sendTrainingToEditor: function(moduleId, editor) {
+    var m = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    if (!m) { toast('Module not found', 'error'); return; }
+    var thread = resolveDailyThreadForEditor(editor);
+    if (!thread) { toast('No daily thread set for ' + editor + ' — set it in Automations', 'error'); return; }
+    var msg = buildTrainingModuleMessage(editor, m);
+    toast('Sending training to ' + editor + '…', '');
+    postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+      if (r && r.ok) {
+        STATE.sentNotifications = STATE.sentNotifications || [];
+        STATE.sentNotifications.unshift({
+          time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
+          reason: 'training-task', body: msg
+        });
+        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+        logAction('notified', 'Training "' + (m.title || '') + '" sent for ' + editor + ' (thread)');
+        toast('✓ Sent to ' + editor + '\'s thread', 'success');
+        render();
+      } else {
+        var reason = (r && r.body) || 'unknown error';
+        logAction('deleted', 'Training send failed for ' + editor + ': ' + reason);
+        toast('Post failed for ' + editor + ': ' + reason, 'error');
+      }
+    }).catch(function(err) {
+      var reason = (err && (err.message || err.code)) || 'network error';
+      logAction('deleted', 'Training send failed for ' + editor + ': ' + reason);
+      toast('Post failed for ' + editor + ': ' + reason, 'error');
+    });
+  },
+
+  // Fan-out: post the same module to every editor's daily thread. Editors
+  // without a thread today are skipped and reported once at the end so a
+  // partial success is still legible.
+  sendTrainingToAllEditors: function(moduleId) {
+    var m = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    if (!m) { toast('Module not found', 'error'); return; }
+    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty'];
+    var sentCount = 0, failCount = 0, skippedCount = 0;
+    var jobs = [];
+    TRAINING_EDS.forEach(function(editor) {
+      var thread = resolveDailyThreadForEditor(editor);
+      if (!thread) { skippedCount++; return; }
+      var msg = buildTrainingModuleMessage(editor, m);
+      jobs.push(
+        postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+          if (r && r.ok) {
+            sentCount++;
+            STATE.sentNotifications = STATE.sentNotifications || [];
+            STATE.sentNotifications.unshift({
+              time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
+              reason: 'training-task', body: msg
+            });
+            if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+            logAction('notified', 'Training "' + (m.title || '') + '" sent for ' + editor + ' (thread)');
+          } else {
+            failCount++;
+            var reason = (r && r.body) || 'unknown error';
+            logAction('deleted', 'Training send failed for ' + editor + ': ' + reason);
+          }
+        }).catch(function(err) {
+          failCount++;
+          var reason = (err && (err.message || err.code)) || 'network error';
+          logAction('deleted', 'Training send failed for ' + editor + ': ' + reason);
+        })
+      );
+    });
+    if (jobs.length === 0) {
+      toast('No daily threads set — nothing sent. Set threads in Automations.', 'error');
+      return;
+    }
+    toast('Sending training to ' + jobs.length + ' editor(s)…', '');
+    Promise.all(jobs).then(function() {
+      var parts = [];
+      if (sentCount) parts.push('✓ ' + sentCount + ' sent');
+      if (failCount) parts.push(failCount + ' failed');
+      if (skippedCount) parts.push(skippedCount + ' skipped (no thread)');
+      toast(parts.join(' · '), sentCount && !failCount ? 'success' : (failCount ? 'error' : ''));
+      render();
+    });
+  },
+
+  // Copy the module's Slack message body to the clipboard so Elsa can paste it
+  // manually if she'd rather send it herself (e.g. into a DM). Uses Sharm's
+  // mention if picking one — but since the message is per-editor, we default to
+  // no editor mention so the pasted text isn't tied to one person.
+  copyTrainingModule: function(moduleId) {
+    var m = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    if (!m) { toast('Module not found', 'error'); return; }
+    var msg = buildTrainingModuleMessage('', m);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(msg).then(function() { toast('Copied training message', 'success'); });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = msg; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('Copied training message', 'success'); }
+      catch (e) { toast('Copy failed', 'error'); }
+      document.body.removeChild(ta);
+    }
   },
 
   // Linear tasks widget — fetches the signed-in user's open assigned issues via
