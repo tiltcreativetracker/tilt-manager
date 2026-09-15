@@ -13961,7 +13961,7 @@ function renderClipTagPanel(c, visibleList) {
       playerHtml +
       meta +
       '<datalist id="' + sellerListId + '">' +
-        (STATE.sellers || []).map(function(n) { return '<option value="' + escapeHtml(n) + '"></option>'; }).join('') +
+        brollPaidCampaignSellers().map(function(n) { return '<option value="' + escapeHtml(n) + '"></option>'; }).join('') +
       '</datalist>' +
       '<datalist id="' + productListId + '">' +
         (STATE.products || []).map(function(n) { return '<option value="' + escapeHtml(n) + '"></option>'; }).join('') +
