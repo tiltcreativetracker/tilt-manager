@@ -13668,7 +13668,7 @@ function renderClipsView() {
   // display:flex row) treats us as ONE child and our internal rows stack
   // vertically like every other tab.
   return '<div class="clips-wrap">' +
-    topBar + doneStripHtml + bulkBar +
+    topBar + renderClipsTaggingLeaderboard() + doneStripHtml + bulkBar +
     '<div class="clips-body" style="' + bodyStyle + '">' +
       '<div class="clips-grid-wrap">' + gridHtml + '</div>' +
       '<div class="clips-resize-handle" data-side="right" onmousedown="App.onBrollResizeStart(event, \'right\')" title="Drag to resize"></div>' +
@@ -14793,6 +14793,47 @@ function buildClipTaggingMessageForEditor(editor) {
     'Head to the *Clips* tab → filter *Untagged* → J/K to move, 1–5 for type. Thanks!'
   ];
   return lines.join('\n');
+}
+
+// Admin-only leaderboard strip on the Clips tab. One card per editor in
+// TAG_EDS with today's tag count vs. shared daily goal + progress bar. Renders
+// only for admins so editors don't get a live scoreboard of each other, and
+// re-renders on every broll update because the Fb.subscribeBroll callback
+// already fires render() when STATE.tab === 'clips'.
+function renderClipsTaggingLeaderboard() {
+  var isAdmin = !!(Auth && Auth.user && Auth.user.role === 'admin');
+  if (!isAdmin) return '';
+  var TAG_EDS = ['Zidni', 'Sharm', 'Patty'];
+  var goal = getBrollDailyGoal();
+  var totalToday = 0;
+  var cards = TAG_EDS.map(function(ed) {
+    var tagged = brollTaggedByEditorToday(ed);
+    totalToday += tagged;
+    var remaining = Math.max(0, goal - tagged);
+    var pct = goal > 0 ? Math.min(100, Math.round((tagged / goal) * 100)) : 0;
+    var barColor = tagged >= goal && goal > 0 ? 'var(--green-text)' : 'var(--accent2)';
+    var statusLine = goal <= 0
+      ? '<span style="color:var(--text3);">no goal</span>'
+      : (tagged >= goal
+          ? '<span style="color:var(--green-text); font-weight:600;">\u{1F389} ' + tagged + '/' + goal + '</span>'
+          : '<span><strong style="color:var(--text1);">' + tagged + '</strong><span style="color:var(--text3);"> / ' + goal + ' · ' + remaining + ' left</span></span>');
+    return '<div class="clips-tagboard-card">' +
+        '<div class="editor-avatar av-' + ed + '">' + editorInitials(ed) + '</div>' +
+        '<div class="clips-tagboard-body">' +
+          '<div class="clips-tagboard-name">' + ed + '</div>' +
+          '<div class="clips-tagboard-status">' + statusLine + '</div>' +
+          '<div class="clips-tagboard-bar"><div class="clips-tagboard-fill" style="width:' + pct + '%; background:' + barColor + ';"></div></div>' +
+        '</div>' +
+      '</div>';
+  }).join('');
+  return '<div class="clips-tagboard">' +
+      '<div class="clips-tagboard-header">' +
+        '<span class="clips-tagboard-title">Today’s tagging</span>' +
+        '<span class="clips-tagboard-total">' + totalToday + ' tagged today</span>' +
+        '<span class="clips-tagboard-hint">admin view · live</span>' +
+      '</div>' +
+      '<div class="clips-tagboard-cards">' + cards + '</div>' +
+    '</div>';
 }
 
 // ===================== DAILY TALLY (per-editor) =====================

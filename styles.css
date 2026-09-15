@@ -1857,6 +1857,24 @@
   .clips-archived-toggle input { margin: 0; }
   .clips-dismissed-count { color: var(--amber-text); font-weight: 600; margin-left: 2px; }
 
+  /* Admin-only live tagging leaderboard on the Clips tab. Sits between the
+     topbar and the Done strip. Compact per-editor cards with a progress bar
+     that repaints on every broll subscribe tick. */
+  .clips-tagboard { padding: 10px 18px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); flex: 0 0 auto; }
+  .clips-tagboard-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .clips-tagboard-title { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text2); }
+  .clips-tagboard-total { font-size: 11px; color: var(--text3); }
+  .clips-tagboard-total::before { content: '·'; margin-right: 8px; color: var(--border2); }
+  .clips-tagboard-hint { margin-left: auto; font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
+  .clips-tagboard-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  .clips-tagboard-card { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; }
+  .clips-tagboard-card .editor-avatar { width: 28px; height: 28px; font-size: 11px; }
+  .clips-tagboard-body { flex: 1 1 auto; min-width: 0; }
+  .clips-tagboard-name { font-size: 12px; font-weight: 600; color: var(--text1); }
+  .clips-tagboard-status { font-size: 11px; margin-top: 1px; }
+  .clips-tagboard-bar { margin-top: 6px; height: 4px; background: var(--bg2); border-radius: 3px; overflow: hidden; }
+  .clips-tagboard-fill { height: 100%; transition: width 0.3s; }
+
   .clips-bulkbar { display: flex; gap: 10px; align-items: center; padding: 10px 18px; background: var(--accent-dim); border-bottom: 1px solid var(--border); flex-wrap: wrap; flex: 0 0 auto; }
   .clips-bulkbar b { color: var(--accent2); }
 
