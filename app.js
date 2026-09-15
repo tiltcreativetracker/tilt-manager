@@ -7812,7 +7812,7 @@ function isEditorStatsViewer() {
 // map so we can also render "yourself" chips. Extend when new editors join.
 var EDITOR_EMAILS = {
   Zidni: ['zidni'],
-  Sharm: ['sharm'],
+  Sharm: ['sharm', 'sharmaine'],
   Patty: ['patty'],
   Elsa:  ['elsa'],
   Seller: []
