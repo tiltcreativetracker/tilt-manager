@@ -10098,6 +10098,7 @@ function renderAutomationsView() {
           '<input type="text" id="daily-thread-input-' + ed + '" value="' + escapeHtml(url) + '" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="https://workspace.slack.com/archives/Cxxxxx/pxxxxxxxxxxxxxx" style="flex:1;">' +
           '<button class="save-btn" onclick="App.saveDailyThread(\'' + ed + '\')">Set</button>' +
           (t ? '<button class="edit-btn" onclick="App.clearDailyThread(\'' + ed + '\')" style="margin-left:4px;">Clear</button>' : '') +
+          '<button class="edit-btn" onclick="App.postDailyThreadNow(\'' + ed + '\')" title="Post the parent thread from the bot right now — writes the URL into the slot above" style="margin-left:4px;">\u{1F9EA} Post now</button>' +
         '</div>' + histHtml +
       '</div>';
     }).join('');
@@ -13758,7 +13759,7 @@ function renderClipsView() {
   var topBar =
     '<div class="clips-topbar">' +
       '<div class="clips-topbar-row">' +
-        '<input class="form-input clips-search" placeholder="Search clips, folders, tags…" ' +
+        '<input id="clips-search" class="form-input clips-search" placeholder="Search clips, folders, tags…" ' +
           'value="' + escapeHtml(STATE.brollSearch || '') + '" ' +
           'oninput="App.setBrollFilter(\'search\', this.value)">' +
         '<select class="form-select" onchange="App.setBrollFilter(\'type\', this.value)">' + typeOptions + '</select>' +
@@ -19507,6 +19508,44 @@ var App = {
     saveState();
     logAction('updated', 'Cleared daily thread for ' + editor);
     render();
+  },
+  // Test path for the future daily-thread scheduler: asks the server to post
+  // the parent Slack message for `editor` right now. Server writes the slot to
+  // Firestore directly; local STATE picks it up on the next snapshot.
+  postDailyThreadNow: function(editor) {
+    var url = (STATE.editorSlackChannels || {})[editor] || '';
+    if (!url) {
+      toast('No channel set for ' + editor + ' — set the Slack channel URL in Config first', 'error');
+      return;
+    }
+    if (!confirm('Post the daily thread parent message to ' + editor + '\'s channel now?')) return;
+    toast('Posting daily thread for ' + editor + '…', 'success');
+    try {
+      var call = firebase.functions().httpsCallable('postDailyThreadForEditor');
+      call({ editor: editor }).then(function(r) {
+        var d = r && r.data;
+        if (!d || !d.ok) {
+          var reason = (d && d.reason) || 'unknown error';
+          toast('Failed for ' + editor + ': ' + reason, 'error');
+          logAction('error', 'postDailyThreadNow failed for ' + editor + ': ' + reason);
+          return;
+        }
+        if (d.alreadySet) {
+          toast('Already set for today — no double-post', 'success');
+          return;
+        }
+        toast('✓ Posted for ' + editor, 'success');
+        logAction('updated', 'Daily thread auto-posted for ' + editor + ' (channel ' + d.channelId + ')');
+        // No local write — server updated state/app.dailyThreads.<editor>; the
+        // Firestore snapshot listener will refresh STATE in a moment.
+      }).catch(function(err) {
+        var msg = (err && (err.message || err.code)) || 'network error';
+        toast('Failed for ' + editor + ': ' + msg, 'error');
+        logAction('error', 'postDailyThreadNow exception for ' + editor + ': ' + msg);
+      });
+    } catch (e) {
+      toast('Functions SDK unavailable', 'error');
+    }
   },
   saveCatHeadDailyThread: function(safeId, cat) {
     if (!STATE.catHeadDailyThreads) STATE.catHeadDailyThreads = {};
