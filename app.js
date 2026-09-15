@@ -1099,6 +1099,50 @@ var Fb = {
         var rc = reconcileSlot(_savedContentLeadThreads[lead], STATE.contentLeadDailyThreads[lead]);
         if (rc.changed) { STATE.contentLeadDailyThreads[lead] = rc.win; _threadsRescued = true; }
       });
+      // Race guard for the Clear button: an in-flight snapshot uploaded BEFORE
+      // the user's clear was flushed will still carry a set value, and the
+      // reconcileSlot loop above never touches slots the user cleared (they
+      // fall out of _savedThreads/etc.), so the snapshot's set silently wins
+      // and the thread "comes back". Any slot cleared locally within
+      // CLEAR_TTL_MS is force-nulled here so the correction upload below
+      // pushes null to Firestore and every tab converges on cleared.
+      (function honorRecentClears() {
+        var CLEAR_TTL_MS = 15000;
+        var now = Date.now();
+        function purge(m) {
+          if (!m) return;
+          Object.keys(m).forEach(function(k) { if (!m[k] || (now - m[k]) > CLEAR_TTL_MS) delete m[k]; });
+        }
+        purge(Fb._recentlyClearedThreads);
+        purge(Fb._recentlyClearedCatThreads);
+        if (Fb._recentlyClearedIntlThread && (now - Fb._recentlyClearedIntlThread) > CLEAR_TTL_MS) Fb._recentlyClearedIntlThread = 0;
+        if (Fb._recentlyClearedOrganicThread && (now - Fb._recentlyClearedOrganicThread) > CLEAR_TTL_MS) Fb._recentlyClearedOrganicThread = 0;
+
+        if (Fb._recentlyClearedThreads) {
+          Object.keys(Fb._recentlyClearedThreads).forEach(function(ed) {
+            if (STATE.dailyThreads && STATE.dailyThreads[ed]) {
+              STATE.dailyThreads[ed] = null;
+              _threadsRescued = true;
+            }
+          });
+        }
+        if (Fb._recentlyClearedCatThreads) {
+          Object.keys(Fb._recentlyClearedCatThreads).forEach(function(cat) {
+            if (STATE.catHeadDailyThreads && STATE.catHeadDailyThreads[cat]) {
+              STATE.catHeadDailyThreads[cat] = null;
+              _threadsRescued = true;
+            }
+          });
+        }
+        if (Fb._recentlyClearedIntlThread && STATE.intlDailyThread) {
+          STATE.intlDailyThread = null;
+          _threadsRescued = true;
+        }
+        if (Fb._recentlyClearedOrganicThread && STATE.organicDailyThread) {
+          STATE.organicDailyThread = null;
+          _threadsRescued = true;
+        }
+      })();
       // Push a correction upload so Firestore reflects the rescued threads.
       if (_threadsRescued) {
         setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
@@ -19647,6 +19691,10 @@ var App = {
     STATE.dailyThreadHistory[editor].unshift({ date: t.date, url: t.url });
     while (STATE.dailyThreadHistory[editor].length > 7) STATE.dailyThreadHistory[editor].pop();
     STATE.dailyThreads[editor] = null;
+    if (typeof Fb !== 'undefined') {
+      Fb._recentlyClearedThreads = Fb._recentlyClearedThreads || {};
+      Fb._recentlyClearedThreads[editor] = Date.now();
+    }
     saveState();
     logAction('updated', 'Cleared daily thread for ' + editor);
     render();
@@ -19718,6 +19766,10 @@ var App = {
     STATE.catHeadDailyThreadHistory[cat].unshift({ date: t.date, url: t.url });
     while (STATE.catHeadDailyThreadHistory[cat].length > 7) STATE.catHeadDailyThreadHistory[cat].pop();
     STATE.catHeadDailyThreads[cat] = null;
+    if (typeof Fb !== 'undefined') {
+      Fb._recentlyClearedCatThreads = Fb._recentlyClearedCatThreads || {};
+      Fb._recentlyClearedCatThreads[cat] = Date.now();
+    }
     saveState();
     logAction('updated', 'Cleared category head thread for ' + cat);
     render();
@@ -19758,6 +19810,7 @@ var App = {
     STATE.intlDailyThreadHistory.unshift({ date: t.date, url: t.url });
     while (STATE.intlDailyThreadHistory.length > 7) STATE.intlDailyThreadHistory.pop();
     STATE.intlDailyThread = null;
+    if (typeof Fb !== 'undefined') Fb._recentlyClearedIntlThread = Date.now();
     saveState();
     logAction('updated', 'Cleared intl daily thread');
     render();
@@ -20061,6 +20114,7 @@ var App = {
     STATE.organicDailyThreadHistory.unshift({ date: t.date, url: t.url });
     while (STATE.organicDailyThreadHistory.length > 7) STATE.organicDailyThreadHistory.pop();
     STATE.organicDailyThread = null;
+    if (typeof Fb !== 'undefined') Fb._recentlyClearedOrganicThread = Date.now();
     saveState();
     logAction('updated', 'Cleared Organic daily thread');
     render();
