@@ -12684,6 +12684,27 @@ function renderLinearTasksPanel() {
 // see the tab in their bar but land on an Under Construction placeholder so
 // Elsa can build/QA the real UI against real data via view-as. Flip the gate
 // (add editor to the allow-list, or drop it entirely) when releasing.
+
+// Admin-only preview override — pick which editor's My Day to render, so Elsa
+// can see the tab through Zidni / Sharm / Patty's eyes without leaving her
+// account. Session-only (module-level), read-only when active — writes are
+// hard-gated to the signed-in editor further down.
+var _eodPreviewEditor = null;
+function _eodActiveEditor(authEditor) {
+  if (!_eodPreviewEditor) return authEditor || '';
+  if (_eodPreviewEditor === authEditor) return authEditor;
+  return _eodPreviewEditor;
+}
+function _eodPickerOptions(authEditor) {
+  var seen = {};
+  var list = [];
+  if (authEditor) { seen[authEditor] = 1; list.push(authEditor); }
+  (typeof DAILY_LOG_EDITORS !== 'undefined' ? DAILY_LOG_EDITORS : ['Zidni', 'Sharm', 'Patty']).forEach(function(e) {
+    if (!seen[e]) { seen[e] = 1; list.push(e); }
+  });
+  return list;
+}
+
 function renderEditorHomeView() {
   // Real role, not the view-as shadow. Fallback to `.role` covers the local
   // auth-bypass path (plain user object, no shadow installed) so previewing
@@ -12697,13 +12718,31 @@ function renderEditorHomeView() {
     '</div></div>';
   }
 
-  var currentEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+  var authEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+  var currentEditor = _eodActiveEditor(authEditor);
+  var isPreview = !!currentEditor && currentEditor !== authEditor;
   var today = todayUK();
 
+  // Admin picker — always shown for admins; renders whichever editor was chosen.
+  var pickerOptions = _eodPickerOptions(authEditor);
+  var pickerHtml = '<div class="eod-picker">' +
+    '<label class="eod-picker-label">View as</label>' +
+    '<select class="form-input eod-picker-select" onchange="App.setEODPreviewEditor(this.value)">' +
+      pickerOptions.map(function(name) {
+        var selected = (name === currentEditor) ? ' selected' : '';
+        var label = name + (name === authEditor ? ' (you)' : '');
+        return '<option value="' + escapeHtml(name) + '"' + selected + '>' + escapeHtml(label) + '</option>';
+      }).join('') +
+    '</select>' +
+  '</div>';
+
   if (!currentEditor) {
-    return '<div class="content" style="padding:0;"><div style="padding:48px;text-align:center;color:var(--text3);">' +
-      '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">My Day</h1>' +
-      '<div>Your account isn\'t mapped to an editor. Pick one from the view-as picker to preview the surface.</div>' +
+    return '<div class="content" style="padding:0;"><div class="eod-page">' +
+      pickerHtml +
+      '<div style="padding:48px;text-align:center;color:var(--text3);margin-top:24px;">' +
+        '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">My Day</h1>' +
+        '<div>Pick an editor above to preview their surface.</div>' +
+      '</div>' +
     '</div></div>';
   }
 
@@ -12722,13 +12761,14 @@ function renderEditorHomeView() {
   var taggedToday = mine.filter(function(a) { return a.doneToday === today; });
   var eodBucket = (STATE.eod && STATE.eod[currentEditor] && STATE.eod[currentEditor][today]) || null;
   var submitted = !!(eodBucket && eodBucket.submittedAt);
+  var interactionsDisabled = submitted || isPreview;
 
   function renderVideoRow(a) {
     var camp = findCampaignById(a.campaignId);
     var doneNow = a.doneToday === today;
     return '<div class="auto-card eod-task-row' + (doneNow ? ' eod-task-row-done' : '') + '">' +
-      '<label class="eod-task-check" title="Mark as worked on today">' +
-        '<input type="checkbox"' + (doneNow ? ' checked' : '') + (submitted ? ' disabled' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')">' +
+      '<label class="eod-task-check" title="' + (isPreview ? 'Read-only preview' : 'Mark as worked on today') + '">' +
+        '<input type="checkbox"' + (doneNow ? ' checked' : '') + (interactionsDisabled ? ' disabled' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')">' +
         '<span>Worked on today</span>' +
       '</label>' +
       '<div class="eod-task-body">' +
@@ -12744,8 +12784,8 @@ function renderEditorHomeView() {
   var tasksBody;
   if (mine.length === 0) {
     tasksBody = '<div class="eod-empty">' +
-      '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">No videos assigned to you right now.</div>' +
-      '<div style="font-size:12.5px;">Enjoy the quiet — or check the <strong>Training</strong> tab.</div>' +
+      '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">No videos assigned' + (isPreview ? ' to ' + escapeHtml(currentEditor) : ' to you') + ' right now.</div>' +
+      '<div style="font-size:12.5px;">' + (isPreview ? 'Nothing to preview today.' : 'Enjoy the quiet — or check the <strong>Training</strong> tab.') + '</div>' +
     '</div>';
   } else {
     tasksBody = mine.map(renderVideoRow).join('');
@@ -12776,8 +12816,27 @@ function renderEditorHomeView() {
       (otherList
         ? '<div class="eod-locked-section-label">Other</div><ul class="eod-locked-list">' + otherList + '</ul>'
         : '') +
-      '<div class="eod-locked-foot">Locked for today. Follow up in the Slack thread if anything\'s missing.</div>' +
+      '<div class="eod-locked-foot">Locked for the day. Follow up in the Slack thread if anything\'s missing.</div>' +
     '</div>';
+  } else if (isPreview) {
+    // Read-only pre-submit preview of another editor's Home. Show what they've
+    // tagged so far and any "Other" items, but no submit / add controls.
+    var pAssets = taggedToday.length
+      ? taggedToday.map(function(a) {
+          var camp = findCampaignById(a.campaignId);
+          var suffix = camp ? (' <span style="color:var(--text3);">— ' + escapeHtml(camp.name) + '</span>') : '';
+          return '<li>' + escapeHtml(a.name || 'Untitled') + suffix + '</li>';
+        }).join('')
+      : '<li class="eod-worked-empty">Nothing tagged yet today.</li>';
+    var pOther = (eodBucket && Array.isArray(eodBucket.other) && eodBucket.other.length)
+      ? eodBucket.other.map(function(o) { return '<li>' + escapeHtml(o.text || '') + '</li>'; }).join('')
+      : '<li class="eod-other-empty">Nothing yet.</li>';
+    eodBody =
+      '<div class="eod-section-label">Worked on today (' + taggedToday.length + ')</div>' +
+      '<ul class="eod-worked-list">' + pAssets + '</ul>' +
+      '<div class="eod-section-label">Other</div>' +
+      '<ul class="eod-worked-list">' + pOther + '</ul>' +
+      '<div class="eod-preview-hint">Read-only — ' + escapeHtml(currentEditor) + ' hasn\'t submitted yet today.</div>';
   } else {
     var otherItems = (eodBucket && Array.isArray(eodBucket.other)) ? eodBucket.other : [];
     var workedOnHtml = taggedToday.length
@@ -12819,12 +12878,24 @@ function renderEditorHomeView() {
     catch (_) { return today; }
   })();
 
+  var previewBanner = isPreview
+    ? '<div class="eod-preview-banner">👀 Previewing <strong>' + escapeHtml(currentEditor) + '</strong>\'s Home — read-only. ' +
+        '<button class="eod-preview-clear" onclick="App.setEODPreviewEditor(\'' + escapeHtml(authEditor || '') + '\')">Back to your view</button>' +
+      '</div>'
+    : '';
+
   return '<div class="content" style="padding:0;"><div class="eod-page">' +
+    pickerHtml +
+    previewBanner +
     '<div class="eod-header">' +
       '<h1>My Day — ' + escapeHtml(currentEditor) + '</h1>' +
       '<span class="eod-header-date">' + escapeHtml(todayLabel) + '</span>' +
     '</div>' +
-    '<div class="eod-header-sub">Tick assets as you work through them. Submit EOD when you\'re done.</div>' +
+    '<div class="eod-header-sub">' +
+      (isPreview
+        ? 'Read-only preview of ' + escapeHtml(currentEditor) + '\'s day.'
+        : 'Tick assets as you work through them. Submit EOD when you\'re done.') +
+    '</div>' +
 
     '<div class="eod-section-label eod-section-label-main">Tasks · ' + mine.length + ' open</div>' +
     tasksBody +
@@ -18654,6 +18725,9 @@ var App = {
   toggleAssetDoneToday: function(id) {
     var a = findAssetById(id);
     if (!a) return;
+    // Belt-and-braces for admin preview mode: don't stamp another editor's
+    // asset while previewing their Home read-only.
+    if (_eodPreviewEditor && a.editor === _eodPreviewEditor) { toast('Read-only preview', 'info'); return; }
     var today = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
     a.doneToday = (a.doneToday === today) ? '' : today;
     saveState();
@@ -18679,10 +18753,24 @@ var App = {
     if (typeof toast === 'function') toast('Decision logged', 'success');
   },
 
+  // Admin-only preview switcher for the My Day tab. Picking a different editor
+  // renders their queue and EOD read-only; picking your own (or clearing to '')
+  // returns to the interactive view. Session-only — resets on reload.
+  setEODPreviewEditor: function(name) {
+    var authEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+    _eodPreviewEditor = (name && name !== authEditor) ? name : null;
+    render();
+  },
+
   // EOD "Other" list — free-text items for non-asset work (meetings, admin, Linear).
   // Pre-submit only: once an EOD is submitted the day is locked and this no-ops.
   addEODOther: function(editor) {
     if (!editor) return;
+    // Belt-and-braces: only the signed-in editor may write. Preview mode
+    // disables the UI, but a stale event or console call still can't cross
+    // into another editor's data.
+    var authEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+    if (editor !== authEditor) { toast('Read-only preview', 'info'); return; }
     var today = todayUK();
     var existing = (STATE.eod && STATE.eod[editor] && STATE.eod[editor][today]) || null;
     if (existing && existing.submittedAt) { toast('EOD already submitted for today', 'info'); return; }
@@ -18709,6 +18797,8 @@ var App = {
   },
   removeEODOther: function(editor, entryId) {
     if (!editor || !entryId) return;
+    var authEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+    if (editor !== authEditor) { toast('Read-only preview', 'info'); return; }
     var today = todayUK();
     var bucket = STATE.eod && STATE.eod[editor] && STATE.eod[editor][today];
     if (!bucket || bucket.submittedAt) return;
@@ -18724,6 +18814,8 @@ var App = {
   // toast, not a lost submission.
   submitEOD: function(editor) {
     if (!editor) return;
+    var authEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+    if (editor !== authEditor) { toast('Read-only preview', 'info'); return; }
     var today = todayUK();
     var bucket = (STATE.eod && STATE.eod[editor] && STATE.eod[editor][today]) || null;
     if (bucket && bucket.submittedAt) { toast('Already submitted', 'info'); return; }
