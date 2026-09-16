@@ -12928,12 +12928,12 @@ function renderEditorHomeView() {
     return 1; // active — In Progress, For Review, Needs Revisions, Assigned, Draft, etc.
   }
 
-  // My Day only shows *active* work — Approved/Cancelled belong elsewhere
-  // (Reporting, Weekly Log, Editor Stats). Stripping the terminal noise keeps
-  // this surface a focused day-of-work view.
-  var activeMine = STATE.assets.filter(function(a) {
-    return a.editor === currentEditor && _statusRank(a) === 1;
-  });
+  // My Day is a *today* view. Active work shows always; also surface today's
+  // approvals (a.dateApproved === today) so an editor's wins for the day are
+  // visible — same list, terminal history is not.
+  var allEditorAssets = STATE.assets.filter(function(a) { return a.editor === currentEditor; });
+  var activeMine    = allEditorAssets.filter(function(a) { return _statusRank(a) === 1; });
+  var approvedToday = allEditorAssets.filter(function(a) { return _statusRank(a) === 2 && a.dateApproved === today; });
   activeMine.sort(function(a, b) {
     // Already-ticked-today rows drop to the bottom.
     var ad = (a.doneToday === today) ? 1 : 0;
