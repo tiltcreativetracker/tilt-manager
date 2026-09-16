@@ -13161,7 +13161,7 @@ function renderEditorHomeView() {
       ? eodBucket.other.map(function(o) { return '<li>' + escapeHtml(o.text || '') + '</li>'; }).join('')
       : '';
     var slackLink = eodBucket.slackReplyUrl
-      ? '<a href="' + escapeHtml(eodBucket.slackReplyUrl) + '" target="_blank" rel="noopener" class="eod-slack-link">View Slack reply ↗</a>'
+      ? '<a href="' + escapeHtml(eodBucket.slackReplyUrl) + '" target="_blank" rel="noopener" class="eod-slack-link">View in Slack ↗</a>'
       : (eodBucket.slackChannelId ? '<span class="eod-slack-warn">Slack reply not confirmed</span>' : '<span class="eod-slack-warn">Not posted to Slack</span>');
     eodBody = '<div class="eod-locked">' +
       '<div class="eod-locked-head">' +
@@ -13224,7 +13224,7 @@ function renderEditorHomeView() {
         '<button class="run-btn secondary" onclick="App.addEODOther(\'' + escapeHtml(currentEditor) + '\')">+ Add</button>' +
       '</div>' +
       '<div class="eod-submit-row">' +
-        '<div class="eod-submit-hint">Posts as a reply under ' + escapeHtml(currentEditor) + '\'s Slack daily thread. One shot — locks the day.</div>' +
+        '<div class="eod-submit-hint">Posts to ' + escapeHtml(currentEditor) + '\'s Slack channel and tags Elsa. One shot — locks the day.</div>' +
         '<button class="run-btn eod-submit-btn" ' + (canSubmit ? '' : 'disabled ') +
           'onclick="App.submitEOD(\'' + escapeHtml(currentEditor) + '\')">Submit EOD</button>' +
       '</div>';
@@ -19365,31 +19365,42 @@ var App = {
     render();
     toast('EOD submitted', 'success');
 
-    // Slack post — best-effort, keeps local record either way.
-    ensureDailyThreadForEditor(editor).then(function(thread) {
-      if (!thread || !thread.channelId || !thread.threadTs) {
-        toast('Saved locally — Slack thread unavailable', 'info');
-        return;
+    // Post EOD as a top-level channel message (not a thread reply). Threads
+    // don't ping the PM if she's not tagged, so we @mention Elsa at the top
+    // so she doesn't miss the summary.
+    var channelUrl = (STATE.editorSlackChannels && STATE.editorSlackChannels[editor]) || '';
+    var channelId = '';
+    var chMatch = channelUrl && String(channelUrl).match(/\/archives\/([A-Z0-9]+)/i);
+    if (chMatch) channelId = chMatch[1];
+    if (!channelId) {
+      // Fall back to today's daily-thread channel id if the raw channel URL isn't set.
+      var t = STATE.dailyThreads && STATE.dailyThreads[editor];
+      if (t && t.channelId) channelId = t.channelId;
+    }
+    if (!channelId) {
+      logAction('skipped-notify', 'EOD skipped — no channel configured for ' + editor);
+      toast('Saved locally — no Slack channel set for ' + editor, 'info');
+      return;
+    }
+    var mention = (typeof mentionElsaForIntl === 'function') ? mentionElsaForIntl() : '@Elsa';
+    var text = mention + '\n' + formatEODSlackMessage(editor, today, assetSnap, otherList);
+    postToSlackThread(channelId, null, text).then(function(r) {
+      var rec = STATE.eod[editor][today];
+      if (!rec) return;
+      rec.slackChannelId = channelId;
+      rec.slackParentTs = null;
+      if (r && r.ok && r.ts) {
+        rec.slackReplyTs = r.ts;
+        rec.slackReplyUrl = 'https://slack.com/archives/' + channelId + '/p' + String(r.ts).replace('.', '');
+        logAction('notified', 'EOD posted to channel for ' + editor + ' (' + today + ')');
+      } else {
+        logAction('skipped-notify', 'EOD Slack post failed for ' + editor + ': ' + ((r && r.body) || 'unknown'));
+        toast('Saved locally — Slack post failed', 'info');
       }
-      var text = formatEODSlackMessage(editor, today, assetSnap, otherList);
-      postToSlackThread(thread.channelId, thread.threadTs, text).then(function(r) {
-        var rec = STATE.eod[editor][today];
-        if (!rec) return;
-        rec.slackChannelId = thread.channelId;
-        rec.slackParentTs = thread.threadTs;
-        if (r && r.ok && r.ts) {
-          rec.slackReplyTs = r.ts;
-          rec.slackReplyUrl = 'https://slack.com/archives/' + thread.channelId + '/p' + String(r.ts).replace('.', '') + '?thread_ts=' + thread.threadTs + '&cid=' + thread.channelId;
-          logAction('notified', 'EOD posted for ' + editor + ' (' + today + ')');
-        } else {
-          logAction('skipped-notify', 'EOD Slack post failed for ' + editor + ': ' + ((r && r.body) || 'unknown'));
-          toast('Saved locally — Slack post failed', 'info');
-        }
-        saveState();
-        render();
-      });
+      saveState();
+      render();
     }).catch(function(err) {
-      logAction('skipped-notify', 'EOD ensureDailyThread errored: ' + ((err && err.message) || 'unknown'));
+      logAction('skipped-notify', 'EOD Slack post errored: ' + ((err && err.message) || 'unknown'));
       toast('Saved locally — Slack post failed', 'info');
     });
   },
