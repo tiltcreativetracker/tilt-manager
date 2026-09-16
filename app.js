@@ -12885,6 +12885,10 @@ function _editorTrainingCompletions(name) {
 // Editors who should see the Training queue on their Home. Senior editors
 // (Zidni, Elsa) are excluded — the queue is aimed at editors currently ramping.
 var TRAINING_QUEUE_EDITORS = ['Sharm', 'Patty'];
+
+// Session-only flag — when true the Editing Tasks section shows admin-dismissed
+// rows too, each with a Restore button. Reset on reload; toggled by App.toggleShowDismissedMyDay.
+var _showDismissedMyDay = false;
 function _eodActiveEditor(authEditor) {
   if (!_eodPreviewEditor) return authEditor || '';
   if (_eodPreviewEditor === authEditor) return authEditor;
@@ -12954,9 +12958,17 @@ function renderEditorHomeView() {
   //
   // Admin-dismissed rows (a.hiddenFromMyDay === true) are filtered out. Those
   // stay live in Campaigns / Board — only Home hides them.
-  var allEditorAssets = STATE.assets.filter(function(a) { return a.editor === currentEditor && !a.hiddenFromMyDay; });
-  var activeMine    = allEditorAssets.filter(function(a) { return _statusRank(a) === 1; });
-  var approvedToday = allEditorAssets.filter(function(a) { return _statusRank(a) === 2 && a.dateApproved === today; });
+  var allEditorAssets = STATE.assets.filter(function(a) { return a.editor === currentEditor; });
+  var visibleAssets = allEditorAssets.filter(function(a) { return !a.hiddenFromMyDay; });
+  var activeMine    = visibleAssets.filter(function(a) { return _statusRank(a) === 1; });
+  var approvedToday = visibleAssets.filter(function(a) { return _statusRank(a) === 2 && a.dateApproved === today; });
+  var dismissedMyDay = allEditorAssets.filter(function(a) {
+    if (!a.hiddenFromMyDay) return false;
+    var rank = _statusRank(a);
+    if (rank === 1) return true; // dismissed active
+    if (rank === 2 && a.dateApproved === today) return true; // dismissed approved-today
+    return false;
+  });
   activeMine.sort(function(a, b) {
     // Already-ticked-today rows drop to the bottom.
     var ad = (a.doneToday === today) ? 1 : 0;
@@ -13043,6 +13055,34 @@ function renderEditorHomeView() {
     '</div>';
   } else {
     tasksBody = displayedTasks.map(renderVideoRow).join('');
+  }
+
+  // Admin restore panel — shows dismissed tasks (both active and approved-today
+  // that were hidden). Only rendered when there ARE dismissed rows for this
+  // editor. Toggle is session-only.
+  var dismissedPanel = '';
+  if (canDismiss && dismissedMyDay.length > 0) {
+    var label = _showDismissedMyDay
+      ? 'Hide ' + dismissedMyDay.length + ' dismissed'
+      : 'Show ' + dismissedMyDay.length + ' dismissed';
+    var restoreRows = _showDismissedMyDay
+      ? dismissedMyDay.map(function(a) {
+          var camp = findCampaignById(a.campaignId);
+          return '<div class="auto-card eod-task-row eod-task-row-dismissed">' +
+            '<div class="eod-task-check eod-task-check-terminal">' +
+              '<span class="eod-task-pill eod-task-pill-dismissed">Dismissed</span>' +
+            '</div>' +
+            '<div class="eod-task-body">' +
+              '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>' +
+              '<div class="eod-task-meta">' + escapeHtml(camp ? camp.name : '—') + ' · ' + escapeHtml(a.category || '—') + '</div>' +
+            '</div>' +
+            '<button class="eod-restore-btn" title="Restore to My Day" onclick="App.undismissDayTask(\'' + a.id + '\')">↺ Restore</button>' +
+          '</div>';
+        }).join('')
+      : '';
+    dismissedPanel =
+      '<div class="eod-dismissed-toggle"><button onclick="App.toggleShowDismissedMyDay()">' + escapeHtml(label) + '</button></div>' +
+      restoreRows;
   }
 
   // Training queue for this editor. Skipped entirely for senior editors
@@ -13204,6 +13244,7 @@ function renderEditorHomeView() {
       return '<div class="eod-section-label eod-section-label-main">Editing tasks · ' + bits.join(' · ') + '</div>';
     })() +
     tasksBody +
+    dismissedPanel +
     trainingSection +
 
     '<div class="eod-block">' +
@@ -19142,14 +19183,15 @@ var App = {
   // (both active and approved-today) without changing status. Every other
   // view (Campaigns, Board, Reporting) still shows the asset in its true
   // state, so this is non-destructive.
+  //
+  // No confirm() prompt — the operation is reversible via undismissDayTask,
+  // and native browser confirm() dialogs turned out to be suppressed on the
+  // deployed site for some sessions.
   dismissDayTask: function(id) {
     var realRole = (Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) || null;
     if (realRole !== 'admin') { toast('Admin only', 'error'); return; }
     var a = findAssetById(id);
-    if (!a) return;
-    if (a.hiddenFromMyDay) return;
-    var owner = a.editor ? (a.editor + '’s') : 'this editor’s';
-    if (!confirm('Remove “' + (a.name || 'Untitled') + '” from ' + owner + ' My Day?\n\nThe asset stays in Campaigns / Board at its current status — this only hides it from Home.')) return;
+    if (!a || a.hiddenFromMyDay) return;
     a.hiddenFromMyDay = true;
     if (typeof logAction === 'function') {
       logAction('updated', 'Asset "' + (a.name || '') + '" hidden from My Day by ' + ((Auth.user && Auth.user.email) || 'unknown'));
@@ -19157,6 +19199,23 @@ var App = {
     saveState();
     render();
     toast('Removed from My Day', 'success');
+  },
+  undismissDayTask: function(id) {
+    var realRole = (Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) || null;
+    if (realRole !== 'admin') { toast('Admin only', 'error'); return; }
+    var a = findAssetById(id);
+    if (!a || !a.hiddenFromMyDay) return;
+    a.hiddenFromMyDay = false;
+    if (typeof logAction === 'function') {
+      logAction('updated', 'Asset "' + (a.name || '') + '" restored to My Day by ' + ((Auth.user && Auth.user.email) || 'unknown'));
+    }
+    saveState();
+    render();
+    toast('Restored', 'success');
+  },
+  toggleShowDismissedMyDay: function() {
+    _showDismissedMyDay = !_showDismissedMyDay;
+    render();
   },
 
   // addAssetDecision: appends a note to a.decisions[]. Editor jots creative choices
