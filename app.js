@@ -12992,6 +12992,24 @@ function renderEditorHomeView() {
   // today's approvals. Approved-today counts as work even without the tick.
   var manuallyTagged = activeMine.filter(function(a) { return a.doneToday === today; });
   var taggedToday = manuallyTagged.concat(approvedToday);
+
+  // Training modules touched today — started or completed today. Rendered as a
+  // "Training" section inside the EOD panel and included in the submission.
+  var trainingTodayList = (function() {
+    var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
+    if (!modules.length) return [];
+    var completions = (typeof _editorTrainingCompletions === 'function') ? _editorTrainingCompletions(currentEditor) : {};
+    var out = [];
+    modules.forEach(function(m) {
+      var c = completions[m.id];
+      if (!c) return;
+      var startedToday   = c.startedAt   && String(c.startedAt).slice(0, 10) === today;
+      var completedToday = c.completedAt && String(c.completedAt).slice(0, 10) === today;
+      if (!startedToday && !completedToday) return;
+      out.push({ moduleId: m.id, title: m.title || 'Untitled module', state: completedToday ? 'Completed' : 'Started' });
+    });
+    return out;
+  })();
   var eodBucket = (STATE.eod && STATE.eod[currentEditor] && STATE.eod[currentEditor][today]) || null;
   var submitted = !!(eodBucket && eodBucket.submittedAt);
   var interactionsDisabled = submitted || isPreview;
@@ -13163,6 +13181,9 @@ function renderEditorHomeView() {
     var slackLink = eodBucket.slackReplyUrl
       ? '<a href="' + escapeHtml(eodBucket.slackReplyUrl) + '" target="_blank" rel="noopener" class="eod-slack-link">View Slack reply ↗</a>'
       : (eodBucket.slackChannelId ? '<span class="eod-slack-warn">Slack reply not confirmed</span>' : '<span class="eod-slack-warn">Not posted to Slack</span>');
+    var lockedTrainingList = (Array.isArray(eodBucket.training) && eodBucket.training.length)
+      ? eodBucket.training.map(function(t) { return '<li>' + escapeHtml(t.title || '') + (t.state ? ' <span style="color:var(--text3);">— ' + escapeHtml(t.state) + '</span>' : '') + '</li>'; }).join('')
+      : '';
     eodBody = '<div class="eod-locked">' +
       '<div class="eod-locked-head">' +
         '<span class="eod-locked-pill">🔒 Submitted at ' + escapeHtml(when) + '</span>' +
@@ -13170,54 +13191,66 @@ function renderEditorHomeView() {
       '</div>' +
       '<div class="eod-locked-section-label">Worked on (' + (eodBucket.assets || []).length + ')</div>' +
       '<ul class="eod-locked-list">' + assetsList + '</ul>' +
+      (lockedTrainingList
+        ? '<div class="eod-locked-section-label">Training</div><ul class="eod-locked-list">' + lockedTrainingList + '</ul>'
+        : '') +
       (otherList
         ? '<div class="eod-locked-section-label">Other</div><ul class="eod-locked-list">' + otherList + '</ul>'
         : '') +
       '<div class="eod-locked-foot">Locked for the day. Follow up in the Slack thread if anything\'s missing.</div>' +
     '</div>';
-  } else if (isPreview) {
-    // Read-only pre-submit preview of another editor's Home. Show what they've
-    // tagged so far and any "Other" items, but no submit / add controls.
-    var pAssets = taggedToday.length
-      ? taggedToday.map(function(a) {
-          var camp = findCampaignById(a.campaignId);
-          var suffix = camp ? (' <span style="color:var(--text3);">— ' + escapeHtml(camp.name) + '</span>') : '';
-          return '<li>' + escapeHtml(a.name || 'Untitled') + suffix + '</li>';
-        }).join('')
-      : '<li class="eod-worked-empty">Nothing tagged yet today.</li>';
-    var pOther = (eodBucket && Array.isArray(eodBucket.other) && eodBucket.other.length)
-      ? eodBucket.other.map(function(o) { return '<li>' + escapeHtml(o.text || '') + '</li>'; }).join('')
-      : '<li class="eod-other-empty">Nothing yet.</li>';
-    eodBody =
-      '<div class="eod-section-label">Worked on today (' + taggedToday.length + ')</div>' +
-      '<ul class="eod-worked-list">' + pAssets + '</ul>' +
-      '<div class="eod-section-label">Other</div>' +
-      '<ul class="eod-worked-list">' + pOther + '</ul>' +
-      '<div class="eod-preview-hint">Read-only — ' + escapeHtml(currentEditor) + ' hasn\'t submitted yet today.</div>';
   } else {
-    var otherItems = (eodBucket && Array.isArray(eodBucket.other)) ? eodBucket.other : [];
-    var workedOnHtml = taggedToday.length
-      ? taggedToday.map(function(a) {
-          var camp = findCampaignById(a.campaignId);
-          var suffix = camp ? (' <span style="color:var(--text3);">— ' + escapeHtml(camp.name) + '</span>') : '';
-          return '<li>' + escapeHtml(a.name || 'Untitled') + suffix + '</li>';
-        }).join('')
-      : '<li class="eod-worked-empty">Tick assets above as you work through them.</li>';
-    var otherHtml = otherItems.length
-      ? otherItems.map(function(o) {
-          return '<li>' +
-            '<span>' + escapeHtml(o.text || '') + '</span>' +
-            '<button class="eod-other-remove" title="Remove" onclick="App.removeEODOther(\'' + escapeHtml(currentEditor) + '\', \'' + escapeHtml(o.id) + '\')">×</button>' +
-          '</li>';
-        }).join('')
-      : '<li class="eod-other-empty">Nothing yet.</li>';
-    var canSubmit = taggedToday.length > 0 || otherItems.length > 0;
+    // Shared training list HTML — used by both the preview and own-view branches.
+    var trainingHtml = trainingTodayList.length
+      ? trainingTodayList.map(function(t) { return '<li>' + escapeHtml(t.title) + ' <span style="color:var(--text3);">— ' + escapeHtml(t.state) + '</span></li>'; }).join('')
+      : '';
+    if (isPreview) {
+      var pAssets = taggedToday.length
+        ? taggedToday.map(function(a) {
+            var camp = findCampaignById(a.campaignId);
+            var suffix = camp ? (' <span style="color:var(--text3);">— ' + escapeHtml(camp.name) + '</span>') : '';
+            return '<li>' + escapeHtml(a.name || 'Untitled') + suffix + '</li>';
+          }).join('')
+        : '<li class="eod-worked-empty">Nothing tagged yet today.</li>';
+      var pOther = (eodBucket && Array.isArray(eodBucket.other) && eodBucket.other.length)
+        ? eodBucket.other.map(function(o) { return '<li>' + escapeHtml(o.text || '') + '</li>'; }).join('')
+        : '<li class="eod-other-empty">Nothing yet.</li>';
+      eodBody =
+        '<div class="eod-section-label">Worked on today (' + taggedToday.length + ')</div>' +
+        '<ul class="eod-worked-list">' + pAssets + '</ul>' +
+        (trainingHtml
+          ? '<div class="eod-section-label">Training (' + trainingTodayList.length + ')</div><ul class="eod-worked-list">' + trainingHtml + '</ul>'
+          : '') +
+        '<div class="eod-section-label">Other</div>' +
+        '<ul class="eod-worked-list">' + pOther + '</ul>' +
+        '<div class="eod-preview-hint">Read-only — ' + escapeHtml(currentEditor) + ' hasn\'t submitted yet today.</div>';
+    } else {
+      var otherItems = (eodBucket && Array.isArray(eodBucket.other)) ? eodBucket.other : [];
+      var workedOnHtml = taggedToday.length
+        ? taggedToday.map(function(a) {
+            var camp = findCampaignById(a.campaignId);
+            var suffix = camp ? (' <span style="color:var(--text3);">— ' + escapeHtml(camp.name) + '</span>') : '';
+            return '<li>' + escapeHtml(a.name || 'Untitled') + suffix + '</li>';
+          }).join('')
+        : '<li class="eod-worked-empty">Tick assets above as you work through them.</li>';
+      var otherHtml = otherItems.length
+        ? otherItems.map(function(o) {
+            return '<li>' +
+              '<span>' + escapeHtml(o.text || '') + '</span>' +
+              '<button class="eod-other-remove" title="Remove" onclick="App.removeEODOther(\'' + escapeHtml(currentEditor) + '\', \'' + escapeHtml(o.id) + '\')">×</button>' +
+            '</li>';
+          }).join('')
+        : '<li class="eod-other-empty">Nothing yet.</li>';
+      var canSubmit = taggedToday.length > 0 || otherItems.length > 0 || trainingTodayList.length > 0;
 
-    eodBody =
-      '<div class="eod-section-label">Worked on today (' + taggedToday.length + ')</div>' +
-      '<ul class="eod-worked-list">' + workedOnHtml + '</ul>' +
-      '<div class="eod-section-label">Other</div>' +
-      '<ul class="eod-other-list">' + otherHtml + '</ul>' +
+      eodBody =
+        '<div class="eod-section-label">Worked on today (' + taggedToday.length + ')</div>' +
+        '<ul class="eod-worked-list">' + workedOnHtml + '</ul>' +
+        (trainingHtml
+          ? '<div class="eod-section-label">Training (' + trainingTodayList.length + ')</div><ul class="eod-worked-list">' + trainingHtml + '</ul>'
+          : '') +
+        '<div class="eod-section-label">Other</div>' +
+        '<ul class="eod-other-list">' + otherHtml + '</ul>' +
       '<div class="eod-add-row">' +
         '<input type="text" id="eod-other-input" class="form-input" placeholder="Add meeting, admin, or non-asset work" ' +
           'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.addEODOther(\'' + escapeHtml(currentEditor) + '\');}">' +
@@ -13228,6 +13261,7 @@ function renderEditorHomeView() {
         '<button class="run-btn eod-submit-btn" ' + (canSubmit ? '' : 'disabled ') +
           'onclick="App.submitEOD(\'' + escapeHtml(currentEditor) + '\')">Submit EOD</button>' +
       '</div>';
+    }
   }
 
   var todayLabel = (function() {
@@ -15305,7 +15339,7 @@ function ensureDailyThreadForEditor(editor) {
 
 // Compose the Slack reply body for an EOD submission. Kept plain-text with
 // mrkdwn (bold via *asterisks*) — matches the existing daily-thread style.
-function formatEODSlackMessage(editor, dateISO, assetSnap, otherList) {
+function formatEODSlackMessage(editor, dateISO, assetSnap, otherList, trainingSnap) {
   var parts = ['*EOD — ' + editor + ' — ' + dateISO + '*'];
   parts.push('Worked on (' + assetSnap.length + ')');
   if (assetSnap.length === 0) {
@@ -15317,6 +15351,13 @@ function formatEODSlackMessage(editor, dateISO, assetSnap, otherList) {
       if (s.category)     suffix.push(s.category);
       var tail = suffix.length ? (' — ' + suffix.join(' · ')) : '';
       parts.push('• ' + (s.name || 'Untitled') + tail);
+    });
+  }
+  if (Array.isArray(trainingSnap) && trainingSnap.length) {
+    parts.push('');
+    parts.push('Training (' + trainingSnap.length + ')');
+    trainingSnap.forEach(function(t) {
+      parts.push('• ' + (t.title || 'Untitled module') + (t.state ? ' — ' + t.state : ''));
     });
   }
   if (Array.isArray(otherList) && otherList.length) {
@@ -19331,10 +19372,6 @@ var App = {
       return a.doneToday === today;
     });
     var otherList = (bucket && Array.isArray(bucket.other)) ? bucket.other.slice() : [];
-    if (tagged.length === 0 && otherList.length === 0) {
-      toast('Tag at least one asset or add an Other item first', 'info');
-      return;
-    }
 
     var assetSnap = tagged.map(function(a) {
       var camp = findCampaignById(a.campaignId);
@@ -19348,6 +19385,34 @@ var App = {
       };
     });
 
+    // Snapshot training modules touched today (started or completed today) so
+    // downtime spent on Training shows up in the EOD too. Uses the alias-aware
+    // completion merge so a sign-in under any of an editor's aliases counts.
+    var trainingSnap = (function() {
+      var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
+      if (!modules.length) return [];
+      var completions = (typeof _editorTrainingCompletions === 'function') ? _editorTrainingCompletions(editor) : {};
+      var out = [];
+      modules.forEach(function(m) {
+        var c = completions[m.id];
+        if (!c) return;
+        var startedToday   = c.startedAt   && String(c.startedAt).slice(0, 10) === today;
+        var completedToday = c.completedAt && String(c.completedAt).slice(0, 10) === today;
+        if (!startedToday && !completedToday) return;
+        out.push({
+          moduleId: m.id,
+          title: m.title || 'Untitled module',
+          state: completedToday ? 'Completed' : 'Started'
+        });
+      });
+      return out;
+    })();
+
+    if (tagged.length === 0 && otherList.length === 0 && trainingSnap.length === 0) {
+      toast('Tag at least one asset, training module, or Other item first', 'info');
+      return;
+    }
+
     if (!STATE.eod || typeof STATE.eod !== 'object') STATE.eod = {};
     if (!STATE.eod[editor] || typeof STATE.eod[editor] !== 'object') STATE.eod[editor] = {};
     STATE.eod[editor][today] = {
@@ -19355,6 +19420,7 @@ var App = {
       submittedByUid:  (Auth.user && Auth.user.uid) || null,
       submittedByName: (Auth.user && (Auth.user.displayName || Auth.user.email)) || 'unknown',
       assets: assetSnap,
+      training: trainingSnap,
       other: otherList,
       slackChannelId: null,
       slackParentTs: null,
@@ -19374,7 +19440,7 @@ var App = {
         return;
       }
       var mention = (typeof mentionElsaForIntl === 'function') ? mentionElsaForIntl() : '@Elsa';
-      var text = mention + '\n' + formatEODSlackMessage(editor, today, assetSnap, otherList);
+      var text = mention + '\n' + formatEODSlackMessage(editor, today, assetSnap, otherList, trainingSnap);
       postToSlackThread(thread.channelId, thread.threadTs, text).then(function(r) {
         var rec = STATE.eod[editor][today];
         if (!rec) return;
