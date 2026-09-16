@@ -13146,7 +13146,7 @@ function renderEditorHomeView() {
         : 'Tick assets as you work through them. Submit EOD when you\'re done.') +
     '</div>' +
 
-    '<div class="eod-section-label eod-section-label-main">Tasks · ' + activeMine.length + ' active</div>' +
+    '<div class="eod-section-label eod-section-label-main">Editing tasks · ' + activeMine.length + ' active</div>' +
     tasksBody +
     trainingSection +
 
@@ -18777,10 +18777,13 @@ var App = {
     STATE.trainingCompletions = STATE.trainingCompletions || {};
     STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
     var existing = STATE.trainingCompletions[email][moduleId] || {};
+    var carry = Array.isArray(existing.submissionUrls)
+      ? existing.submissionUrls.slice()
+      : (existing.submissionUrl ? [existing.submissionUrl] : []);
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: (new Date()).toISOString(),
       completedAt: '',
-      submissionUrl: existing.submissionUrl || ''
+      submissionUrls: carry
     };
     saveState();
     render();
@@ -18791,10 +18794,13 @@ var App = {
     STATE.trainingCompletions = STATE.trainingCompletions || {};
     STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
     var existing = STATE.trainingCompletions[email][moduleId] || {};
+    var carry = Array.isArray(existing.submissionUrls)
+      ? existing.submissionUrls.slice()
+      : (existing.submissionUrl ? [existing.submissionUrl] : []);
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || (new Date()).toISOString(),
       completedAt: (new Date()).toISOString(),
-      submissionUrl: existing.submissionUrl || ''
+      submissionUrls: carry
     };
     saveState();
     render();
@@ -18805,43 +18811,66 @@ var App = {
     if (!email) return;
     if (!(STATE.trainingCompletions && STATE.trainingCompletions[email])) return;
     var existing = STATE.trainingCompletions[email][moduleId] || {};
+    var carry = Array.isArray(existing.submissionUrls)
+      ? existing.submissionUrls.slice()
+      : (existing.submissionUrl ? [existing.submissionUrl] : []);
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || '',
       completedAt: '',
-      submissionUrl: existing.submissionUrl || ''
+      submissionUrls: carry
     };
     saveState();
     render();
   },
 
-  // Save (or clear) the current user's submission link on a training module.
-  // Mirrors setAssetFinalVideo: trim, validate as URL, store, log, toast. A
-  // valid non-empty URL also auto-starts the module (sets startedAt if unset)
-  // and posts a heads-up reply into the editor's daily Slack thread — same
-  // route sendTrainingToEditor uses to deliver the brief. No thread today =
-  // silent skip (logged) so we don't fall back to the main channel.
-  trainingSetSubmission: function(moduleId, newUrl) {
+  // Save (or clear) one of the current user's submission slots on a training
+  // module. Mirrors setAssetFinalVideo: trim, validate as URL, store, log, toast.
+  // A valid non-empty URL also auto-starts the module (sets startedAt if unset)
+  // and posts a heads-up reply into the editor's daily Slack thread. No thread
+  // today = silent skip (logged) so we don't fall back to the main channel.
+  //
+  // Callable as trainingSetSubmission(moduleId, newUrl) — legacy shape, treated
+  // as slot 0 — or trainingSetSubmission(moduleId, index, newUrl).
+  trainingSetSubmission: function(moduleId, indexOrUrl, maybeUrl) {
     var email = Auth && Auth.user && Auth.user.email;
     if (!email) return;
+    var index, newUrl;
+    if (arguments.length >= 3) { index = parseInt(indexOrUrl, 10) || 0; newUrl = maybeUrl; }
+    else { index = 0; newUrl = indexOrUrl; }
+    if (index < 0) index = 0;
     var trimmed = String(newUrl || '').trim();
     if (trimmed && !extractSingleUrl(trimmed)) {
       if (typeof toast === 'function') toast('Submission must be a URL (or leave empty)', 'error');
       render();
       return;
     }
+    var module = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    var moduleTitle = (module && module.title) || 'training module';
+    var required = (module && parseInt(module.requiredSubmissions, 10) > 0)
+      ? parseInt(module.requiredSubmissions, 10) : 1;
     STATE.trainingCompletions = STATE.trainingCompletions || {};
     STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
     var existing = STATE.trainingCompletions[email][moduleId] || {};
-    var wasSet = !!(existing.submissionUrl || '').trim();
-    if ((existing.submissionUrl || '') === trimmed) { render(); return; }
+    // Migrate legacy single-string field into the array on first read.
+    var current = Array.isArray(existing.submissionUrls)
+      ? existing.submissionUrls.slice()
+      : (existing.submissionUrl ? [existing.submissionUrl] : []);
+    while (current.length <= index) current.push('');
+    var prior = (current[index] || '').trim();
+    if (prior === trimmed) { render(); return; }
+    var wasSet = !!prior;
+    current[index] = trimmed;
+    // Trim trailing empties so we don't grow forever if `required` drops.
+    while (current.length > 0 && !(current[current.length - 1] || '').trim() && current.length > required) {
+      current.pop();
+    }
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || (trimmed ? (new Date()).toISOString() : ''),
       completedAt: existing.completedAt || '',
-      submissionUrl: trimmed
+      submissionUrls: current
     };
-    var module = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
-    var moduleTitle = (module && module.title) || 'training module';
-    logAction('updated', 'Training "' + moduleTitle + '" submission ' + (trimmed ? (wasSet ? 'updated' : 'submitted') : 'cleared') + ' by ' + email);
+    logAction('updated', 'Training "' + moduleTitle + '" submission #' + (index + 1) + ' ' +
+      (trimmed ? (wasSet ? 'updated' : 'submitted') : 'cleared') + ' by ' + email);
     saveState();
     render();
     if (typeof toast === 'function') {
@@ -18860,7 +18889,8 @@ var App = {
       logAction('skipped-notify', 'Training submission ping skipped — no daily thread for ' + editor);
       return;
     }
-    var msg = '🎬 *' + editor + '* submitted training: *' + moduleTitle + '*\n<' + trimmed + '|Watch submission ↗>';
+    var slotLabel = required > 1 ? (' (#' + (index + 1) + ' of ' + required + ')') : '';
+    var msg = '🎬 *' + editor + '* submitted training: *' + moduleTitle + '*' + slotLabel + '\n<' + trimmed + '|Watch submission ↗>';
     postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
       if (r && r.ok) {
         logAction('notified', 'Training submission ping posted for ' + editor + ' — ' + moduleTitle);
