@@ -2143,6 +2143,14 @@
 /* Overdue rows get a subtle red rail so they can't be scrolled past. */
 .eod-task-row-overdue { border-left: 3px solid var(--red); padding-left: 15px; }
 
+/* Training queue row — same shape as tasks, but the leading slot is the status pill and there are links below. */
+.eod-training-row .eod-task-body { min-width: 0; }
+.eod-training-links { margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text3); }
+.eod-training-links a { color: var(--accent); text-decoration: none; }
+.eod-training-links a:hover { text-decoration: underline; }
+.eod-training-open { background: transparent; border: 1px solid var(--border2); color: var(--text2); font-size: 11.5px; padding: 2px 8px; border-radius: 4px; cursor: pointer; transition: all 0.12s; }
+.eod-training-open:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+
 .eod-empty { padding: 32px; text-align: center; color: var(--text3); border: 1px dashed var(--border2); border-radius: 12px; background: var(--bg2); }
 
 .eod-block { margin-top: 28px; padding: 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; }
