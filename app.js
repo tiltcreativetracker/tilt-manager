@@ -2397,6 +2397,18 @@ var STATE = {
   // never wipe a fresh entry.
   weeklyLog: {},
 
+  // Editor EOD submissions, keyed by editor then date (YYYY-MM-DD):
+  //   { [editor]: { [dateISO]: {
+  //       submittedAt, submittedByUid, submittedByName,
+  //       assets: [{ assetId, name, campaignId, campaignName, category, status }],
+  //       other:  [{ id, text, addedAt, addedByName }],
+  //       slackChannelId, slackParentTs, slackReplyTs, slackReplyUrl } } }
+  // Once submittedAt is set the day is read-only ("locked") — the EOD panel
+  // switches to a summary card. Tag source is the same a.doneToday stamp the
+  // My Day checkbox writes; assets are snapshotted at submit time so later
+  // renames/moves don't drift the record.
+  eod: {},
+
   // Reporting tab UI state — persisted so filter selections survive reloads.
   reportingPeriod:      'monthly',
   reportingMonth:       '',
@@ -5233,21 +5245,20 @@ var ROLE_TAB_VISIBILITY = {
   // Default landing role for brand-new sign-ins. Narrow read-only access to
   // the four core surfaces. An admin promotes them from Config.
   visitor:     ['campaigns', 'editingCalendar', 'today', 'reporting'],
-  // Editors see everything except Config (destructive admin panel), CL Home
-  // (admin only), and My Day (Elsa-only surface — see the email override in
-  // tabsForRole).
-  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config' && t !== 'clHome' && t !== 'editorHome'; }),
+  // Editors see everything except Config (destructive admin panel) and CL Home
+  // (admin only). My Day is visible but gated inside renderEditorHomeView so
+  // non-admin viewers land on an "Under Construction" placeholder while the
+  // real UI is being iterated on.
+  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config' && t !== 'clHome'; }),
   // Category Heads: their own review surface + the shared context tabs.
   catHead:     ['campaigns', 'editingCalendar', 'today', 'catReview', 'reporting'],
   // Content Leads: shared context tabs. CL Home is admin-only.
   contentLead: ['campaigns', 'editingCalendar', 'reporting', 'editingStyle', 'strategy'],
-  // Admins see everything except My Day (Elsa-only surface — an email-specific
-  // override in tabsForRole adds it back for her).
-  admin:       ALL_TABS_INTERNAL.filter(function(t) { return t !== 'editorHome'; })
+  // Admins see everything. The functionality gate for editorHome lives inside
+  // renderEditorHomeView (real-role admin only), not in tab visibility.
+  admin:       ALL_TABS_INTERNAL.slice()
 };
 
-// Elsa (the PM / product owner) uses My Day herself even though she's an admin.
-// Rather than granting My Day to every admin, we grant it to her by email.
 var ELSA_EMAIL = 'elsa@tilt.app';
 
 // Human-readable role labels (role keys are camelCase / short; these are what the
@@ -5260,17 +5271,7 @@ function roleLabelFor(role) { return ROLE_LABELS[role] || (role || '').toUpperCa
 // (including null while a profile is still loading, or legacy 'viewer'/'pm')
 // get the visitor set — the safest read-only default.
 function tabsForRole(role) {
-  var tabs = ROLE_TAB_VISIBILITY[role] || ROLE_TAB_VISIBILITY.visitor;
-  // Elsa-specific override: as admin she also gets My Day (editorHome). Prepend
-  // so it lands at position 0 for her without touching the shared admin set.
-  // Skipped while she's in view-as mode so the preview reflects the target role
-  // faithfully — My Day is email-gated, not role-gated, so it would otherwise
-  // leak through every preview.
-  var viewingAs = (Auth && typeof Auth.getViewAs === 'function') ? Auth.getViewAs() : null;
-  if (!viewingAs && Auth && Auth.user && Auth.user.email === ELSA_EMAIL && tabs.indexOf('editorHome') < 0) {
-    tabs = ['editorHome'].concat(tabs);
-  }
-  return tabs;
+  return ROLE_TAB_VISIBILITY[role] || ROLE_TAB_VISIBILITY.visitor;
 }
 
 // True if the current signed-in user has the given role (or higher). Hierarchy:
@@ -12673,27 +12674,44 @@ function renderLinearTasksPanel() {
 }
 
 // ── Editor Home ("My Day") ─────────────────────────────────────────────────
-// Combined assigned-videos + EOD tagging surface. Editor sees today's assigned
-// work, ticks "Done today" per video (stamps a.doneToday = today), and jots
-// free-text decision notes (appended to a.decisions[]).
+// Focused editor Home: (1) assigned-videos queue as the day's task list with a
+// "Worked on today" checkbox on each row (writes a.doneToday), (2) EOD panel
+// that lists the tagged assets, accepts free-text "Other" items, and — on
+// Submit — snapshots the record and posts a reply under the editor's daily
+// Slack thread. Once submitted the panel locks for the day.
+//
+// Gate: functionality is real-role admin only for the current rollout. Editors
+// see the tab in their bar but land on an Under Construction placeholder so
+// Elsa can build/QA the real UI against real data via view-as. Flip the gate
+// (add editor to the allow-list, or drop it entirely) when releasing.
 function renderEditorHomeView() {
-  var currentEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
-  var today = (typeof todayLocalISO === 'function') ? todayLocalISO() : (new Date()).toISOString().slice(0, 10);
-
-  if (!currentEditor) {
-    return '<div style="padding:48px;text-align:center;color:var(--text3);">' +
-      '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">My Day</h1>' +
-      '<div>Your account isn\'t mapped to an editor yet. Ask an admin to add your email to the editor list.</div>' +
-    '</div>';
+  // Real role, not the view-as shadow. Fallback to `.role` covers the local
+  // auth-bypass path (plain user object, no shadow installed) so previewing
+  // as admin locally still passes the gate.
+  var realRole = (Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) || null;
+  if (realRole !== 'admin') {
+    return '<div class="content" style="padding:0;"><div class="uc-card">' +
+      '<div class="uc-icon">🚧</div>' +
+      '<h1>My Day</h1>' +
+      '<p>This tab is under construction. Coming soon — you\'ll see your task list and end-of-day submission here.</p>' +
+    '</div></div>';
   }
 
-  // Assigned videos: any asset belonging to this editor that isn't Approved or Cancelled.
+  var currentEditor = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : '';
+  var today = todayUK();
+
+  if (!currentEditor) {
+    return '<div class="content" style="padding:0;"><div style="padding:48px;text-align:center;color:var(--text3);">' +
+      '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">My Day</h1>' +
+      '<div>Your account isn\'t mapped to an editor. Pick one from the view-as picker to preview the surface.</div>' +
+    '</div></div>';
+  }
+
   var mine = STATE.assets.filter(function(a) {
     if (a.editor !== currentEditor) return false;
     var s = a.status || 'Draft';
     return s !== 'Approved' && s !== 'Cancelled';
   });
-  // Bring "not done today" to the top, then most recently assigned first.
   mine.sort(function(a, b) {
     var ad = (a.doneToday === today) ? 1 : 0;
     var bd = (b.doneToday === today) ? 1 : 0;
@@ -12701,64 +12719,120 @@ function renderEditorHomeView() {
     return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
   });
 
-  var doneCount = mine.filter(function(a) { return a.doneToday === today; }).length;
+  var taggedToday = mine.filter(function(a) { return a.doneToday === today; });
+  var eodBucket = (STATE.eod && STATE.eod[currentEditor] && STATE.eod[currentEditor][today]) || null;
+  var submitted = !!(eodBucket && eodBucket.submittedAt);
 
   function renderVideoRow(a) {
     var camp = findCampaignById(a.campaignId);
     var doneNow = a.doneToday === today;
-    var lastDecision = (Array.isArray(a.decisions) && a.decisions.length)
-      ? a.decisions[a.decisions.length - 1]
-      : null;
-    var decisionsHtml = (Array.isArray(a.decisions) && a.decisions.length)
-      ? '<div style="margin-top:8px;font-size:11.5px;color:var(--text3);">' +
-          a.decisions.slice(-3).reverse().map(function(d) {
-            var when = d.at ? (new Date(d.at)).toLocaleDateString() : '';
-            return '<div>• <span style="color:var(--text2);">' + escapeHtml(d.note || '') + '</span> <span style="color:var(--text3);">(' + escapeHtml(when) + ')</span></div>';
-          }).join('') +
-        '</div>'
-      : '';
-    return '<div class="auto-card" style="margin-bottom:10px;' + (doneNow ? 'opacity:0.55;' : '') + '">' +
-      '<div style="display:flex;align-items:flex-start;gap:14px;">' +
-        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding-top:2px;flex-shrink:0;">' +
-          '<input type="checkbox"' + (doneNow ? ' checked' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')" title="Mark as done today">' +
-          '<span style="font-size:12px;color:var(--text3);">Done today</span>' +
-        '</label>' +
-        '<div style="flex:1 1 auto;min-width:0;">' +
-          '<div style="font-size:14px;font-weight:600;color:var(--text1);' + (doneNow ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(a.name || '') + '</div>' +
-          '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' +
-            escapeHtml(camp ? camp.name : '—') + ' · ' + escapeHtml(a.category || '—') + ' · ' +
-            '<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>' +
-          '</div>' +
-          decisionsHtml +
-          '<div style="margin-top:8px;display:flex;gap:6px;">' +
-            '<input type="text" class="form-input" id="dec-' + a.id + '" placeholder="Decision note (e.g. cut opener 3s, boosted sat)" style="flex:1 1 auto;font-size:12px;padding:6px 8px;" ' +
-              'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.addAssetDecision(\'' + a.id + '\', this.value);this.value=\'\';}">' +
-            '<button class="btn" style="padding:4px 10px;font-size:12px;" onclick="var el=document.getElementById(\'dec-' + a.id + '\'); App.addAssetDecision(\'' + a.id + '\', el.value); el.value=\'\';">Log</button>' +
-          '</div>' +
+    return '<div class="auto-card eod-task-row' + (doneNow ? ' eod-task-row-done' : '') + '">' +
+      '<label class="eod-task-check" title="Mark as worked on today">' +
+        '<input type="checkbox"' + (doneNow ? ' checked' : '') + (submitted ? ' disabled' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')">' +
+        '<span>Worked on today</span>' +
+      '</label>' +
+      '<div class="eod-task-body">' +
+        '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>' +
+        '<div class="eod-task-meta">' +
+          escapeHtml(camp ? camp.name : '—') + ' · ' + escapeHtml(a.category || '—') + ' · ' +
+          '<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>' +
         '</div>' +
       '</div>' +
     '</div>';
   }
 
-  var body;
+  var tasksBody;
   if (mine.length === 0) {
-    body = '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">' +
+    tasksBody = '<div class="eod-empty">' +
       '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">No videos assigned to you right now.</div>' +
-      '<div style="font-size:12.5px;">Head to the <strong>Training</strong> tab to practise a module while you\'re quiet.</div>' +
+      '<div style="font-size:12.5px;">Enjoy the quiet — or check the <strong>Training</strong> tab.</div>' +
     '</div>';
   } else {
-    body = mine.map(renderVideoRow).join('');
+    tasksBody = mine.map(renderVideoRow).join('');
   }
 
-  // Wrap in .content so the tab scrolls inside .main (overflow:hidden).
-  return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;">' +
-    '<h1 style="margin:0 0 4px;font-size:22px;">My Day — ' + escapeHtml(currentEditor) + '</h1>' +
-    '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-      'Your assigned videos. Tick <strong>Done today</strong> for each one you\'ve wrapped, and jot any creative decisions you made. ' +
-      '<span style="color:var(--text2);">' + doneCount + ' of ' + mine.length + ' marked done today.</span>' +
+  var eodBody;
+  if (submitted) {
+    var when = eodBucket.submittedAt ? (new Date(eodBucket.submittedAt)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    var assetsList = (Array.isArray(eodBucket.assets) && eodBucket.assets.length)
+      ? eodBucket.assets.map(function(s) {
+          var suffix = [s.campaignName, s.category].filter(Boolean).map(escapeHtml).join(' · ');
+          return '<li>' + escapeHtml(s.name || 'Untitled') + (suffix ? ' <span style="color:var(--text3);">— ' + suffix + '</span>' : '') + '</li>';
+        }).join('')
+      : '<li style="color:var(--text3);">(no assets tagged)</li>';
+    var otherList = (Array.isArray(eodBucket.other) && eodBucket.other.length)
+      ? eodBucket.other.map(function(o) { return '<li>' + escapeHtml(o.text || '') + '</li>'; }).join('')
+      : '';
+    var slackLink = eodBucket.slackReplyUrl
+      ? '<a href="' + escapeHtml(eodBucket.slackReplyUrl) + '" target="_blank" rel="noopener" class="eod-slack-link">View Slack reply ↗</a>'
+      : (eodBucket.slackChannelId ? '<span class="eod-slack-warn">Slack reply not confirmed</span>' : '<span class="eod-slack-warn">Not posted to Slack</span>');
+    eodBody = '<div class="eod-locked">' +
+      '<div class="eod-locked-head">' +
+        '<span class="eod-locked-pill">🔒 Submitted at ' + escapeHtml(when) + '</span>' +
+        slackLink +
+      '</div>' +
+      '<div class="eod-locked-section-label">Worked on (' + (eodBucket.assets || []).length + ')</div>' +
+      '<ul class="eod-locked-list">' + assetsList + '</ul>' +
+      (otherList
+        ? '<div class="eod-locked-section-label">Other</div><ul class="eod-locked-list">' + otherList + '</ul>'
+        : '') +
+      '<div class="eod-locked-foot">Locked for today. Follow up in the Slack thread if anything\'s missing.</div>' +
+    '</div>';
+  } else {
+    var otherItems = (eodBucket && Array.isArray(eodBucket.other)) ? eodBucket.other : [];
+    var workedOnHtml = taggedToday.length
+      ? taggedToday.map(function(a) {
+          var camp = findCampaignById(a.campaignId);
+          var suffix = camp ? (' <span style="color:var(--text3);">— ' + escapeHtml(camp.name) + '</span>') : '';
+          return '<li>' + escapeHtml(a.name || 'Untitled') + suffix + '</li>';
+        }).join('')
+      : '<li class="eod-worked-empty">Tick assets above as you work through them.</li>';
+    var otherHtml = otherItems.length
+      ? otherItems.map(function(o) {
+          return '<li>' +
+            '<span>' + escapeHtml(o.text || '') + '</span>' +
+            '<button class="eod-other-remove" title="Remove" onclick="App.removeEODOther(\'' + escapeHtml(currentEditor) + '\', \'' + escapeHtml(o.id) + '\')">×</button>' +
+          '</li>';
+        }).join('')
+      : '<li class="eod-other-empty">Nothing yet.</li>';
+    var canSubmit = taggedToday.length > 0 || otherItems.length > 0;
+
+    eodBody =
+      '<div class="eod-section-label">Worked on today (' + taggedToday.length + ')</div>' +
+      '<ul class="eod-worked-list">' + workedOnHtml + '</ul>' +
+      '<div class="eod-section-label">Other</div>' +
+      '<ul class="eod-other-list">' + otherHtml + '</ul>' +
+      '<div class="eod-add-row">' +
+        '<input type="text" id="eod-other-input" class="form-input" placeholder="Add meeting, admin, or non-asset work" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.addEODOther(\'' + escapeHtml(currentEditor) + '\');}">' +
+        '<button class="run-btn secondary" onclick="App.addEODOther(\'' + escapeHtml(currentEditor) + '\')">+ Add</button>' +
+      '</div>' +
+      '<div class="eod-submit-row">' +
+        '<div class="eod-submit-hint">Posts as a reply under ' + escapeHtml(currentEditor) + '\'s Slack daily thread. One shot — locks the day.</div>' +
+        '<button class="run-btn eod-submit-btn" ' + (canSubmit ? '' : 'disabled ') +
+          'onclick="App.submitEOD(\'' + escapeHtml(currentEditor) + '\')">Submit EOD</button>' +
+      '</div>';
+  }
+
+  var todayLabel = (function() {
+    try { return (new Date()).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }); }
+    catch (_) { return today; }
+  })();
+
+  return '<div class="content" style="padding:0;"><div class="eod-page">' +
+    '<div class="eod-header">' +
+      '<h1>My Day — ' + escapeHtml(currentEditor) + '</h1>' +
+      '<span class="eod-header-date">' + escapeHtml(todayLabel) + '</span>' +
     '</div>' +
-    body +
-    '<div style="margin-top:24px;">' + renderLinearTasksPanel() + '</div>' +
+    '<div class="eod-header-sub">Tick assets as you work through them. Submit EOD when you\'re done.</div>' +
+
+    '<div class="eod-section-label eod-section-label-main">Tasks · ' + mine.length + ' open</div>' +
+    tasksBody +
+
+    '<div class="eod-block">' +
+      '<div class="eod-block-title">End of day</div>' +
+      eodBody +
+    '</div>' +
   '</div></div>';
 }
 
@@ -14740,6 +14814,83 @@ function resolveDailyThreadForEditor(editor) {
   if (t.date !== todayUK()) return null;
   if (!t.channelId || !t.threadTs) return null;
   return t;
+}
+
+// Resolve today's daily-thread slot for `editor`, creating one if missing via
+// the postDailyThreadForEditor callable. The callable writes the slot into
+// Firestore server-side; we poll STATE.dailyThreads[editor] for up to ~5s for
+// the snapshot listener to pick it up. Resolves null on failure (no channel
+// configured, callable rejected, timeout) so callers can degrade gracefully.
+var _eodEnsureThreadInFlight = {};
+function ensureDailyThreadForEditor(editor) {
+  if (!editor) return Promise.resolve(null);
+  var existing = resolveDailyThreadForEditor(editor);
+  if (existing) return Promise.resolve(existing);
+  if (_eodEnsureThreadInFlight[editor]) return _eodEnsureThreadInFlight[editor];
+
+  var channelUrl = (STATE.editorSlackChannels || {})[editor] || '';
+  if (!channelUrl) {
+    logAction('skipped-notify', 'EOD ensureDailyThread skipped — no channel set for ' + editor);
+    return Promise.resolve(null);
+  }
+
+  var p = new Promise(function(resolve) {
+    var call;
+    try {
+      call = firebase.functions().httpsCallable('postDailyThreadForEditor');
+    } catch (e) {
+      resolve(null);
+      return;
+    }
+    call({ editor: editor }).then(function(r) {
+      var d = r && r.data;
+      if (!d || !d.ok) {
+        logAction('skipped-notify', 'postDailyThreadForEditor failed for ' + editor + ': ' + ((d && d.reason) || 'unknown'));
+        resolve(null);
+        return;
+      }
+      // Server has written the slot. Poll STATE for up to ~5s so the snapshot listener catches up.
+      var start = Date.now();
+      (function poll() {
+        var t = resolveDailyThreadForEditor(editor);
+        if (t) { resolve(t); return; }
+        if (Date.now() - start > 5000) { resolve(null); return; }
+        setTimeout(poll, 250);
+      })();
+    }).catch(function(err) {
+      logAction('skipped-notify', 'postDailyThreadForEditor exception for ' + editor + ': ' + ((err && err.message) || 'unknown'));
+      resolve(null);
+    });
+  }).then(function(t) {
+    delete _eodEnsureThreadInFlight[editor];
+    return t;
+  });
+  _eodEnsureThreadInFlight[editor] = p;
+  return p;
+}
+
+// Compose the Slack reply body for an EOD submission. Kept plain-text with
+// mrkdwn (bold via *asterisks*) — matches the existing daily-thread style.
+function formatEODSlackMessage(editor, dateISO, assetSnap, otherList) {
+  var parts = ['*EOD — ' + editor + ' — ' + dateISO + '*'];
+  parts.push('Worked on (' + assetSnap.length + ')');
+  if (assetSnap.length === 0) {
+    parts.push('• (no assets tagged)');
+  } else {
+    assetSnap.forEach(function(s) {
+      var suffix = [];
+      if (s.campaignName) suffix.push(s.campaignName);
+      if (s.category)     suffix.push(s.category);
+      var tail = suffix.length ? (' — ' + suffix.join(' · ')) : '';
+      parts.push('• ' + (s.name || 'Untitled') + tail);
+    });
+  }
+  if (Array.isArray(otherList) && otherList.length) {
+    parts.push('');
+    parts.push('Other');
+    otherList.forEach(function(o) { parts.push('• ' + (o.text || '')); });
+  }
+  return parts.join('\n');
 }
 
 // Returns the daily-thread descriptor for a category IFF its date matches today.
@@ -18526,6 +18677,126 @@ var App = {
     saveState();
     render();
     if (typeof toast === 'function') toast('Decision logged', 'success');
+  },
+
+  // EOD "Other" list — free-text items for non-asset work (meetings, admin, Linear).
+  // Pre-submit only: once an EOD is submitted the day is locked and this no-ops.
+  addEODOther: function(editor) {
+    if (!editor) return;
+    var today = todayUK();
+    var existing = (STATE.eod && STATE.eod[editor] && STATE.eod[editor][today]) || null;
+    if (existing && existing.submittedAt) { toast('EOD already submitted for today', 'info'); return; }
+    var input = document.getElementById('eod-other-input');
+    if (!input) return;
+    var text = (input.value || '').trim();
+    if (!text) { toast('Type something first', 'info'); input.focus(); return; }
+    if (!STATE.eod || typeof STATE.eod !== 'object') STATE.eod = {};
+    if (!STATE.eod[editor] || typeof STATE.eod[editor] !== 'object') STATE.eod[editor] = {};
+    if (!STATE.eod[editor][today] || typeof STATE.eod[editor][today] !== 'object') {
+      STATE.eod[editor][today] = { assets: [], other: [] };
+    }
+    if (!Array.isArray(STATE.eod[editor][today].other)) STATE.eod[editor][today].other = [];
+    var now = Date.now();
+    STATE.eod[editor][today].other.push({
+      id: 'eo_' + now + '_' + Math.random().toString(36).slice(2, 8),
+      text: text,
+      addedAt: now,
+      addedByName: (Auth.user && (Auth.user.displayName || Auth.user.email)) || 'unknown'
+    });
+    input.value = '';
+    saveState();
+    render();
+  },
+  removeEODOther: function(editor, entryId) {
+    if (!editor || !entryId) return;
+    var today = todayUK();
+    var bucket = STATE.eod && STATE.eod[editor] && STATE.eod[editor][today];
+    if (!bucket || bucket.submittedAt) return;
+    if (!Array.isArray(bucket.other)) return;
+    bucket.other = bucket.other.filter(function(e) { return e && e.id !== entryId; });
+    saveState();
+    render();
+  },
+
+  // Submit the day's EOD: snapshot tagged assets, ensure a Slack parent thread
+  // for today exists, post the summary as a reply, and lock the record. Any
+  // Slack failure keeps the local record intact — the editor gets a warning
+  // toast, not a lost submission.
+  submitEOD: function(editor) {
+    if (!editor) return;
+    var today = todayUK();
+    var bucket = (STATE.eod && STATE.eod[editor] && STATE.eod[editor][today]) || null;
+    if (bucket && bucket.submittedAt) { toast('Already submitted', 'info'); return; }
+
+    // Snapshot tagged assets: this editor's non-approved/-cancelled work where doneToday === today.
+    var tagged = STATE.assets.filter(function(a) {
+      if (a.editor !== editor) return false;
+      var s = a.status || 'Draft';
+      if (s === 'Approved' || s === 'Cancelled') return false;
+      return a.doneToday === today;
+    });
+    var otherList = (bucket && Array.isArray(bucket.other)) ? bucket.other.slice() : [];
+    if (tagged.length === 0 && otherList.length === 0) {
+      toast('Tag at least one asset or add an Other item first', 'info');
+      return;
+    }
+
+    var assetSnap = tagged.map(function(a) {
+      var camp = findCampaignById(a.campaignId);
+      return {
+        assetId: a.id,
+        name: a.name || '',
+        campaignId: a.campaignId || null,
+        campaignName: camp ? (camp.name || '') : '',
+        category: a.category || '',
+        status: a.status || 'Draft'
+      };
+    });
+
+    if (!STATE.eod || typeof STATE.eod !== 'object') STATE.eod = {};
+    if (!STATE.eod[editor] || typeof STATE.eod[editor] !== 'object') STATE.eod[editor] = {};
+    STATE.eod[editor][today] = {
+      submittedAt: (new Date()).toISOString(),
+      submittedByUid:  (Auth.user && Auth.user.uid) || null,
+      submittedByName: (Auth.user && (Auth.user.displayName || Auth.user.email)) || 'unknown',
+      assets: assetSnap,
+      other: otherList,
+      slackChannelId: null,
+      slackParentTs: null,
+      slackReplyTs: null,
+      slackReplyUrl: null
+    };
+    saveState();
+    render();
+    toast('EOD submitted', 'success');
+
+    // Slack post — best-effort, keeps local record either way.
+    ensureDailyThreadForEditor(editor).then(function(thread) {
+      if (!thread || !thread.channelId || !thread.threadTs) {
+        toast('Saved locally — Slack thread unavailable', 'info');
+        return;
+      }
+      var text = formatEODSlackMessage(editor, today, assetSnap, otherList);
+      postToSlackThread(thread.channelId, thread.threadTs, text).then(function(r) {
+        var rec = STATE.eod[editor][today];
+        if (!rec) return;
+        rec.slackChannelId = thread.channelId;
+        rec.slackParentTs = thread.threadTs;
+        if (r && r.ok && r.ts) {
+          rec.slackReplyTs = r.ts;
+          rec.slackReplyUrl = 'https://slack.com/archives/' + thread.channelId + '/p' + String(r.ts).replace('.', '') + '?thread_ts=' + thread.threadTs + '&cid=' + thread.channelId;
+          logAction('notified', 'EOD posted for ' + editor + ' (' + today + ')');
+        } else {
+          logAction('skipped-notify', 'EOD Slack post failed for ' + editor + ': ' + ((r && r.body) || 'unknown'));
+          toast('Saved locally — Slack post failed', 'info');
+        }
+        saveState();
+        render();
+      });
+    }).catch(function(err) {
+      logAction('skipped-notify', 'EOD ensureDailyThread errored: ' + ((err && err.message) || 'unknown'));
+      toast('Saved locally — Slack post failed', 'info');
+    });
   },
 
   setAssetClQcDateApproved: function(id, newDate) {

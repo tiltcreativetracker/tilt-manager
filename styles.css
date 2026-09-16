@@ -2100,3 +2100,59 @@
   vertical-align: middle;
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15);
 }
+
+/* ── Editor Home (My Day) — Tasks + EOD ─────────────────────────────────── */
+/* Non-admin viewers see this placeholder while the real UI is admin-only. */
+.uc-card { max-width: 520px; margin: 96px auto; text-align: center; padding: 40px 32px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 14px; }
+.uc-card .uc-icon { font-size: 40px; margin-bottom: 12px; }
+.uc-card h1 { font-size: 22px; color: var(--text1); margin: 0 0 10px; font-weight: 600; }
+.uc-card p { font-size: 13.5px; color: var(--text3); line-height: 1.55; margin: 0; }
+
+.eod-page { padding: 24px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.eod-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.eod-header h1 { margin: 0; font-size: 22px; color: var(--text1); font-weight: 600; }
+.eod-header-date { font-size: 13px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+.eod-header-sub { font-size: 13px; color: var(--text3); margin-bottom: 20px; margin-top: 4px; }
+
+.eod-section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); margin: 12px 0 8px; }
+.eod-section-label-main { margin-top: 18px; }
+
+.eod-task-row { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 8px; padding: 12px 14px; }
+.eod-task-row-done { opacity: 0.6; }
+.eod-task-check { display: flex; align-items: center; gap: 8px; cursor: pointer; padding-top: 2px; flex-shrink: 0; font-size: 12px; color: var(--text3); user-select: none; }
+.eod-task-check input[type="checkbox"] { cursor: pointer; }
+.eod-task-check input[type="checkbox"]:disabled { cursor: not-allowed; }
+.eod-task-body { flex: 1 1 auto; min-width: 0; }
+.eod-task-title { font-size: 14px; font-weight: 600; color: var(--text1); }
+.eod-task-row-done .eod-task-title { text-decoration: line-through; }
+.eod-task-meta { font-size: 12px; color: var(--text3); margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.eod-empty { padding: 32px; text-align: center; color: var(--text3); border: 1px dashed var(--border2); border-radius: 12px; background: var(--bg2); }
+
+.eod-block { margin-top: 28px; padding: 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; }
+.eod-block-title { font-size: 14px; font-weight: 600; color: var(--text1); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+
+.eod-worked-list, .eod-other-list, .eod-locked-list { list-style: none; margin: 0 0 14px; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; }
+.eod-worked-list li, .eod-other-list li, .eod-locked-list li { font-size: 13px; color: var(--text1); padding: 4px 0; line-height: 1.5; }
+.eod-worked-empty, .eod-other-empty { color: var(--text3) !important; font-style: italic; }
+.eod-other-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.eod-other-remove { flex-shrink: 0; background: transparent; border: none; color: var(--text3); font-size: 18px; line-height: 1; padding: 0 6px; cursor: pointer; border-radius: 4px; transition: color 0.12s, background 0.12s; }
+.eod-other-remove:hover { color: var(--red-text); background: var(--red-bg); }
+
+.eod-add-row { display: flex; gap: 8px; margin-bottom: 18px; align-items: center; }
+.eod-add-row .form-input { flex: 1 1 auto; }
+.eod-add-row .run-btn { white-space: nowrap; flex-shrink: 0; }
+.eod-submit-btn { white-space: nowrap; }
+
+.eod-submit-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.eod-submit-hint { font-size: 12px; color: var(--text3); flex: 1 1 auto; }
+.eod-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.eod-locked { }
+.eod-locked-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.eod-locked-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--green-bg); color: var(--green-text); font-size: 12px; font-weight: 600; }
+.eod-slack-link { font-size: 12px; color: var(--accent2); text-decoration: none; }
+.eod-slack-link:hover { text-decoration: underline; }
+.eod-slack-warn { font-size: 12px; color: var(--amber-text); }
+.eod-locked-section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); margin: 8px 0 6px; }
+.eod-locked-foot { font-size: 12px; color: var(--text3); margin-top: 4px; font-style: italic; }
