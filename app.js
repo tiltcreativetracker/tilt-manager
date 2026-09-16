@@ -12518,12 +12518,42 @@ function renderTrainingView() {
               ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark complete</button>'
               : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
           var embeds = moduleEmbeds(m);
+          // Submission: mirrors the campaign asset's finalVideo field. When set, we show
+          // a Frame ↗ link + pencil-edit + × clear. When empty, an inline URL input that
+          // commits on Enter/blur. Submitting auto-starts the module if it wasn't yet.
+          var submissionUrl = (c.submissionUrl || '').trim();
+          var submissionRow;
+          if (submissionUrl) {
+            submissionRow =
+              '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                '<span style="font-size:12px;color:var(--text3);">Submission:</span>' +
+                '<a href="' + escapeHtml(submissionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;" title="' + escapeHtml(submissionUrl) + '">Frame ↗</a>' +
+                '<button type="button" class="url-edit-pencil" title="Edit submission link" ' +
+                  'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
+                '<button type="button" class="url-edit-pencil" title="Clear submission link" ' +
+                  'onclick="App.trainingSetSubmission(\'' + m.id + '\', \'\')">×</button>' +
+                '<input type="url" class="inline-edit-input inline-edit-url" style="display:none;flex:1 1 220px;min-width:180px;" ' +
+                  'placeholder="https://frame.io/... or Drive link" value="' + escapeHtml(submissionUrl) + '" ' +
+                  'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(submissionUrl) + '\';this.blur();}" ' +
+                  'onblur="App.trainingSetSubmission(\'' + m.id + '\', this.value)">' +
+              '</div>';
+          } else {
+            submissionRow =
+              '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                '<span style="font-size:12px;color:var(--text3);">Submission:</span>' +
+                '<input type="url" class="inline-edit-input inline-edit-url" style="flex:1 1 220px;min-width:180px;" ' +
+                  'placeholder="Paste Frame.io / Drive link" ' +
+                  'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
+                  'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', this.value)">' +
+              '</div>';
+          }
           return '<div class="auto-card" style="margin-bottom:10px;">' +
             '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
               '<div style="flex:1 1 320px;min-width:280px;">' +
                 '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + ' &nbsp; ' + badge + '</div>' +
                 '<div style="font-size:12px;color:var(--text2);margin-top:6px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
                 '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
+                submissionRow +
                 (embeds ? '<div class="training-embeds">' + embeds + '</div>' : '') +
               '</div>' +
               '<div style="flex-shrink:0;">' + actions + '</div>' +

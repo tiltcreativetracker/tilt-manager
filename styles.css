@@ -277,7 +277,7 @@
   }
   .pn { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text3); }
   .video-name-cell { max-width: 260px; display: flex; align-items: center; gap: 6px; }
-  .video-name-cell > .editable-cell:first-child { flex: 1; min-width: 0; overflow: hidden; }
+  .video-name-cell > .editable-cell:not(:last-child) { flex: 1; min-width: 0; overflow: hidden; }
   .video-name-cell > .editable-cell:last-child { flex-shrink: 0; }
   /* When the name field is in edit mode, the rendered <input> replaces the .editable-cell
      wrapper. Without this rule, the input has no flex sizing and collapses to its content
