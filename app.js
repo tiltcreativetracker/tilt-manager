@@ -12906,14 +12906,15 @@ function _eodPickerOptions(authEditor) {
 
 function renderEditorHomeView() {
   // Real role, not the view-as shadow. Fallback to `.role` covers the local
-  // auth-bypass path (plain user object, no shadow installed) so previewing
-  // as admin locally still passes the gate.
+  // auth-bypass path (plain user object, no shadow installed).
   var realRole = (Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) || null;
-  if (realRole !== 'admin') {
+  // My Day is open to editors + admins. Other roles fall through to the
+  // "not mapped to an editor" placeholder further down.
+  if (realRole !== 'admin' && realRole !== 'editor') {
     return '<div class="content" style="padding:0;"><div class="uc-card">' +
       '<div class="uc-icon">🚧</div>' +
       '<h1>My Day</h1>' +
-      '<p>This tab is under construction. Coming soon — you\'ll see your task list and end-of-day submission here.</p>' +
+      '<p>This tab is for editors and admins.</p>' +
     '</div></div>';
   }
 
@@ -12922,18 +12923,21 @@ function renderEditorHomeView() {
   var isPreview = !!currentEditor && currentEditor !== authEditor;
   var today = todayUK();
 
-  // Admin picker — always shown for admins; renders whichever editor was chosen.
-  var pickerOptions = _eodPickerOptions(authEditor);
-  var pickerHtml = '<div class="eod-picker">' +
-    '<label class="eod-picker-label">View as</label>' +
-    '<select class="form-input eod-picker-select" onchange="App.setEODPreviewEditor(this.value)">' +
-      pickerOptions.map(function(name) {
-        var selected = (name === currentEditor) ? ' selected' : '';
-        var label = name + (name === authEditor ? ' (you)' : '');
-        return '<option value="' + escapeHtml(name) + '"' + selected + '>' + escapeHtml(label) + '</option>';
-      }).join('') +
-    '</select>' +
-  '</div>';
+  // "View as" picker is admin-only — editors always see their own Home.
+  var pickerHtml = '';
+  if (realRole === 'admin') {
+    var pickerOptions = _eodPickerOptions(authEditor);
+    pickerHtml = '<div class="eod-picker">' +
+      '<label class="eod-picker-label">View as</label>' +
+      '<select class="form-input eod-picker-select" onchange="App.setEODPreviewEditor(this.value)">' +
+        pickerOptions.map(function(name) {
+          var selected = (name === currentEditor) ? ' selected' : '';
+          var label = name + (name === authEditor ? ' (you)' : '');
+          return '<option value="' + escapeHtml(name) + '"' + selected + '>' + escapeHtml(label) + '</option>';
+        }).join('') +
+      '</select>' +
+    '</div>';
+  }
 
   if (!currentEditor) {
     return '<div class="content" style="padding:0;"><div class="eod-page">' +
