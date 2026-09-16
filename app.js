@@ -480,6 +480,7 @@ var Fb = {
       strategyNotionUrl: STATE.strategyNotionUrl || '',
       trainingModules: Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [],
       trainingCompletions: (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {},
+      weeklyLog: (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {},
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedByTab: Fb._tabId,
@@ -656,6 +657,7 @@ var Fb = {
       var _localProducts = Array.isArray(STATE.products) ? STATE.products.slice() : [];
       var _localGrades = Array.isArray(STATE.grades) ? STATE.grades.slice() : [];
       var _localScorecardMeta = (STATE.scorecardMeta && typeof STATE.scorecardMeta === 'object') ? STATE.scorecardMeta : {};
+      var _localWeeklyLog = (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {};
       var _localCountries = Array.isArray(STATE.countries) ? STATE.countries.slice() : [];
       var _localCampaigns = Array.isArray(STATE.campaigns) ? STATE.campaigns.slice() : [];
       var _localPendingBatches = (STATE.pendingBatches && typeof STATE.pendingBatches === 'object') ? STATE.pendingBatches : {};
@@ -701,6 +703,10 @@ var Fb = {
         // Both merged below so a teammate's routine save can't wipe a fresh grade or
         // scorecard input that hasn't finished round-tripping through Firestore yet.
         if (k === 'grades' || k === 'scorecardMeta') return;
+        // Weekly Log — nested map { date: [entry, ...] }. Union-merged per (date, id)
+        // below so a teammate's stale write can't wipe activity entries added between
+        // their load and their save.
+        if (k === 'weeklyLog') return;
         // Countries + campaigns — merged by code/id below. Campaign edits still last-write-
         // wins for existing entries, but a fresh CREATED campaign never gets wiped by a
         // stale save from another tab.
@@ -860,6 +866,35 @@ var Fb = {
       }
       STATE.grades        = mergeGradesList(_localGrades, data.grades);
       STATE.scorecardMeta = mergeScorecardMeta(_localScorecardMeta, data.scorecardMeta);
+
+      // weeklyLog: { 'YYYY-MM-DD': [entry, ...] } where each entry has a stable id.
+      // Merge per date, then per id. On id conflict prefer the newer addedAt (edits
+      // are rare — deletes are done via App.deleteWeeklyLogEntry which drops the
+      // entry from both sides on the next save round-trip).
+      function mergeWeeklyLog(local, incoming) {
+        var out = {};
+        var dateSet = {};
+        Object.keys(incoming || {}).forEach(function(d) { dateSet[d] = true; });
+        Object.keys(local    || {}).forEach(function(d) { dateSet[d] = true; });
+        Object.keys(dateSet).forEach(function(d) {
+          var incList = (incoming && Array.isArray(incoming[d])) ? incoming[d] : [];
+          var locList = (local    && Array.isArray(local[d]))    ? local[d]    : [];
+          var byId = {}, order = [];
+          incList.forEach(function(e) {
+            if (!e || !e.id) return;
+            byId[e.id] = e; order.push(e.id);
+          });
+          locList.forEach(function(e) {
+            if (!e || !e.id) return;
+            var ex = byId[e.id];
+            if (!ex) { byId[e.id] = e; order.push(e.id); return; }
+            if ((e.addedAt || 0) > (ex.addedAt || 0)) byId[e.id] = e;
+          });
+          if (order.length) out[d] = order.map(function(id) { return byId[id]; });
+        });
+        return out;
+      }
+      STATE.weeklyLog = mergeWeeklyLog(_localWeeklyLog, data.weeklyLog);
 
       // Countries: array of {code, name}. Union-merge by code so a stale writer's list
       // can't drop a country another tab just added.
@@ -1865,7 +1900,7 @@ var Presence = {
   },
   _location: function(tab, campaignId) {
     var labels = { campaigns: 'Campaigns', board: 'Board', notifications: 'Notifications',
-      log: 'Daily Log', editingCalendar: 'Editing Calendar', automations: 'Automations', config: 'Config' };
+      log: 'Weekly Log', editingCalendar: 'Editing Calendar', automations: 'Automations', config: 'Config' };
     if (tab === 'campaigns' && campaignId) {
       var camp = findCampaignById(campaignId);
       if (camp) return camp.name;
@@ -2349,12 +2384,18 @@ var STATE = {
   // Migrated into organicDailyThread on first load (see boot migration below).
   contentLeadDailyThreads: { Millie: null, Rivers: null },
   contentLeadDailyThreadHistory: { Millie: [], Rivers: [] },
-  // Daily Log tab: remembered editor selection so it survives re-renders and sessions.
+  // Weekly Log tab: remembered editor selection so it survives re-renders and sessions.
   // Null = show first editor. Changed via the dropdown; persisted by saveState.
   logEditor: null,
-  // Daily Log tab: week offset from current week. 0 = this week, -1 = last week, etc.
+  // Weekly Log tab: week offset from current week. 0 = this week, -1 = last week, etc.
   // Per-user UI preference, not shared via Firestore.
   logWeekOffset: 0,
+  // Weekly Log tab: team activity entries keyed by ISO date (YYYY-MM-DD). Each
+  // value is an array of { id, category, text, editor?, addedByUid, addedByName,
+  // addedAt } entries. Categories come from WEEKLY_LOG_CATEGORIES. Shared workspace
+  // data — synced via Firestore, union-merged by (date, id) so a stale write can
+  // never wipe a fresh entry.
+  weeklyLog: {},
 
   // Reporting tab UI state — persisted so filter selections survive reloads.
   reportingPeriod:      'monthly',
@@ -4841,6 +4882,12 @@ var SidebarEditState = { renameCampId: null, previousCompact: null };
 // Dismissed by clicking anywhere outside, pressing Escape, or picking an action.
 var ContextMenuState = { subcampId: null, x: 0, y: 0 };
 
+// Row-actions dropdown state: which video row's Actions ▾ menu is open. Positioned
+// like ContextMenuState (position:fixed at x/y) so it escapes the table's overflow.
+// Only one can be open at a time; opening a new one replaces it. Dismissed on
+// outside-click, Escape, or picking an action.
+var RowActionsState = { assetId: null, x: 0, y: 0 };
+
 // Transient sidebar-search keyboard navigation state. `idx` is which result is
 // currently highlighted for Enter-to-open. Reset on every query change and on
 // clear. Not persisted.
@@ -5055,6 +5102,7 @@ function showAssetModal(existing) {
       STATE.assets.push(payload);
       logAction('created', 'Asset "' + name + '" added (' + payload.difficulty + ', ' + (payload.editor || 'unassigned') + ')');
       emitAssetChangeNotifications(payload, { oldEditor: '', oldStatus: null, isNew: true });
+      notifyNewIntlAssetIfApplicable(payload);
       toast('Asset added', 'success');
     }
     closeModal();
@@ -5126,6 +5174,7 @@ function duplicateAsset(id) {
   logAction('created', 'Asset "' + src.name + '" duplicated as "' + copy.name + '"');
   // Same notification flow as a new asset with an editor: triggers an "assigned" ping if editor present.
   emitAssetChangeNotifications(copy, { oldEditor: '', oldStatus: null, isNew: true });
+  notifyNewIntlAssetIfApplicable(copy);
   toast('Duplicated as "' + copy.name + '"', 'success');
   render();
 }
@@ -5145,7 +5194,7 @@ var TAB_DEFS = {
   today:            { label: 'Board' },
   catReview:        { label: 'Cat Heads Review', badge: true },
   editingCalendar:  { label: 'Editing Calendar' },
-  log:              { label: 'Daily Log' },
+  log:              { label: 'Weekly Log' },
   grading:          { label: 'Grading' },
   editingStyle:     { label: 'Editing Style' },
   strategy:         { label: 'Strategy' },
@@ -5875,7 +5924,7 @@ function renderCampaignsView() {
             '<td>' + renderEditableCell(a, 'clQcDateApproved') + '</td>'
           : '') +
         (showIgLink ? '<td class="link-cell">' + renderEditableCell(a, 'igLink') + '</td>' : '') +
-        '<td><div class="row-actions"><button class="action-btn" onclick="App.editAssetById(\'' + a.id + '\')" title="Open edit modal">Edit</button><button class="action-btn" onclick="App.duplicateAsset(\'' + a.id + '\')" title="Duplicate this row">Dup</button><button class="action-btn" onclick="App.openAdReport(\'' + a.id + '\')" title="Open ad report in ForceStaff">Report</button>' + (roleAtLeast('admin') ? '<button class="action-btn del-btn" onclick="App.deleteAsset(\'' + a.id + '\')" title="Delete this row">Del</button>' : '') + '</div></td>' +
+        '<td><div class="row-actions"><button class="action-btn row-actions-menu-btn" onclick="App.showRowActionsMenu(event, \'' + a.id + '\')" title="Row actions">Actions ▾</button></div></td>' +
       '</tr>';
   }
 
@@ -6756,18 +6805,22 @@ function renderTodayView() {
   '</div>';
 }
 
-// ===================== DAILY LOG =====================
-// Per-editor x per-day status grid over the last 7 workdays (Mon-Fri).
-// For each of the editor's videos, reconstructs what status the video had at
-// end-of-day of each prior day. Cell colouring
-// flags editors who approved < DAILY_APPROVAL_TARGET videos on a given day
-// so under-performers stand out at a glance.
+// ===================== WEEKLY LOG =====================
+// Two-panel view of a Mon–Fri week:
+//   1. Team Activities — manually logged notes per day (Tagging, Training, …).
+//   2. Approved Videos — the automated per-editor rundown of what got approved.
+// Each day card renders both, so a viewer can see both the qualitative team log
+// and the video-approval tally in one place.
 //
 // Note: historical reconstruction only works for changes captured since the
 // version-history system landed. For assets that existed before that, older
 // days will fall back to the earliest known snapshot or current state.
 
 var DAILY_LOG_WINDOW_WORKDAYS = 5;
+
+// Categories a Weekly Log entry can be tagged with. Kept in one place so the
+// dropdown and the chip colour lookup stay in sync. Add here to extend.
+var WEEKLY_LOG_CATEGORIES = ['Tagging', 'Training', 'Editing', 'Meeting', 'Admin', 'Other'];
 
 // Return the last N workdays (Mon-Fri only) ending today (inclusive), as
 // LOCAL 'YYYY-MM-DD' strings in CHRONOLOGICAL order (oldest first).
@@ -6859,6 +6912,66 @@ function assetExistedOnDay(a, dateISO) {
     return true;
   }
   return true; // Default: treat as existed. Conservative; status will be Draft if uninitialized.
+}
+
+// Return the sorted list of Weekly Log activity entries for the given date.
+// Newest first (by addedAt) so the most recent activity is easiest to skim.
+function getWeeklyLogEntries(dateISO) {
+  var m = (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {};
+  var list = Array.isArray(m[dateISO]) ? m[dateISO].slice() : [];
+  list.sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+  return list;
+}
+
+// Format a per-entry "10:23 · Elsa" byline. Time is derived from addedAt, name
+// from addedByName (fallback: 'unknown').
+function formatWeeklyLogEntryByline(entry) {
+  var d = entry && entry.addedAt ? new Date(entry.addedAt) : null;
+  var timeStr = '';
+  if (d && !isNaN(d.getTime())) {
+    var hh = d.getHours(), mm = d.getMinutes();
+    timeStr = (hh < 10 ? '0' + hh : hh) + ':' + (mm < 10 ? '0' + mm : mm);
+  }
+  var name = (entry && entry.addedByName) ? entry.addedByName : 'unknown';
+  return (timeStr ? timeStr + ' · ' : '') + name;
+}
+
+// Slug for CSS class lookup: 'Tagging' -> 'wlog-cat-tagging'. Falls back to 'other'.
+function weeklyLogCategoryClass(cat) {
+  var slug = String(cat || 'Other').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return 'wlog-cat-' + slug;
+}
+
+// Render the activities panel for one day (input form + entries list). Used
+// inside each day-card on the Weekly Log tab.
+function renderWeeklyLogActivitiesPanel(dateISO) {
+  var entries = getWeeklyLogEntries(dateISO);
+  var inputId = 'wlog-input-' + dateISO;
+  var catId = 'wlog-cat-' + dateISO;
+  var catOpts = WEEKLY_LOG_CATEGORIES.map(function(c) {
+    return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>';
+  }).join('');
+  var entriesHtml = entries.length === 0
+    ? '<div class="wlog-empty">No activities logged yet — add one above.</div>'
+    : entries.map(function(e) {
+        return '<div class="wlog-entry">' +
+          '<span class="wlog-cat-chip ' + weeklyLogCategoryClass(e.category) + '">' + escapeHtml(e.category || 'Other') + '</span>' +
+          '<span class="wlog-entry-text">' + escapeHtml(e.text || '') + '</span>' +
+          '<span class="wlog-entry-by" title="Added by ' + escapeHtml(e.addedByName || 'unknown') + '">' + escapeHtml(formatWeeklyLogEntryByline(e)) + '</span>' +
+          '<button class="wlog-entry-del" title="Delete this entry" ' +
+            'onclick="App.deleteWeeklyLogEntry(\'' + dateISO + '\',\'' + escapeHtml(e.id) + '\')">×</button>' +
+        '</div>';
+      }).join('');
+  return '<div class="wlog-panel">' +
+    '<div class="wlog-input-row">' +
+      '<select id="' + catId + '" class="wlog-cat-select" title="Category">' + catOpts + '</select>' +
+      '<input id="' + inputId + '" class="wlog-text-input" type="text" ' +
+        'placeholder="What did the team do? (Enter to add)" maxlength="240" ' +
+        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();App.addWeeklyLogEntry(\'' + dateISO + '\');}" />' +
+      '<button class="wlog-add-btn" onclick="App.addWeeklyLogEntry(\'' + dateISO + '\')">+ Add</button>' +
+    '</div>' +
+    '<div class="wlog-entries">' + entriesHtml + '</div>' +
+  '</div>';
 }
 
 // Compute the per-editor daily log. Returns an object mapping editor name
@@ -7218,6 +7331,7 @@ function renderDailyLogView() {
         '</div>';
       }).join('');
     }
+    var activitiesHtml = renderWeeklyLogActivitiesPanel(dayIso);
     return '<div class="log-day-card' + (isToday ? ' is-today' : '') + '">' +
       '<div class="log-day-card-header">' +
         '<div class="log-day-card-date">' +
@@ -7232,7 +7346,14 @@ function renderDailyLogView() {
           '<span class="log-day-card-stats-label">approved</span>' +
         '</div>' +
       '</div>' +
-      '<div class="log-day-card-body">' + rowsHtml + '</div>' +
+      '<div class="wlog-section">' +
+        '<div class="wlog-section-label">Team activities</div>' +
+        activitiesHtml +
+      '</div>' +
+      '<div class="wlog-section">' +
+        '<div class="wlog-section-label">Approved videos \u2014 ' + escapeHtml(selectedEditor) + '</div>' +
+        '<div class="log-day-card-body">' + rowsHtml + '</div>' +
+      '</div>' +
     '</div>';
   }).join('');
 
@@ -7258,10 +7379,10 @@ function renderDailyLogView() {
   return '<div class="log-wrap">' +
     '<div class="log-top">' +
       '<div class="log-top-left">' +
-        '<h2 class="log-title">Daily Log</h2>' +
+        '<h2 class="log-title">Weekly Log</h2>' +
         '<div class="log-sub">' +
           weekLabel + ' (' + firstDay + ' \u2013 ' + lastDay + ') \u00B7 ' +
-          'Target: <b>' + target + '</b> approved videos per day for ' + selectedEditor +
+          'Log team activities per day, plus <b>' + selectedEditor + '</b>&rsquo;s approved videos (target ' + target + '/day)' +
         '</div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-left:auto;">' +
@@ -10673,6 +10794,7 @@ function importCampaignsAndAssets(campaignsData, assetsData) {
         if (row.adStatus) asset.adStatus = row.adStatus;
 
         STATE.assets.push(asset);
+        notifyNewIntlAssetIfApplicable(asset);
         importedAssets++;
       }
     });
@@ -10804,14 +10926,14 @@ function exportDailyLogCSV(weekOffset) {
   var d0 = new Date(weekStart + 'T12:00:00');
   var jan4 = new Date(d0.getFullYear(), 0, 4);
   var weekNum = Math.ceil(((d0 - jan4) / 86400000 + jan4.getDay() + 1) / 7);
-  var fileName = 'daily-log-' + d0.getFullYear() + '-W' + (weekNum < 10 ? '0' + weekNum : weekNum) + '.csv';
+  var fileName = 'weekly-log-' + d0.getFullYear() + '-W' + (weekNum < 10 ? '0' + weekNum : weekNum) + '.csv';
   link.setAttribute('href', url);
   link.setAttribute('download', fileName);
   link.style.visibility = 'hidden';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  toast('Exported daily log to ' + fileName, 'success');
+  toast('Exported weekly log to ' + fileName, 'success');
 }
 
 // Build a Slack-formatted summary of one editor's week from the daily log data.
@@ -10827,7 +10949,7 @@ function buildDailyLogSlackMessage(editor, days, data) {
 
   var firstDay = formatDate(days[0]);
   var lastDay = formatDate(days[days.length - 1]);
-  var lines = [':bar_chart: *Daily Log — ' + editor + '* | ' + firstDay + ' – ' + lastDay];
+  var lines = [':bar_chart: *Weekly Log — ' + editor + '* | ' + firstDay + ' – ' + lastDay];
   lines.push('');
 
   var totalApproved = 0;
@@ -10871,7 +10993,7 @@ function showDailyLogSlackModal(weekOffset, editor) {
   }).join('');
 
   var html =
-    '<div class="modal-title">Copy Daily Log for Slack</div>' +
+    '<div class="modal-title">Copy Weekly Log for Slack</div>' +
     '<div class="form-row full" style="display:flex;gap:10px;align-items:center;">' +
       '<div style="flex:1;"><label class="form-label">Editor</label>' +
         '<select id="dlog-slack-editor" class="form-select">' + editorOpts + '</select></div>' +
@@ -11191,6 +11313,7 @@ function executeSheetImport() {
         }
 
         STATE.assets.push(asset);
+        notifyNewIntlAssetIfApplicable(asset);
         importedAssets++;
       }
     });
@@ -11498,6 +11621,7 @@ function executeItalyImport() {
       asset.adStatus = (c[m.ST_AD] || '').trim();
       if (dateApproved) asset.dateApproved = dateApproved;
       STATE.assets.push(asset);
+      notifyNewIntlAssetIfApplicable(asset);
       imported++;
     }
   });
@@ -14678,6 +14802,145 @@ function resolveDailyThreadForIntl(items) {
   return t;
 }
 
+// ===================== INTL AUTO-THREAD (new intl video ping) =====================
+// When a new asset is created under an IT/ES/US campaign, ping the intl daily
+// thread so Elsa sees it. If today's intl thread hasn't been set yet, we
+// auto-create one by posting a top-level opener into the intl channel (derived
+// from history) and saving the returned message ts as STATE.intlDailyThread.
+// Subsequent intl-asset creations that day post as replies to that thread.
+//
+// This is intentionally OUT-OF-BAND from the pendingBatches / editor-thread
+// notification path. That path only fires on status changes (Assigned / For
+// Review / etc.); Elsa wants a heads-up the moment a Draft intl row appears,
+// which is earlier than the batch flow ever reacts.
+//
+// Channel derivation is best-effort: today's set thread wins, otherwise the
+// most recent history entry's URL. If neither exists we log and skip (no way
+// to auto-post without a channel ID; user has to paste an intl thread URL on
+// Automations once to seed history).
+
+// In-flight guard: while an opener is being posted, later intl-asset creations
+// on the same tab wait for the same promise instead of racing to open a second
+// opener. Cross-tab races are still possible but rare and self-correcting
+// (whichever tab wins the saveState round-trip becomes the canonical thread;
+// the loser's opener sits as an orphan top-level message).
+var _intlThreadCreationInFlight = null;
+
+// Returns { channelId } or null. Tries in order:
+//   1. STATE.intlDailyThread.channelId (any date — we only need the channel)
+//   2. Parse the URL from the most-recent intlDailyThreadHistory entry
+function resolveIntlChannelId() {
+  var t = STATE.intlDailyThread;
+  if (t && t.channelId) return t.channelId;
+  var hist = STATE.intlDailyThreadHistory || [];
+  for (var i = 0; i < hist.length; i++) {
+    var url = hist[i] && hist[i].url;
+    if (!url) continue;
+    var parsed = parseSlackThreadUrl(url);
+    if (parsed && parsed.channelId) return parsed.channelId;
+  }
+  return null;
+}
+
+// Slack mention token for Elsa on the opener message. Prefers pmSlackIds.UK
+// (she's the UK PM), falls back to editorSlackIds.Elsa, then to a plain "@Elsa"
+// string that Slack won't notify on but at least labels who owns the thread.
+function mentionElsaForIntl() {
+  var pm = (STATE.pmSlackIds && STATE.pmSlackIds.UK) || '';
+  if (pm) return '<@' + pm + '>';
+  var ed = (STATE.editorSlackIds && STATE.editorSlackIds.Elsa) || '';
+  if (ed) return '<@' + ed + '>';
+  return '@Elsa';
+}
+
+// If today's intl thread is set, resolve to it. Otherwise post a top-level
+// opener to the intl channel via sendSlackChatPostMessage (which returns the
+// posted message's ts), save it as STATE.intlDailyThread, and resolve to the
+// new thread. Resolves null on any failure (no channel known, callable fails,
+// no ts returned) — callers should skip the reply post in that case.
+function ensureIntlThreadForToday() {
+  var today = todayUK();
+  var t = STATE.intlDailyThread;
+  if (t && t.date === today && t.channelId && t.threadTs) {
+    return Promise.resolve({ channelId: t.channelId, threadTs: t.threadTs });
+  }
+  if (_intlThreadCreationInFlight) return _intlThreadCreationInFlight;
+
+  var channelId = resolveIntlChannelId();
+  if (!channelId) {
+    logAction('skipped-notify', 'Intl auto-thread skipped — no channel known (set an intl thread URL on Automations once to seed)');
+    return Promise.resolve(null);
+  }
+
+  var opener = '🌍 *International videos — ' + today + '*\n' +
+    mentionElsaForIntl() + ' this thread collects any new intl videos added today.';
+
+  _intlThreadCreationInFlight = postToSlackThread(channelId, null, opener).then(function(r) {
+    _intlThreadCreationInFlight = null;
+    // Another tab may have set the intl thread while we were in flight — if so,
+    // prefer that one (the opener we just posted becomes an orphan; harmless).
+    var now = STATE.intlDailyThread;
+    if (now && now.date === today && now.channelId && now.threadTs) {
+      return { channelId: now.channelId, threadTs: now.threadTs };
+    }
+    if (!r || !r.ok || !r.ts) {
+      logAction('skipped-notify', 'Intl auto-thread opener failed: ' + ((r && r.body) || 'unknown'));
+      return null;
+    }
+    var url = 'https://slack.com/archives/' + channelId + '/p' + String(r.ts).replace('.', '');
+    STATE.intlDailyThread = {
+      date: today,
+      url: url,
+      channelId: channelId,
+      threadTs: r.ts,
+      setAt: Date.now(),
+      autoCreated: true
+    };
+    saveState();
+    logAction('notified', 'Intl auto-thread created (channel ' + channelId + ')');
+    return { channelId: channelId, threadTs: r.ts };
+  }).catch(function(err) {
+    _intlThreadCreationInFlight = null;
+    logAction('skipped-notify', 'Intl auto-thread errored: ' + ((err && err.message) || 'unknown'));
+    return null;
+  });
+
+  return _intlThreadCreationInFlight;
+}
+
+// Country → flag emoji for the reply message.
+var INTL_COUNTRY_FLAGS = { IT: '🇮🇹', ES: '🇪🇸', US: '🇺🇸' };
+
+// If `asset`'s campaign is IT/ES/US, ensure today's intl thread exists and
+// post a reply describing the new row. No-op for UK / unknown campaigns.
+// Fire-and-forget: callers don't await; errors are logged via ensureIntl...
+// / catch below.
+function notifyNewIntlAssetIfApplicable(asset) {
+  if (!asset) return;
+  var camp = findCampaignById(asset.campaignId);
+  if (!camp) return;
+  var country = camp.country;
+  if (INTL_COUNTRIES.indexOf(country) < 0) return;
+
+  ensureIntlThreadForToday().then(function(thread) {
+    if (!thread) return;
+    var flag = INTL_COUNTRY_FLAGS[country] || '';
+    var editorPart = asset.editor ? ('editor: ' + asset.editor) : 'unassigned';
+    var statusPart = asset.status || 'Draft';
+    var text = '📹 *' + (asset.name || 'Untitled') + '* added to *' + (camp.name || 'Unknown campaign') + '*' +
+               ' — ' + flag + ' ' + country + ' · ' + statusPart + ' · ' + editorPart;
+    postToSlackThread(thread.channelId, thread.threadTs, text).then(function(r) {
+      if (r && r.ok) {
+        logAction('notified', 'Intl new-video ping posted: ' + (asset.name || asset.id));
+      } else {
+        logAction('skipped-notify', 'Intl new-video ping failed: ' + ((r && r.body) || 'unknown'));
+      }
+    }).catch(function(err) {
+      logAction('skipped-notify', 'Intl new-video ping errored: ' + ((err && err.message) || 'unknown'));
+    });
+  });
+}
+
 // True when every item belongs to an Organic sub-campaign AND is UK. A missing
 // campaign, any Paid Ads item, or any non-UK item disqualifies the batch.
 // International Organic falls through to intl / editor routing instead.
@@ -15926,7 +16189,9 @@ function render() {
   else if (STATE.tab === 'clips') body = renderClipsView();
   else body = renderConfigView();
   document.getElementById('app').innerHTML = renderTopbar() + '<div class="main">' + body + '</div>';
-  // Context menu layer \u2014 empty if nothing is open; a positioned popup if ContextMenuState is set
+  // Context menu layer \u2014 empty if nothing is open; a positioned popup if ContextMenuState
+  // or RowActionsState is set. Only one of the two is ever open at a time (opening one
+  // clears the other), so they share the layer without stacking.
   var menuLayer = document.getElementById('context-menu-layer');
   if (menuLayer) {
     if (ContextMenuState.subcampId !== null) {
@@ -15942,6 +16207,31 @@ function render() {
       } else {
         menuLayer.innerHTML = '';
         ContextMenuState.subcampId = null; // campaign no longer exists
+      }
+    } else if (RowActionsState.assetId !== null) {
+      var targetAsset = findAssetById(RowActionsState.assetId);
+      if (targetAsset) {
+        var aid = targetAsset.id;
+        var edLabel = targetAsset.editor ? escapeHtml(targetAsset.editor) : 'editor';
+        var hasVideo = !!extractSingleUrl(targetAsset.finalVideo);
+        var sendTitle = !targetAsset.editor
+          ? 'No editor assigned to this video'
+          : !hasVideo
+            ? 'No final video link on this row'
+            : 'Post the video into ' + edLabel + '\'s daily Slack thread';
+        var sendDisabled = (!targetAsset.editor || !hasVideo) ? ' disabled' : '';
+        menuLayer.innerHTML =
+          '<div class="subcamp-context-menu row-actions-menu" style="left:' + RowActionsState.x + 'px; top:' + RowActionsState.y + 'px;">' +
+            '<div class="subcamp-context-menu-header">' + escapeHtml(targetAsset.name || 'Video') + '</div>' +
+            '<button class="subcamp-context-menu-item" onclick="App.editAssetById(\'' + aid + '\'); App.hideRowActionsMenu();">\u270E Edit</button>' +
+            '<button class="subcamp-context-menu-item" onclick="App.duplicateAsset(\'' + aid + '\'); App.hideRowActionsMenu();">\u29C9 Duplicate</button>' +
+            '<button class="subcamp-context-menu-item" onclick="App.openAdReport(\'' + aid + '\'); App.hideRowActionsMenu();">\u{1F4CA} Report</button>' +
+            '<button class="subcamp-context-menu-item"' + sendDisabled + ' title="' + sendTitle + '" onclick="App.sendVideoToEditorThread(\'' + aid + '\');">\u{1F4E8} Send video to ' + edLabel + '\u2019s thread</button>' +
+            (roleAtLeast('admin') ? '<button class="subcamp-context-menu-item subcamp-context-menu-destructive" onclick="App.deleteAsset(\'' + aid + '\'); App.hideRowActionsMenu();">\u{1F5D1} Delete</button>' : '') +
+          '</div>';
+      } else {
+        menuLayer.innerHTML = '';
+        RowActionsState.assetId = null; // asset no longer exists
       }
     } else {
       menuLayer.innerHTML = '';
@@ -17154,6 +17444,44 @@ var App = {
   },
   showDailyLogSlack: function(offset, editor) {
     showDailyLogSlackModal(parseInt(offset, 10) || 0, editor);
+  },
+  // Weekly Log: add a new activity entry for the given date. Reads the sibling
+  // <select> and <input> by the ids the renderer stamped in. Trims text; a blank
+  // input is a no-op (with a toast so the user knows why nothing happened).
+  addWeeklyLogEntry: function(dateISO) {
+    if (!dateISO || !/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return;
+    var input = document.getElementById('wlog-input-' + dateISO);
+    var cat   = document.getElementById('wlog-cat-' + dateISO);
+    if (!input) return;
+    var text = (input.value || '').trim();
+    if (!text) { toast('Type something first', 'info'); input.focus(); return; }
+    var category = cat && cat.value && WEEKLY_LOG_CATEGORIES.indexOf(cat.value) >= 0 ? cat.value : 'Other';
+    if (!STATE.weeklyLog || typeof STATE.weeklyLog !== 'object') STATE.weeklyLog = {};
+    if (!Array.isArray(STATE.weeklyLog[dateISO])) STATE.weeklyLog[dateISO] = [];
+    var now = Date.now();
+    var entry = {
+      id: 'wl_' + now + '_' + Math.random().toString(36).slice(2, 8),
+      category: category,
+      text: text,
+      addedByUid:  (Auth.user && Auth.user.uid) || null,
+      addedByName: (Auth.user && (Auth.user.displayName || Auth.user.email)) || 'unknown',
+      addedAt: now
+    };
+    STATE.weeklyLog[dateISO].push(entry);
+    saveState();
+    render();
+  },
+  // Weekly Log: remove an entry by id. Guarded so a stale button click after a
+  // sync can't crash — silently no-ops if the date bucket or id has moved on.
+  deleteWeeklyLogEntry: function(dateISO, entryId) {
+    if (!dateISO || !entryId) return;
+    if (!STATE.weeklyLog || !Array.isArray(STATE.weeklyLog[dateISO])) return;
+    var before = STATE.weeklyLog[dateISO].length;
+    STATE.weeklyLog[dateISO] = STATE.weeklyLog[dateISO].filter(function(e) { return e && e.id !== entryId; });
+    if (STATE.weeklyLog[dateISO].length === 0) delete STATE.weeklyLog[dateISO];
+    if (STATE.weeklyLog[dateISO] && STATE.weeklyLog[dateISO].length === before) return;
+    saveState();
+    render();
   },
   bulkApproveAssigned: function() {
     var camp = getActiveCampaign();
@@ -18791,6 +19119,95 @@ var App = {
     menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
   },
 
+  // --- Video row Actions dropdown ---
+  // Anchors below the clicked button and clamps to the viewport so the menu never
+  // gets cut off at the right/bottom edge. Renders via the context-menu-layer so
+  // the table's overflow:auto doesn't clip it. Toggle: clicking the same row's
+  // button again closes the menu.
+  showRowActionsMenu: function(event, assetId) {
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    if (RowActionsState.assetId === assetId) {
+      RowActionsState.assetId = null;
+      render();
+      return;
+    }
+    var btn = event && event.currentTarget;
+    var rect = btn && btn.getBoundingClientRect ? btn.getBoundingClientRect() : null;
+    var menuW = 260, menuH = 220;
+    var x, y;
+    if (rect) {
+      x = rect.right - menuW;         // right-align the menu to the button
+      y = rect.bottom + 4;
+    } else {
+      x = (event && event.clientX) || 0;
+      y = (event && event.clientY) || 0;
+    }
+    if (x + menuW > window.innerWidth)  x = window.innerWidth  - menuW - 6;
+    if (x < 6) x = 6;
+    if (y + menuH > window.innerHeight) y = Math.max(6, (rect ? rect.top - menuH - 4 : y - menuH));
+    // Opening a row-actions menu closes any subcamp context menu (they share the layer).
+    ContextMenuState.subcampId = null;
+    RowActionsState.assetId = assetId;
+    RowActionsState.x = x;
+    RowActionsState.y = y;
+    render();
+  },
+
+  hideRowActionsMenu: function() {
+    if (RowActionsState.assetId === null) return;
+    RowActionsState.assetId = null;
+    render();
+  },
+
+  // Post the row's final video into the assigned editor's daily Slack thread.
+  // Refuses when no editor is set, no video link is set, or no daily thread is
+  // configured for today (webhook fallback would leak to the main channel).
+  // Message intentionally simple: mentions the editor and links the video +
+  // Tracker deep-link. Recorded in sentNotifications so it shows up in the
+  // Notifications tab like every other outbound message.
+  sendVideoToEditorThread: function(assetId) {
+    var a = findAssetById(assetId);
+    if (!a) { toast('Video not found', 'error'); return; }
+    var editor = a.editor || '';
+    if (!editor) { toast('No editor assigned — set one first', 'error'); return; }
+    var videoUrl = extractSingleUrl(a.finalVideo);
+    if (!videoUrl) { toast('No final video link on this row', 'error'); return; }
+    var thread = resolveDailyThreadForEditor(editor);
+    if (!thread) {
+      toast('No daily thread set for ' + editor + ' — set it in Automations', 'error');
+      return;
+    }
+    var camp = findCampaignById(a.campaignId);
+    var base = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
+    var trackerLink = (base && camp)
+      ? ' · <' + base + '#campaign=' + camp.id + '&asset=' + a.id + '|Tracker ↗>'
+      : '';
+    var msg = mentionEditor(editor) + ' — here’s the video: <' + videoUrl + '|' + (a.name || 'Video') + '>' + trackerLink;
+    App.hideRowActionsMenu();
+    toast('Sending video to ' + editor + '’s thread…', '');
+    postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+      if (r && r.ok) {
+        STATE.sentNotifications = STATE.sentNotifications || [];
+        STATE.sentNotifications.unshift({
+          time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
+          reason: 'manual-video-push', body: msg
+        });
+        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
+        logAction('notified', '"' + (a.name || 'video') + '" manually posted to ' + editor + '’s thread');
+        toast('✓ Sent to ' + editor + '’s thread', 'success');
+        render();
+      } else {
+        var reason = (r && r.body) || 'unknown error';
+        logAction('deleted', 'Manual video push failed for ' + editor + ': ' + reason);
+        toast('Post failed: ' + reason, 'error');
+      }
+    }).catch(function(err) {
+      var reason = (err && (err.message || err.code)) || 'network error';
+      logAction('deleted', 'Manual video push failed for ' + editor + ': ' + reason);
+      toast('Post failed: ' + reason, 'error');
+    });
+  },
+
   // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
   // hash (#campaign=N) so it doesn't collide with Firebase auth's query-string redirects.
   // Boot logic in attachAuthListener parses this and selects the campaign on load.
@@ -20297,6 +20714,7 @@ document.addEventListener('keydown', function(e) {
       return;
     }
     if (SidebarEditState.renameCampId !== null) { App.cancelRenameSubcamp(); return; }
+    if (RowActionsState.assetId !== null) { App.hideRowActionsMenu(); return; }
     if (ContextMenuState.subcampId !== null) { App.hideSubcampContextMenu(); return; }
     var kebab = document.getElementById('camp-actions-menu');
     if (kebab && kebab.style.display && kebab.style.display !== 'none') {
@@ -20388,6 +20806,18 @@ document.addEventListener('click', function(e) {
     t = t.parentNode;
   }
   App.hideSubcampContextMenu();
+});
+
+// Same shape for the row-actions dropdown. Bails if the click landed inside the
+// menu itself or on the button that opened it (the button handler already toggles).
+document.addEventListener('click', function(e) {
+  if (RowActionsState.assetId === null) return;
+  var t = e.target;
+  while (t) {
+    if (t.classList && (t.classList.contains('row-actions-menu') || t.classList.contains('row-actions-menu-btn'))) return;
+    t = t.parentNode;
+  }
+  App.hideRowActionsMenu();
 });
 
 // Dismiss the campaign-header kebab menu on outside-click (same shape as the sidebar one).

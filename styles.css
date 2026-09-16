@@ -789,10 +789,17 @@
   }
   .inline-edit-input.inline-edit-url:focus { box-shadow: 0 4px 14px rgba(0,0,0,0.6), 0 0 0 2px var(--accent-dim), 0 0 0 1px var(--accent2); }
   .inline-edit-input.inline-edit-url.is-invalid { box-shadow: 0 4px 14px rgba(0,0,0,0.5), 0 0 0 2px var(--red-bg), 0 0 0 1px var(--red); border-color: var(--red); }
-  .row-actions { display: flex; gap: 4px; }
+  .row-actions { display: flex; gap: 4px; justify-content: flex-end; }
   .action-btn { padding: 4px 9px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 11px; font-family: inherit; transition: all 0.12s; }
   .action-btn:hover { border-color: var(--border2); color: var(--text1); background: var(--bg3); }
   .del-btn:hover { border-color: var(--red); color: var(--red-text); background: var(--red-bg); }
+  .row-actions-menu-btn { display: inline-flex; align-items: center; gap: 4px; }
+  /* Row-actions dropdown shares subcamp-context-menu's structure but is a touch
+     wider to fit "Send video to <Editor>'s thread". Disabled items still hover
+     but stay muted so it's clear why they can't be clicked. */
+  .row-actions-menu { min-width: 240px; }
+  .row-actions-menu .subcamp-context-menu-item[disabled] { opacity: 0.45; cursor: not-allowed; }
+  .row-actions-menu .subcamp-context-menu-item[disabled]:hover { background: transparent; color: var(--text1); }
 
   .scheduler-panel, .automation-panel, .config-panel, .notif-panel { padding: 24px 28px; overflow-y: auto; flex: 1; max-width: 1040px; width: 100%; }
   .section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 12px; margin-top: 8px; display: flex; align-items: center; gap: 8px; }
@@ -1103,6 +1110,38 @@
   .log-vid-chq-status.log-chq-review { background: var(--blue-bg); color: var(--blue-text); }
   .log-vid-chq-status.log-chq-revisions { background: var(--amber-bg); color: var(--amber-text); }
   .log-vid-chq-status.log-chq-approved { background: var(--green-bg); color: var(--green-text); }
+
+  /* Weekly Log activity panel — one per day card. Sits between the day header
+     and the approved-videos list. The input row is a single line: category
+     select + free-text input + Add button; entries below are one line each. */
+  .wlog-section { border-top: 1px solid var(--border); }
+  .wlog-section-label { font-size: 10px; font-weight: 700; color: var(--text3); letter-spacing: 0.09em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; padding: 8px 14px 4px; }
+  .wlog-panel { padding: 4px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .wlog-input-row { display: flex; gap: 6px; align-items: center; }
+  .wlog-cat-select { background: var(--bg3); color: var(--text1); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 24px 6px 10px; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; min-width: 110px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%236b6880' d='M0 0l5 6 5-6z'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; }
+  .wlog-cat-select:hover { border-color: var(--accent2); color: var(--accent2); }
+  .wlog-cat-select:focus { outline: none; border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(127,119,221,0.2); }
+  .wlog-text-input { flex: 1; background: var(--bg3); color: var(--text1); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 10px; font-family: inherit; font-size: 13px; min-width: 0; }
+  .wlog-text-input:focus { outline: none; border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(127,119,221,0.2); }
+  .wlog-text-input::placeholder { color: var(--text3); }
+  .wlog-add-btn { background: var(--accent-dim); color: var(--accent2); border: 1px solid rgba(127,119,221,0.35); border-radius: 6px; padding: 6px 12px; font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .wlog-add-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .wlog-entries { display: flex; flex-direction: column; gap: 4px; }
+  .wlog-empty { font-size: 11.5px; color: var(--text3); font-style: italic; padding: 4px 2px; }
+  .wlog-entry { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 10px; padding: 6px 8px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; }
+  .wlog-entry-text { font-size: 13px; color: var(--text1); word-break: break-word; }
+  .wlog-entry-by { font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .wlog-entry-del { background: transparent; color: var(--text3); border: none; border-radius: 4px; width: 22px; height: 22px; font-size: 16px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  .wlog-entry-del:hover { background: var(--red-bg); color: var(--red-text); }
+
+  .wlog-cat-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; border: 1px solid transparent; white-space: nowrap; }
+  .wlog-cat-chip.wlog-cat-tagging   { background: var(--blue-bg);   color: var(--blue-text);   border-color: rgba(133,183,235,0.35); }
+  .wlog-cat-chip.wlog-cat-training  { background: rgba(94,234,212,0.10); color: #5eead4; border-color: rgba(94,234,212,0.35); }
+  .wlog-cat-chip.wlog-cat-editing   { background: var(--accent-dim); color: var(--accent2); border-color: rgba(127,119,221,0.35); }
+  .wlog-cat-chip.wlog-cat-meeting   { background: var(--amber-bg);  color: var(--amber-text);  border-color: rgba(250,199,117,0.35); }
+  .wlog-cat-chip.wlog-cat-admin     { background: var(--gray-bg);   color: var(--gray-text);   border-color: rgba(180,178,169,0.30); }
+  .wlog-cat-chip.wlog-cat-other     { background: var(--bg4);       color: var(--text3);       border-color: var(--border2); }
 
   /* The table: a single grid with sticky day-header row + sticky approvals row, then video rows. */
   .log-grid { display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }

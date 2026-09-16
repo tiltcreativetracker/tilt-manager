@@ -72,8 +72,17 @@ exports.sendSlackChatPostMessage = onCall(
         status: res.status, error: json.error || 'unknown', response_metadata: json.response_metadata || null,
       }));
     }
-    // Return the same shape the client's postToSlackThread expects.
-    return { ok: !!json.ok, body: json.error || (json.ok ? 'ok' : 'unknown'), status: res.status };
+    // Return the same shape the client's postToSlackThread expects, PLUS the
+    // posted message's ts + channel. Clients that only want ok/body/status can
+    // ignore the extras; the intl auto-thread flow reads ts to save a new
+    // top-level post as a thread the client can then reply into.
+    return {
+      ok: !!json.ok,
+      body: json.error || (json.ok ? 'ok' : 'unknown'),
+      status: res.status,
+      ts: json.ts || null,
+      channel: json.channel || null
+    };
   }
 );
 
