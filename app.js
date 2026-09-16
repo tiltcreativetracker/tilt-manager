@@ -12779,24 +12779,29 @@ function renderEditorHomeView() {
     '</div></div>';
   }
 
-  // All assets assigned to this editor. Terminal statuses (Approved, Cancelled)
-  // stay in the list but sort to the bottom — the day-to-day task list is the
-  // active section at the top, with a visible tail so it's clear what's done
-  // versus dead versus still pending.
-  var mine = STATE.assets.filter(function(a) { return a.editor === currentEditor; });
-
   function _statusRank(a) {
     var s = a.status || 'Draft';
     if (s === 'Approved')  return 2;
     if (s === 'Cancelled') return 3;
     return 1; // active — In Progress, For Review, Needs Revisions, Assigned, Draft, etc.
   }
+
+  // My Day is a *today* view. Active assets always show; Approved is scoped to
+  // things approved today (feeds EOD context). Cancelled has no reliable
+  // timestamp field, so we can't scope by "cancelled today" — it stays hidden
+  // from the row list and only appears as a lifetime count in the label.
+  var allEditorAssets = STATE.assets.filter(function(a) { return a.editor === currentEditor; });
+  var activeMine    = allEditorAssets.filter(function(a) { return _statusRank(a) === 1; });
+  var approvedToday = allEditorAssets.filter(function(a) { return _statusRank(a) === 2 && a.dateApproved === today; });
+  var cancelledLifetime = allEditorAssets.filter(function(a) { return _statusRank(a) === 3; }).length;
+  var mine = activeMine.concat(approvedToday);
+
   mine.sort(function(a, b) {
-    // Status section first: active (1) → Approved (2) → Cancelled (3).
+    // Status section first: active (1) → Approved-today (2).
     var ar = _statusRank(a), br = _statusRank(b);
     if (ar !== br) return ar - br;
     // Within the section, already-ticked-today rows drop to the bottom of
-    // that section (not below the next section).
+    // that section.
     var ad = (a.doneToday === today) ? 1 : 0;
     var bd = (b.doneToday === today) ? 1 : 0;
     if (ad !== bd) return ad - bd;
@@ -12808,12 +12813,6 @@ function renderEditorHomeView() {
     // Tiebreak: most recently assigned first.
     return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
   });
-
-  // Active-only slice for the EOD "tag" flow — Approved/Cancelled aren't
-  // things you're actively working on today, so they don't feed submissions.
-  var activeMine = mine.filter(function(a) { return _statusRank(a) === 1; });
-  var approvedCount = mine.filter(function(a) { return _statusRank(a) === 2; }).length;
-  var cancelledCount = mine.filter(function(a) { return _statusRank(a) === 3; }).length;
 
   var taggedToday = activeMine.filter(function(a) { return a.doneToday === today; });
   var eodBucket = (STATE.eod && STATE.eod[currentEditor] && STATE.eod[currentEditor][today]) || null;
@@ -12873,9 +12872,12 @@ function renderEditorHomeView() {
       '<div style="font-size:12.5px;">' + (isPreview ? 'Nothing to preview today.' : 'Enjoy the quiet — or check the <strong>Training</strong> tab.') + '</div>' +
     '</div>';
   } else if (activeMine.length === 0) {
+    var tailBits = [];
+    if (approvedToday.length) tailBits.push(approvedToday.length + ' approved today');
+    if (cancelledLifetime)    tailBits.push(cancelledLifetime + ' cancelled (lifetime)');
     tasksBody = '<div class="eod-empty">' +
       '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">Nothing active right now.</div>' +
-      '<div style="font-size:12.5px;">' + approvedCount + ' approved · ' + cancelledCount + ' cancelled below.</div>' +
+      (tailBits.length ? '<div style="font-size:12.5px;">' + tailBits.join(' · ') + '</div>' : '') +
     '</div>' + mine.map(renderVideoRow).join('');
   } else {
     tasksBody = mine.map(renderVideoRow).join('');
@@ -12990,8 +12992,8 @@ function renderEditorHomeView() {
     (function() {
       var bits = [];
       bits.push(activeMine.length + ' active');
-      if (approvedCount)  bits.push(approvedCount + ' approved');
-      if (cancelledCount) bits.push(cancelledCount + ' cancelled');
+      if (approvedToday.length) bits.push(approvedToday.length + ' approved today');
+      if (cancelledLifetime)    bits.push(cancelledLifetime + ' cancelled lifetime');
       return '<div class="eod-section-label eod-section-label-main">Tasks · ' + bits.join(' · ') + '</div>';
     })() +
     tasksBody +
