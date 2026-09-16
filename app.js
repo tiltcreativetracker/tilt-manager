@@ -5221,7 +5221,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['clHome', 'editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['clHome', 'campaigns', 'editorHome', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -5306,13 +5306,29 @@ function renderTopbar() {
       STATE.tabOrder = order.slice();
     }
   })();
-  // Migration: always place notifications immediately after campaigns (beside it).
+  // Migration: enforce the Campaigns → My Day → Notifications adjacency at the
+  // front of the tab bar. My Day (editorHome) sits directly after Campaigns,
+  // then Notifications right after My Day. This runs on every render so
+  // rebuilds from stored orders (from before My Day existed / before this
+  // adjacency was enforced) settle into the new layout.
   (function() {
-    var nf = order.indexOf('notifications'), cp = order.indexOf('campaigns');
-    if (nf >= 0 && cp >= 0 && nf !== cp + 1) {
-      order.splice(nf, 1);
+    var cp = order.indexOf('campaigns');
+    var eh = order.indexOf('editorHome');
+    if (cp >= 0 && eh >= 0 && eh !== cp + 1) {
+      order.splice(eh, 1);
       cp = order.indexOf('campaigns');
-      order.splice(cp + 1, 0, 'notifications');
+      order.splice(cp + 1, 0, 'editorHome');
+      STATE.tabOrder = order.slice();
+    }
+    // Notifications targets: after editorHome if present, else after campaigns.
+    var nf = order.indexOf('notifications');
+    var anchor = order.indexOf('editorHome');
+    if (anchor < 0) anchor = order.indexOf('campaigns');
+    if (nf >= 0 && anchor >= 0 && nf !== anchor + 1) {
+      order.splice(nf, 1);
+      anchor = order.indexOf('editorHome');
+      if (anchor < 0) anchor = order.indexOf('campaigns');
+      order.splice(anchor + 1, 0, 'notifications');
       STATE.tabOrder = order.slice();
     }
   })();
@@ -13058,10 +13074,17 @@ function renderEditorHomeView() {
       ? '<button class="eod-dismiss-btn" title="Remove from My Day" onclick="App.dismissDayTask(\'' + a.id + '\')">×</button>'
       : '';
 
+    var titleEl = a.campaignId
+      ? '<button class="eod-task-title-link" title="Jump to this video in Campaigns" ' +
+          'onclick="App.jumpToAsset(\'' + escapeHtml(String(a.campaignId)) + '\', \'' + escapeHtml(a.id) + '\')">' +
+          escapeHtml(a.name || 'Untitled') +
+        '</button>'
+      : '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>';
+
     return '<div class="' + rowCls + '">' +
       leadingSlot +
       '<div class="eod-task-body">' +
-        '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>' +
+        titleEl +
         '<div class="eod-task-meta">' + metaBits.join(' · ') + '</div>' +
       '</div>' +
       trailingSlot +
@@ -19363,9 +19386,11 @@ var App = {
 
     // Snapshot "worked on today" assets: manually-ticked active work (doneToday
     // === today) plus anything approved today (auto — a same-day approval
-    // clearly counts as work even without the tick).
+    // clearly counts as work even without the tick). Admin-dismissed rows
+    // (hiddenFromMyDay) are excluded — dismissing = "not part of the day".
     var tagged = STATE.assets.filter(function(a) {
       if (a.editor !== editor) return false;
+      if (a.hiddenFromMyDay) return false;
       var s = a.status || 'Draft';
       if (s === 'Cancelled') return false;
       if (s === 'Approved') return a.dateApproved === today;

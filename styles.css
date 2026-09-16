@@ -2124,6 +2124,13 @@
 .eod-task-check input[type="checkbox"]:disabled { cursor: not-allowed; }
 .eod-task-body { flex: 1 1 auto; min-width: 0; }
 .eod-task-title { font-size: 14px; font-weight: 600; color: var(--text1); }
+.eod-task-title-link { display: inline; background: transparent; border: none; padding: 0; font-family: inherit; font-size: 14px; font-weight: 600; color: var(--text1); cursor: pointer; text-align: left; transition: color 0.12s; }
+.eod-task-title-link:hover { color: var(--accent2); text-decoration: underline; text-underline-offset: 3px; }
+.eod-task-title-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.eod-task-row-done .eod-task-title-link,
+.eod-task-row-terminal .eod-task-title-link { text-decoration: line-through; }
+.eod-task-row-done .eod-task-title-link:hover,
+.eod-task-row-terminal .eod-task-title-link:hover { text-decoration: line-through underline; }
 .eod-task-row-done .eod-task-title { text-decoration: line-through; }
 .eod-task-meta { font-size: 12px; color: var(--text3); margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
