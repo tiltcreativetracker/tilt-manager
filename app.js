@@ -13095,23 +13095,32 @@ function renderEditorHomeView() {
     if (TRAINING_QUEUE_EDITORS.indexOf(currentEditor) < 0) return;
     var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
     if (modules.length === 0) return;
-    // Merge completions across every alias email that resolves to this editor
-    // so a sign-in under sharmaine@ still counts sharm@'s completions.
     var mineDone = _editorTrainingCompletions(currentEditor);
     var moduleGdrive = function(m) { return (m && (m.gdriveUrl || m.loomUrl)) || ''; };
-    var open = modules.filter(function(m) {
-      if (!(m.notionUrl || moduleGdrive(m) || m.footageUrl)) return false;
+
+    // Show every module — completed ones dimmed at the bottom, incomplete on
+    // top. Modules with no content links still render (just no Brief/GDrive
+    // buttons) so nothing silently disappears from Sharm/Patty's view.
+    var incomplete = [], completed = [];
+    modules.forEach(function(m) {
       var c = mineDone[m.id] || {};
-      return !c.completedAt;
+      (c.completedAt ? completed : incomplete).push(m);
     });
-    if (open.length === 0) return;
+    var sorted = incomplete.concat(completed);
+    if (sorted.length === 0) return;
+
+    var labelBits = [incomplete.length + ' open'];
+    if (completed.length) labelBits.push(completed.length + ' completed');
     trainingSection =
-      '<div class="eod-section-label eod-section-label-main">Training queue · ' + open.length + ' open</div>' +
-      open.map(function(m) {
+      '<div class="eod-section-label eod-section-label-main">Training queue · ' + labelBits.join(' · ') + '</div>' +
+      sorted.map(function(m) {
         var c = mineDone[m.id] || {};
-        var pill = c.startedAt
-          ? '<span class="training-status-pill training-status-progress">In progress</span>'
-          : '<span class="training-status-pill training-status-idle">Not started</span>';
+        var isDone = !!c.completedAt;
+        var pill = isDone
+          ? '<span class="training-status-pill training-status-done">✓ Completed</span>'
+          : c.startedAt
+            ? '<span class="training-status-pill training-status-progress">In progress</span>'
+            : '<span class="training-status-pill training-status-idle">Not started</span>';
         var brief = (m.brief || '').trim();
         var briefLine = brief
           ? '<div class="eod-task-meta">' + escapeHtml(brief.length > 140 ? brief.slice(0, 140) + '…' : brief) + '</div>'
@@ -13121,12 +13130,15 @@ function renderEditorHomeView() {
         if (moduleGdrive(m))  linkBits.push('<a href="' + escapeHtml(moduleGdrive(m)) + '" target="_blank" rel="noopener">GDrive ↗</a>');
         if (m.footageUrl)     linkBits.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener">Assets ↗</a>');
         var openInTab = '<button class="eod-training-open" onclick="App.setTab(\'training\')">Open in Training →</button>';
-        return '<div class="auto-card eod-task-row eod-training-row">' +
+        var linksLine = linkBits.length
+          ? '<div class="eod-training-links">' + linkBits.join(' · ') + ' · ' + openInTab + '</div>'
+          : '<div class="eod-training-links">' + openInTab + '</div>';
+        return '<div class="auto-card eod-task-row eod-training-row' + (isDone ? ' eod-task-row-terminal' : '') + '">' +
           '<div class="eod-task-check eod-task-check-terminal">' + pill + '</div>' +
           '<div class="eod-task-body">' +
             '<div class="eod-task-title">' + escapeHtml(m.title || 'Untitled module') + '</div>' +
             briefLine +
-            (linkBits.length ? '<div class="eod-training-links">' + linkBits.join(' · ') + ' · ' + openInTab + '</div>' : '<div class="eod-training-links">' + openInTab + '</div>') +
+            linksLine +
           '</div>' +
         '</div>';
       }).join('');
