@@ -12746,19 +12746,43 @@ function renderEditorHomeView() {
     '</div></div>';
   }
 
-  var mine = STATE.assets.filter(function(a) {
-    if (a.editor !== currentEditor) return false;
+  // All assets assigned to this editor. Terminal statuses (Approved, Cancelled)
+  // stay in the list but sort to the bottom — the day-to-day task list is the
+  // active section at the top, with a visible tail so it's clear what's done
+  // versus dead versus still pending.
+  var mine = STATE.assets.filter(function(a) { return a.editor === currentEditor; });
+
+  function _statusRank(a) {
     var s = a.status || 'Draft';
-    return s !== 'Approved' && s !== 'Cancelled';
-  });
+    if (s === 'Approved')  return 2;
+    if (s === 'Cancelled') return 3;
+    return 1; // active — In Progress, For Review, Needs Revisions, Assigned, Draft, etc.
+  }
   mine.sort(function(a, b) {
+    // Status section first: active (1) → Approved (2) → Cancelled (3).
+    var ar = _statusRank(a), br = _statusRank(b);
+    if (ar !== br) return ar - br;
+    // Within the section, already-ticked-today rows drop to the bottom of
+    // that section (not below the next section).
     var ad = (a.doneToday === today) ? 1 : 0;
     var bd = (b.doneToday === today) ? 1 : 0;
     if (ad !== bd) return ad - bd;
+    // Overdue/soonest ETA first, no-ETA last.
+    var aE = a.estDelivery || '', bE = b.estDelivery || '';
+    if (aE && !bE) return -1;
+    if (!aE && bE) return 1;
+    if (aE && bE && aE !== bE) return aE < bE ? -1 : 1;
+    // Tiebreak: most recently assigned first.
     return (a.assignedAt || '') < (b.assignedAt || '') ? 1 : -1;
   });
 
-  var taggedToday = mine.filter(function(a) { return a.doneToday === today; });
+  // Active-only slice for the EOD "tag" flow — Approved/Cancelled aren't
+  // things you're actively working on today, so they don't feed submissions.
+  var activeMine = mine.filter(function(a) { return _statusRank(a) === 1; });
+  var approvedCount = mine.filter(function(a) { return _statusRank(a) === 2; }).length;
+  var cancelledCount = mine.filter(function(a) { return _statusRank(a) === 3; }).length;
+
+  var taggedToday = activeMine.filter(function(a) { return a.doneToday === today; });
   var eodBucket = (STATE.eod && STATE.eod[currentEditor] && STATE.eod[currentEditor][today]) || null;
   var submitted = !!(eodBucket && eodBucket.submittedAt);
   var interactionsDisabled = submitted || isPreview;
@@ -12766,27 +12790,60 @@ function renderEditorHomeView() {
   function renderVideoRow(a) {
     var camp = findCampaignById(a.campaignId);
     var doneNow = a.doneToday === today;
-    return '<div class="auto-card eod-task-row' + (doneNow ? ' eod-task-row-done' : '') + '">' +
-      '<label class="eod-task-check" title="' + (isPreview ? 'Read-only preview' : 'Mark as worked on today') + '">' +
+    var rank = _statusRank(a);
+    var isTerminal = rank !== 1;
+    var eta = a.estDelivery || '';
+    var isOverdue = !!(eta && eta < today && !isTerminal);
+    var rowCls = 'auto-card eod-task-row';
+    if (doneNow)    rowCls += ' eod-task-row-done';
+    if (isTerminal) rowCls += ' eod-task-row-terminal';
+    if (isOverdue)  rowCls += ' eod-task-row-overdue';
+
+    // Terminal rows don't get an interactive checkbox — a small status pill sits in the slot instead.
+    var leadingSlot;
+    if (isTerminal) {
+      var pillCls = (rank === 2) ? 'eod-task-pill eod-task-pill-approved' : 'eod-task-pill eod-task-pill-cancelled';
+      var pillTxt = (rank === 2) ? '✓ Approved' : '✕ Cancelled';
+      leadingSlot = '<div class="eod-task-check eod-task-check-terminal"><span class="' + pillCls + '">' + pillTxt + '</span></div>';
+    } else {
+      leadingSlot = '<label class="eod-task-check" title="' + (isPreview ? 'Read-only preview' : 'Mark as worked on today') + '">' +
         '<input type="checkbox"' + (doneNow ? ' checked' : '') + (interactionsDisabled ? ' disabled' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')">' +
         '<span>Worked on today</span>' +
-      '</label>' +
+      '</label>';
+    }
+
+    var metaBits = [];
+    metaBits.push(escapeHtml(camp ? camp.name : '—'));
+    metaBits.push(escapeHtml(a.category || '—'));
+    if (!isTerminal) {
+      metaBits.push('<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>');
+    }
+    if (eta) {
+      var etaCls = 'eod-eta-chip' + (isOverdue ? ' eod-eta-chip-overdue' : (eta === today ? ' eod-eta-chip-today' : ''));
+      var etaLabel = isOverdue ? ('Overdue · ' + formatDate(eta)) : ('ETA ' + formatDate(eta));
+      metaBits.push('<span class="' + etaCls + '">' + escapeHtml(etaLabel) + '</span>');
+    }
+
+    return '<div class="' + rowCls + '">' +
+      leadingSlot +
       '<div class="eod-task-body">' +
         '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>' +
-        '<div class="eod-task-meta">' +
-          escapeHtml(camp ? camp.name : '—') + ' · ' + escapeHtml(a.category || '—') + ' · ' +
-          '<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>' +
-        '</div>' +
+        '<div class="eod-task-meta">' + metaBits.join(' · ') + '</div>' +
       '</div>' +
     '</div>';
   }
 
   var tasksBody;
-  if (mine.length === 0) {
+  if (activeMine.length === 0 && mine.length === 0) {
     tasksBody = '<div class="eod-empty">' +
       '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">No videos assigned' + (isPreview ? ' to ' + escapeHtml(currentEditor) : ' to you') + ' right now.</div>' +
       '<div style="font-size:12.5px;">' + (isPreview ? 'Nothing to preview today.' : 'Enjoy the quiet — or check the <strong>Training</strong> tab.') + '</div>' +
     '</div>';
+  } else if (activeMine.length === 0) {
+    tasksBody = '<div class="eod-empty">' +
+      '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">Nothing active right now.</div>' +
+      '<div style="font-size:12.5px;">' + approvedCount + ' approved · ' + cancelledCount + ' cancelled below.</div>' +
+    '</div>' + mine.map(renderVideoRow).join('');
   } else {
     tasksBody = mine.map(renderVideoRow).join('');
   }
@@ -12897,7 +12954,13 @@ function renderEditorHomeView() {
         : 'Tick assets as you work through them. Submit EOD when you\'re done.') +
     '</div>' +
 
-    '<div class="eod-section-label eod-section-label-main">Tasks · ' + mine.length + ' open</div>' +
+    (function() {
+      var bits = [];
+      bits.push(activeMine.length + ' active');
+      if (approvedCount)  bits.push(approvedCount + ' approved');
+      if (cancelledCount) bits.push(cancelledCount + ' cancelled');
+      return '<div class="eod-section-label eod-section-label-main">Tasks · ' + bits.join(' · ') + '</div>';
+    })() +
     tasksBody +
 
     '<div class="eod-block">' +

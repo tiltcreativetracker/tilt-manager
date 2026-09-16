@@ -2127,6 +2127,22 @@
 .eod-task-row-done .eod-task-title { text-decoration: line-through; }
 .eod-task-meta { font-size: 12px; color: var(--text3); margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
+/* Terminal rows (Approved / Cancelled): dim and lock the leading slot. */
+.eod-task-row-terminal { opacity: 0.62; }
+.eod-task-row-terminal .eod-task-title { text-decoration: line-through; }
+.eod-task-check-terminal { padding-top: 2px; }
+.eod-task-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
+.eod-task-pill-approved  { background: var(--green-bg); color: var(--green-text); }
+.eod-task-pill-cancelled { background: var(--gray-bg);  color: var(--gray-text); }
+
+/* ETA chip in the row meta line. Overdue → red; ETA today → amber. */
+.eod-eta-chip { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 4px; font-size: 10.5px; font-weight: 600; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em; background: var(--bg4); color: var(--text2); }
+.eod-eta-chip-today    { background: var(--amber-bg); color: var(--amber-text); }
+.eod-eta-chip-overdue  { background: var(--red-bg);   color: var(--red-text); }
+
+/* Overdue rows get a subtle red rail so they can't be scrolled past. */
+.eod-task-row-overdue { border-left: 3px solid var(--red); padding-left: 15px; }
+
 .eod-empty { padding: 32px; text-align: center; color: var(--text3); border: 1px dashed var(--border2); border-radius: 12px; background: var(--bg2); }
 
 .eod-block { margin-top: 28px; padding: 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; }
