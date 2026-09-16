@@ -12977,6 +12977,10 @@ function renderEditorHomeView() {
   var submitted = !!(eodBucket && eodBucket.submittedAt);
   var interactionsDisabled = submitted || isPreview;
 
+  // Admin dismiss button appears on active rows for real-role admins in both
+  // own view and preview mode. Approved-today rows aren't dismissable — that
+  // work is already done.
+  var canDismiss = ((Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) === 'admin');
   function renderVideoRow(a) {
     var camp = findCampaignById(a.campaignId);
     var doneNow = a.doneToday === today;
@@ -13013,12 +13017,17 @@ function renderEditorHomeView() {
       metaBits.push('<span class="' + etaCls + '">' + escapeHtml(etaLabel) + '</span>');
     }
 
+    var trailingSlot = (canDismiss && !isApprovedToday)
+      ? '<button class="eod-dismiss-btn" title="Dismiss task (Cancel asset)" onclick="App.dismissDayTask(\'' + a.id + '\')">×</button>'
+      : '';
+
     return '<div class="' + rowCls + '">' +
       leadingSlot +
       '<div class="eod-task-body">' +
         '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>' +
         '<div class="eod-task-meta">' + metaBits.join(' · ') + '</div>' +
       '</div>' +
+      trailingSlot +
     '</div>';
   }
 
@@ -19123,6 +19132,30 @@ var App = {
     a.doneToday = (a.doneToday === today) ? '' : today;
     saveState();
     render();
+  },
+
+  // Admin-only: dismiss a task from an editor's Home by cancelling the asset.
+  // Works in both the admin's own view and while previewing another editor —
+  // the point is that Elsa (PM) can pull work off an editor's plate without
+  // waiting for them to do it themselves. Sets status = 'Cancelled', which
+  // every other view already handles.
+  dismissDayTask: function(id) {
+    var realRole = (Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) || null;
+    if (realRole !== 'admin') { toast('Admin only', 'error'); return; }
+    var a = findAssetById(id);
+    if (!a) return;
+    if (a.status === 'Cancelled') return;
+    var owner = a.editor ? (a.editor + '’s') : 'this editor’s';
+    if (!confirm('Dismiss “' + (a.name || 'Untitled') + '” from ' + owner + ' day?\n\nMarks the asset as Cancelled (visible in Campaigns / Board).')) return;
+    var prev = a.status || 'Draft';
+    a.status = 'Cancelled';
+    a.dragLocked = true;
+    if (typeof logAction === 'function') {
+      logAction('updated', 'Asset "' + (a.name || '') + '" dismissed from My Day (' + prev + ' → Cancelled) by ' + ((Auth.user && Auth.user.email) || 'unknown'));
+    }
+    saveState();
+    render();
+    toast('Dismissed', 'success');
   },
 
   // addAssetDecision: appends a note to a.decisions[]. Editor jots creative choices
