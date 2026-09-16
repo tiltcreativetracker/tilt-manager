@@ -2476,7 +2476,7 @@ var STATE = {
   // sellers / products: growing dropdowns for the Clips tab tag panel. Auto-populate
   // when a new value is typed while tagging (see App.setBrollTag). Managed in Config.
   // Kept in the main snapshot so every teammate shares the same list.
-  sellers: [],
+  sellers: ['Clearance Guys'],
   products: [],
   // broll: mirror of the state/app/broll subcollection. Populated by Fb.subscribeBroll,
   // NOT saved back through the main snapshot (docs live in the subcollection). Each
