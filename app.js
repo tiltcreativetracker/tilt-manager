@@ -12865,6 +12865,26 @@ function _editorPrimaryEmail(name) {
   if (!aliases.length) return '';
   return aliases[0] + '@' + EDITOR_EMAIL_DOMAIN;
 }
+
+// Merge every trainingCompletions bucket whose key resolves to this editor
+// (via emailToEditor) — so Sharm's completions land whether she signs in as
+// sharm@tilt.app or sharmaine@tilt.app. Later writes win on module-id
+// collision, which matches "most-recent record is truth".
+function _editorTrainingCompletions(name) {
+  var out = {};
+  if (!name) return out;
+  var all = (STATE && STATE.trainingCompletions) || {};
+  Object.keys(all).forEach(function(email) {
+    if (typeof emailToEditor !== 'function' || emailToEditor(email) !== name) return;
+    var bucket = all[email] || {};
+    Object.keys(bucket).forEach(function(mid) { out[mid] = bucket[mid]; });
+  });
+  return out;
+}
+
+// Editors who should see the Training queue on their Home. Senior editors
+// (Zidni, Elsa) are excluded — the queue is aimed at editors currently ramping.
+var TRAINING_QUEUE_EDITORS = ['Sharm', 'Patty'];
 function _eodActiveEditor(authEditor) {
   if (!_eodPreviewEditor) return authEditor || '';
   if (_eodPreviewEditor === authEditor) return authEditor;
@@ -12949,7 +12969,10 @@ function renderEditorHomeView() {
   });
   var mine = activeMine;
 
-  var taggedToday = activeMine.filter(function(a) { return a.doneToday === today; });
+  // "Worked on today" for the EOD panel = manually-ticked active + auto-populated
+  // today's approvals. Approved-today counts as work even without the tick.
+  var manuallyTagged = activeMine.filter(function(a) { return a.doneToday === today; });
+  var taggedToday = manuallyTagged.concat(approvedToday);
   var eodBucket = (STATE.eod && STATE.eod[currentEditor] && STATE.eod[currentEditor][today]) || null;
   var submitted = !!(eodBucket && eodBucket.submittedAt);
   var interactionsDisabled = submitted || isPreview;
@@ -12957,17 +12980,33 @@ function renderEditorHomeView() {
   function renderVideoRow(a) {
     var camp = findCampaignById(a.campaignId);
     var doneNow = a.doneToday === today;
+    var isApprovedToday = _statusRank(a) === 2;
     var eta = a.estDelivery || '';
-    var isOverdue = !!(eta && eta < today);
+    var isOverdue = !!(eta && eta < today && !isApprovedToday);
     var rowCls = 'auto-card eod-task-row';
-    if (doneNow)   rowCls += ' eod-task-row-done';
-    if (isOverdue) rowCls += ' eod-task-row-overdue';
+    if (doneNow)         rowCls += ' eod-task-row-done';
+    if (isApprovedToday) rowCls += ' eod-task-row-terminal';
+    if (isOverdue)       rowCls += ' eod-task-row-overdue';
+
+    var leadingSlot;
+    if (isApprovedToday) {
+      leadingSlot = '<div class="eod-task-check eod-task-check-terminal">' +
+        '<span class="eod-task-pill eod-task-pill-approved">✓ Approved today</span>' +
+      '</div>';
+    } else {
+      leadingSlot = '<label class="eod-task-check" title="' + (isPreview ? 'Read-only preview' : 'Mark as worked on today') + '">' +
+        '<input type="checkbox"' + (doneNow ? ' checked' : '') + (interactionsDisabled ? ' disabled' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')">' +
+        '<span>Worked on today</span>' +
+      '</label>';
+    }
 
     var metaBits = [
       escapeHtml(camp ? camp.name : '—'),
-      escapeHtml(a.category || '—'),
-      '<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>'
+      escapeHtml(a.category || '—')
     ];
+    if (!isApprovedToday) {
+      metaBits.push('<span class="qc-badge qc-' + (a.status || 'Draft').replace(/ /g, '_') + '">' + escapeHtml(a.status || 'Draft') + '</span>');
+    }
     if (eta) {
       var etaCls = 'eod-eta-chip' + (isOverdue ? ' eod-eta-chip-overdue' : (eta === today ? ' eod-eta-chip-today' : ''));
       var etaLabel = isOverdue ? ('Overdue · ' + formatDate(eta)) : ('ETA ' + formatDate(eta));
@@ -12975,10 +13014,7 @@ function renderEditorHomeView() {
     }
 
     return '<div class="' + rowCls + '">' +
-      '<label class="eod-task-check" title="' + (isPreview ? 'Read-only preview' : 'Mark as worked on today') + '">' +
-        '<input type="checkbox"' + (doneNow ? ' checked' : '') + (interactionsDisabled ? ' disabled' : '') + ' onchange="App.toggleAssetDoneToday(\'' + a.id + '\')">' +
-        '<span>Worked on today</span>' +
-      '</label>' +
+      leadingSlot +
       '<div class="eod-task-body">' +
         '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>' +
         '<div class="eod-task-meta">' + metaBits.join(' · ') + '</div>' +
@@ -12987,25 +13023,29 @@ function renderEditorHomeView() {
   }
 
   var tasksBody;
-  if (activeMine.length === 0) {
+  var displayedTasks = activeMine.concat(approvedToday);
+  if (displayedTasks.length === 0) {
     tasksBody = '<div class="eod-empty">' +
       '<div style="font-size:14px;color:var(--text1);margin-bottom:6px;">Nothing active' + (isPreview ? ' for ' + escapeHtml(currentEditor) : ' for you') + ' right now.</div>' +
       '<div style="font-size:12.5px;">' + (isPreview ? 'Nothing to preview today.' : 'Enjoy the quiet — or pick a Training module below.') + '</div>' +
     '</div>';
   } else {
-    tasksBody = activeMine.map(renderVideoRow).join('');
+    tasksBody = displayedTasks.map(renderVideoRow).join('');
   }
 
-  // Training queue for this editor. Modules that (a) have working content and
-  // (b) haven't been completed by this editor. Rendered as a compact section
-  // below Tasks so downtime always has a next thing to do. Read-only when
-  // previewing another editor.
+  // Training queue for this editor. Skipped entirely for senior editors
+  // (TRAINING_QUEUE_EDITORS controls who sees it). Modules that (a) have
+  // working content and (b) haven't been completed by this editor render as a
+  // compact section below Tasks so downtime always has a next thing to do.
+  // Read-only when previewing another editor.
   var trainingSection = '';
   (function() {
+    if (TRAINING_QUEUE_EDITORS.indexOf(currentEditor) < 0) return;
     var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
     if (modules.length === 0) return;
-    var email = _editorPrimaryEmail(currentEditor);
-    var mineDone = (STATE.trainingCompletions && email && STATE.trainingCompletions[email]) || {};
+    // Merge completions across every alias email that resolves to this editor
+    // so a sign-in under sharmaine@ still counts sharm@'s completions.
+    var mineDone = _editorTrainingCompletions(currentEditor);
     var moduleGdrive = function(m) { return (m && (m.gdriveUrl || m.loomUrl)) || ''; };
     var open = modules.filter(function(m) {
       if (!(m.notionUrl || moduleGdrive(m) || m.footageUrl)) return false;
@@ -13146,7 +13186,11 @@ function renderEditorHomeView() {
         : 'Tick assets as you work through them. Submit EOD when you\'re done.') +
     '</div>' +
 
-    '<div class="eod-section-label eod-section-label-main">Editing tasks · ' + activeMine.length + ' active</div>' +
+    (function() {
+      var bits = [activeMine.length + ' active'];
+      if (approvedToday.length) bits.push(approvedToday.length + ' approved today');
+      return '<div class="eod-section-label eod-section-label-main">Editing tasks · ' + bits.join(' · ') + '</div>';
+    })() +
     tasksBody +
     trainingSection +
 
@@ -19167,11 +19211,14 @@ var App = {
     var bucket = (STATE.eod && STATE.eod[editor] && STATE.eod[editor][today]) || null;
     if (bucket && bucket.submittedAt) { toast('Already submitted', 'info'); return; }
 
-    // Snapshot tagged assets: this editor's non-approved/-cancelled work where doneToday === today.
+    // Snapshot "worked on today" assets: manually-ticked active work (doneToday
+    // === today) plus anything approved today (auto — a same-day approval
+    // clearly counts as work even without the tick).
     var tagged = STATE.assets.filter(function(a) {
       if (a.editor !== editor) return false;
       var s = a.status || 'Draft';
-      if (s === 'Approved' || s === 'Cancelled') return false;
+      if (s === 'Cancelled') return false;
+      if (s === 'Approved') return a.dateApproved === today;
       return a.doneToday === today;
     });
     var otherList = (bucket && Array.isArray(bucket.other)) ? bucket.other.slice() : [];
