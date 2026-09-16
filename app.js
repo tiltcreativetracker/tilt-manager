@@ -12532,7 +12532,7 @@ function renderTrainingView() {
                   'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
                 '<button type="button" class="url-edit-pencil" title="Clear submission link" ' +
                   'onclick="App.trainingSetSubmission(\'' + m.id + '\', \'\')">×</button>' +
-                '<input type="url" class="inline-edit-input inline-edit-url" style="display:none;flex:1 1 220px;min-width:180px;" ' +
+                '<input type="url" class="form-input" style="display:none;flex:1 1 240px;min-width:180px;max-width:420px;padding:6px 10px;font-size:13px;" ' +
                   'placeholder="https://frame.io/... or Drive link" value="' + escapeHtml(submissionUrl) + '" ' +
                   'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(submissionUrl) + '\';this.blur();}" ' +
                   'onblur="App.trainingSetSubmission(\'' + m.id + '\', this.value)">' +
@@ -12541,7 +12541,7 @@ function renderTrainingView() {
             submissionRow =
               '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
                 '<span style="font-size:12px;color:var(--text3);">Submission:</span>' +
-                '<input type="url" class="inline-edit-input inline-edit-url" style="flex:1 1 220px;min-width:180px;" ' +
+                '<input type="url" class="form-input" style="flex:1 1 240px;min-width:180px;max-width:420px;padding:6px 10px;font-size:13px;" ' +
                   'placeholder="Paste Frame.io / Drive link" ' +
                   'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
                   'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', this.value)">' +
@@ -12551,7 +12551,6 @@ function renderTrainingView() {
             '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
               '<div style="flex:1 1 320px;min-width:280px;">' +
                 '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + ' &nbsp; ' + badge + '</div>' +
-                '<div style="font-size:12px;color:var(--text2);margin-top:6px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
                 '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
                 submissionRow +
                 (embeds ? '<div class="training-embeds">' + embeds + '</div>' : '') +
@@ -12585,7 +12584,7 @@ function renderTrainingView() {
       for (var i = 0; i < aliases.length; i++) {
         var email = aliases[i] + '@tilt.app';
         var c = (completions[email] || {})[moduleId];
-        if (c && (c.startedAt || c.completedAt)) return c;
+        if (c && (c.startedAt || c.completedAt || c.submissionUrl)) return c;
       }
       return {};
     }
@@ -12604,8 +12603,12 @@ function renderTrainingView() {
             if (c.completedAt) { mark = '✓'; color = '#22c55e'; }
             else if (c.startedAt) { mark = '…'; color = '#f59e0b'; }
             else { mark = '—'; color = 'var(--text3)'; }
+            var subUrl = (c.submissionUrl || '').trim();
+            var subLink = subUrl
+              ? ' <a href="' + escapeHtml(subUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;" title="Open ' + escapeHtml(ed) + '\'s submission">↗</a>'
+              : '';
             return '<span style="color:var(--text2);">' + escapeHtml(ed) + '</span> ' +
-                   '<span style="color:' + color + ';font-weight:700;">' + mark + '</span>';
+                   '<span style="color:' + color + ';font-weight:700;">' + mark + '</span>' + subLink;
           }).join(' &nbsp;·&nbsp; ');
           var statusStrip = '<div style="margin-top:6px;font-size:14px;">' + statusBits + '</div>';
 
@@ -18619,9 +18622,11 @@ var App = {
     if (!email) return;
     STATE.trainingCompletions = STATE.trainingCompletions || {};
     STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
+    var existing = STATE.trainingCompletions[email][moduleId] || {};
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: (new Date()).toISOString(),
-      completedAt: ''
+      completedAt: '',
+      submissionUrl: existing.submissionUrl || ''
     };
     saveState();
     render();
@@ -18634,7 +18639,8 @@ var App = {
     var existing = STATE.trainingCompletions[email][moduleId] || {};
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || (new Date()).toISOString(),
-      completedAt: (new Date()).toISOString()
+      completedAt: (new Date()).toISOString(),
+      submissionUrl: existing.submissionUrl || ''
     };
     saveState();
     render();
@@ -18647,10 +18653,69 @@ var App = {
     var existing = STATE.trainingCompletions[email][moduleId] || {};
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || '',
-      completedAt: ''
+      completedAt: '',
+      submissionUrl: existing.submissionUrl || ''
     };
     saveState();
     render();
+  },
+
+  // Save (or clear) the current user's submission link on a training module.
+  // Mirrors setAssetFinalVideo: trim, validate as URL, store, log, toast. A
+  // valid non-empty URL also auto-starts the module (sets startedAt if unset)
+  // and posts a heads-up reply into the editor's daily Slack thread — same
+  // route sendTrainingToEditor uses to deliver the brief. No thread today =
+  // silent skip (logged) so we don't fall back to the main channel.
+  trainingSetSubmission: function(moduleId, newUrl) {
+    var email = Auth && Auth.user && Auth.user.email;
+    if (!email) return;
+    var trimmed = String(newUrl || '').trim();
+    if (trimmed && !extractSingleUrl(trimmed)) {
+      if (typeof toast === 'function') toast('Submission must be a URL (or leave empty)', 'error');
+      render();
+      return;
+    }
+    STATE.trainingCompletions = STATE.trainingCompletions || {};
+    STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
+    var existing = STATE.trainingCompletions[email][moduleId] || {};
+    var wasSet = !!(existing.submissionUrl || '').trim();
+    if ((existing.submissionUrl || '') === trimmed) { render(); return; }
+    STATE.trainingCompletions[email][moduleId] = {
+      startedAt: existing.startedAt || (trimmed ? (new Date()).toISOString() : ''),
+      completedAt: existing.completedAt || '',
+      submissionUrl: trimmed
+    };
+    var module = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    var moduleTitle = (module && module.title) || 'training module';
+    logAction('updated', 'Training "' + moduleTitle + '" submission ' + (trimmed ? (wasSet ? 'updated' : 'submitted') : 'cleared') + ' by ' + email);
+    saveState();
+    render();
+    if (typeof toast === 'function') {
+      toast(trimmed ? (wasSet ? 'Submission updated' : 'Submission saved') : 'Submission cleared', 'success');
+    }
+
+    // Notify: post the submission into the editor's daily thread so Elsa sees
+    // it without checking the Training tab. Only on new/updated links, never
+    // on clears. If no thread is set for today, log and skip — a webhook
+    // fallback would broadcast to the main channel.
+    if (!trimmed) return;
+    var editor = (typeof emailToEditor === 'function') ? emailToEditor(email) : null;
+    if (!editor) return;
+    var thread = (typeof resolveDailyThreadForEditor === 'function') ? resolveDailyThreadForEditor(editor) : null;
+    if (!thread) {
+      logAction('skipped-notify', 'Training submission ping skipped — no daily thread for ' + editor);
+      return;
+    }
+    var msg = '🎬 *' + editor + '* submitted training: *' + moduleTitle + '*\n<' + trimmed + '|Watch submission ↗>';
+    postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+      if (r && r.ok) {
+        logAction('notified', 'Training submission ping posted for ' + editor + ' — ' + moduleTitle);
+      } else {
+        logAction('skipped-notify', 'Training submission ping failed for ' + editor + ': ' + ((r && r.body) || 'unknown'));
+      }
+    }).catch(function(err) {
+      logAction('skipped-notify', 'Training submission ping errored for ' + editor + ': ' + ((err && err.message) || 'unknown'));
+    });
   },
   trainingAddModule: function() {
     if (!roleAtLeast('admin')) { if (typeof toast === 'function') toast('Admin only', 'error'); return; }
