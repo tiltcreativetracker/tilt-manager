@@ -12951,7 +12951,10 @@ function renderEditorHomeView() {
   // My Day is a *today* view. Active work shows always; also surface today's
   // approvals (a.dateApproved === today) so an editor's wins for the day are
   // visible — same list, terminal history is not.
-  var allEditorAssets = STATE.assets.filter(function(a) { return a.editor === currentEditor; });
+  //
+  // Admin-dismissed rows (a.hiddenFromMyDay === true) are filtered out. Those
+  // stay live in Campaigns / Board — only Home hides them.
+  var allEditorAssets = STATE.assets.filter(function(a) { return a.editor === currentEditor && !a.hiddenFromMyDay; });
   var activeMine    = allEditorAssets.filter(function(a) { return _statusRank(a) === 1; });
   var approvedToday = allEditorAssets.filter(function(a) { return _statusRank(a) === 2 && a.dateApproved === today; });
   activeMine.sort(function(a, b) {
@@ -13017,8 +13020,8 @@ function renderEditorHomeView() {
       metaBits.push('<span class="' + etaCls + '">' + escapeHtml(etaLabel) + '</span>');
     }
 
-    var trailingSlot = (canDismiss && !isApprovedToday)
-      ? '<button class="eod-dismiss-btn" title="Dismiss task (Cancel asset)" onclick="App.dismissDayTask(\'' + a.id + '\')">×</button>'
+    var trailingSlot = canDismiss
+      ? '<button class="eod-dismiss-btn" title="Remove from My Day" onclick="App.dismissDayTask(\'' + a.id + '\')">×</button>'
       : '';
 
     return '<div class="' + rowCls + '">' +
@@ -19134,28 +19137,26 @@ var App = {
     render();
   },
 
-  // Admin-only: dismiss a task from an editor's Home by cancelling the asset.
-  // Works in both the admin's own view and while previewing another editor —
-  // the point is that Elsa (PM) can pull work off an editor's plate without
-  // waiting for them to do it themselves. Sets status = 'Cancelled', which
-  // every other view already handles.
+  // Admin-only: dismiss a task from an editor's My Day. Soft-hide only — sets
+  // a `hiddenFromMyDay` flag on the asset so it disappears from the Home view
+  // (both active and approved-today) without changing status. Every other
+  // view (Campaigns, Board, Reporting) still shows the asset in its true
+  // state, so this is non-destructive.
   dismissDayTask: function(id) {
     var realRole = (Auth && Auth.user && (Auth.user._realRole || Auth.user.role)) || null;
     if (realRole !== 'admin') { toast('Admin only', 'error'); return; }
     var a = findAssetById(id);
     if (!a) return;
-    if (a.status === 'Cancelled') return;
+    if (a.hiddenFromMyDay) return;
     var owner = a.editor ? (a.editor + '’s') : 'this editor’s';
-    if (!confirm('Dismiss “' + (a.name || 'Untitled') + '” from ' + owner + ' day?\n\nMarks the asset as Cancelled (visible in Campaigns / Board).')) return;
-    var prev = a.status || 'Draft';
-    a.status = 'Cancelled';
-    a.dragLocked = true;
+    if (!confirm('Remove “' + (a.name || 'Untitled') + '” from ' + owner + ' My Day?\n\nThe asset stays in Campaigns / Board at its current status — this only hides it from Home.')) return;
+    a.hiddenFromMyDay = true;
     if (typeof logAction === 'function') {
-      logAction('updated', 'Asset "' + (a.name || '') + '" dismissed from My Day (' + prev + ' → Cancelled) by ' + ((Auth.user && Auth.user.email) || 'unknown'));
+      logAction('updated', 'Asset "' + (a.name || '') + '" hidden from My Day by ' + ((Auth.user && Auth.user.email) || 'unknown'));
     }
     saveState();
     render();
-    toast('Dismissed', 'success');
+    toast('Removed from My Day', 'success');
   },
 
   // addAssetDecision: appends a note to a.decisions[]. Editor jots creative choices
