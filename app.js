@@ -16863,19 +16863,32 @@ function render() {
         var aid = targetAsset.id;
         var edLabel = targetAsset.editor ? escapeHtml(targetAsset.editor) : 'editor';
         var hasVideo = !!extractSingleUrl(targetAsset.finalVideo);
-        var sendTitle = !targetAsset.editor
+        var targetCampForRow = findCampaignById(targetAsset.campaignId);
+        var isIntlRow = !!(targetCampForRow && INTL_COUNTRIES.indexOf(targetCampForRow.country) >= 0);
+        var sendVerb = hasVideo ? 'the video' : 'a video task';
+        var sendEdTitle = !targetAsset.editor
           ? 'No editor assigned to this video'
-          : !hasVideo
-            ? 'No final video link on this row'
-            : 'Post the video into ' + edLabel + '\'s daily Slack thread';
-        var sendDisabled = (!targetAsset.editor || !hasVideo) ? ' disabled' : '';
+          : 'Post ' + sendVerb + ' into ' + edLabel + '\'s daily Slack thread';
+        var sendEdDisabled = !targetAsset.editor ? ' disabled' : '';
+        var sendIntlTitle = 'Post ' + sendVerb + ' into the International daily thread';
+        var sendBothTitle = !targetAsset.editor
+          ? 'No editor assigned to this video'
+          : 'Post ' + sendVerb + ' into both ' + edLabel + '\u2019s thread and the International thread';
+        var sendBothDisabled = !targetAsset.editor ? ' disabled' : '';
+        var actionButtons =
+          '<button class="subcamp-context-menu-item"' + sendEdDisabled + ' title="' + sendEdTitle + '" onclick="App.sendVideoToEditorThread(\'' + aid + '\');">\u{1F4E8} Send video to ' + edLabel + '\u2019s thread</button>';
+        if (isIntlRow) {
+          actionButtons +=
+            '<button class="subcamp-context-menu-item" title="' + sendIntlTitle + '" onclick="App.sendVideoToIntlThread(\'' + aid + '\');">\u{1F30D} Send video to International thread</button>' +
+            '<button class="subcamp-context-menu-item"' + sendBothDisabled + ' title="' + sendBothTitle + '" onclick="App.sendVideoToBothThreads(\'' + aid + '\');">\u{1F4E8}\u{1F30D} Send video to both threads</button>';
+        }
         menuLayer.innerHTML =
           '<div class="subcamp-context-menu row-actions-menu" style="left:' + RowActionsState.x + 'px; top:' + RowActionsState.y + 'px;">' +
             '<div class="subcamp-context-menu-header">' + escapeHtml(targetAsset.name || 'Video') + '</div>' +
             '<button class="subcamp-context-menu-item" onclick="App.editAssetById(\'' + aid + '\'); App.hideRowActionsMenu();">\u270E Edit</button>' +
             '<button class="subcamp-context-menu-item" onclick="App.duplicateAsset(\'' + aid + '\'); App.hideRowActionsMenu();">\u29C9 Duplicate</button>' +
             '<button class="subcamp-context-menu-item" onclick="App.openAdReport(\'' + aid + '\'); App.hideRowActionsMenu();">\u{1F4CA} Report</button>' +
-            '<button class="subcamp-context-menu-item"' + sendDisabled + ' title="' + sendTitle + '" onclick="App.sendVideoToEditorThread(\'' + aid + '\');">\u{1F4E8} Send video to ' + edLabel + '\u2019s thread</button>' +
+            actionButtons +
             (roleAtLeast('admin') ? '<button class="subcamp-context-menu-item subcamp-context-menu-destructive" onclick="App.deleteAsset(\'' + aid + '\'); App.hideRowActionsMenu();">\u{1F5D1} Delete</button>' : '') +
           '</div>';
       } else {
@@ -16967,6 +16980,35 @@ function restoreScrollPositions(snap) {
       if (s.left) el.scrollLeft = s.left;
     });
   } catch (e) { /* no-op */ }
+}
+
+// Body of a manual video/video-task push (no leading mention). When the asset
+// has a final video link, we surface it; otherwise the message reads as a task
+// pointer with just the tracker deep-link. Callers prepend their own header
+// (editor mention for the editor thread, country+flag for the intl thread).
+function buildManualVideoPushBody(a) {
+  var camp = findCampaignById(a.campaignId);
+  var base = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
+  var trackerLink = (base && camp)
+    ? ' · <' + base + '#campaign=' + camp.id + '&asset=' + a.id + '|Tracker ↗>'
+    : '';
+  var name = a.name || 'Video';
+  var videoUrl = extractSingleUrl(a.finalVideo);
+  if (videoUrl) {
+    return 'here’s the video: <' + videoUrl + '|' + name + '>' + trackerLink;
+  }
+  return 'new video task: *' + name + '*' + trackerLink;
+}
+
+// Push a manual video-post into the sentNotifications ring so it appears on
+// the Notifications tab. Keeps the cap logic (max 20) in one spot.
+function recordManualVideoPush(editor, msg, reason) {
+  STATE.sentNotifications = STATE.sentNotifications || [];
+  STATE.sentNotifications.unshift({
+    time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
+    reason: reason, body: msg
+  });
+  if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
 }
 
 // ===================== EVENTS =====================
@@ -20119,10 +20161,10 @@ var App = {
     render();
   },
 
-  // Post the row's final video into the assigned editor's daily Slack thread.
-  // Refuses when no editor is set, no video link is set, or no daily thread is
-  // configured for today (webhook fallback would leak to the main channel).
-  // Message intentionally simple: mentions the editor and links the video +
+  // Post the row's final video (or a video task, when no link is set yet) into
+  // the assigned editor's daily Slack thread. Refuses when no editor is set or
+  // no daily thread is configured for today (webhook fallback would leak to
+  // the main channel). Message mentions the editor and links the video +
   // Tracker deep-link. Recorded in sentNotifications so it shows up in the
   // Notifications tab like every other outbound message.
   sendVideoToEditorThread: function(assetId) {
@@ -20130,42 +20172,89 @@ var App = {
     if (!a) { toast('Video not found', 'error'); return; }
     var editor = a.editor || '';
     if (!editor) { toast('No editor assigned — set one first', 'error'); return; }
-    var videoUrl = extractSingleUrl(a.finalVideo);
-    if (!videoUrl) { toast('No final video link on this row', 'error'); return; }
     var thread = resolveDailyThreadForEditor(editor);
     if (!thread) {
       toast('No daily thread set for ' + editor + ' — set it in Automations', 'error');
       return;
     }
-    var camp = findCampaignById(a.campaignId);
-    var base = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
-    var trackerLink = (base && camp)
-      ? ' · <' + base + '#campaign=' + camp.id + '&asset=' + a.id + '|Tracker ↗>'
-      : '';
-    var msg = mentionEditor(editor) + ' — here’s the video: <' + videoUrl + '|' + (a.name || 'Video') + '>' + trackerLink;
+    var msg = mentionEditor(editor) + ' — ' + buildManualVideoPushBody(a);
+    var hasVideo = !!extractSingleUrl(a.finalVideo);
+    var label = hasVideo ? 'video' : 'video task';
     App.hideRowActionsMenu();
-    toast('Sending video to ' + editor + '’s thread…', '');
+    toast('Sending ' + label + ' to ' + editor + '’s thread…', '');
     postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
       if (r && r.ok) {
-        STATE.sentNotifications = STATE.sentNotifications || [];
-        STATE.sentNotifications.unshift({
-          time: timeStamp(), sentAt: Date.now(), editor: editor, items: [],
-          reason: 'manual-video-push', body: msg
-        });
-        if (STATE.sentNotifications.length > 20) STATE.sentNotifications.pop();
-        logAction('notified', '"' + (a.name || 'video') + '" manually posted to ' + editor + '’s thread');
+        recordManualVideoPush(editor, msg, 'manual-video-push');
+        logAction('notified', '"' + (a.name || label) + '" manually posted to ' + editor + '’s thread');
         toast('✓ Sent to ' + editor + '’s thread', 'success');
         render();
       } else {
         var reason = (r && r.body) || 'unknown error';
-        logAction('deleted', 'Manual video push failed for ' + editor + ': ' + reason);
+        logAction('deleted', 'Manual ' + label + ' push failed for ' + editor + ': ' + reason);
         toast('Post failed: ' + reason, 'error');
       }
     }).catch(function(err) {
       var reason = (err && (err.message || err.code)) || 'network error';
-      logAction('deleted', 'Manual video push failed for ' + editor + ': ' + reason);
+      logAction('deleted', 'Manual ' + label + ' push failed for ' + editor + ': ' + reason);
       toast('Post failed: ' + reason, 'error');
     });
+  },
+
+  // Post the row's video (or video task) into the shared International daily
+  // thread. Only meaningful for IT/ES/US campaigns; the menu only surfaces the
+  // action there. Auto-creates today's intl thread if one isn't set yet
+  // (ensureIntlThreadForToday). Editor mention is included when set so the
+  // right person is pinged inside the intl channel.
+  sendVideoToIntlThread: function(assetId) {
+    var a = findAssetById(assetId);
+    if (!a) { toast('Video not found', 'error'); return; }
+    var camp = findCampaignById(a.campaignId);
+    if (!camp || INTL_COUNTRIES.indexOf(camp.country) < 0) {
+      toast('This row isn’t an international campaign', 'error');
+      return;
+    }
+    var editor = a.editor || '';
+    var hasVideo = !!extractSingleUrl(a.finalVideo);
+    var label = hasVideo ? 'video' : 'video task';
+    App.hideRowActionsMenu();
+    toast('Sending ' + label + ' to International thread…', '');
+    ensureIntlThreadForToday().then(function(thread) {
+      if (!thread) {
+        toast('No International thread set for today — set it in Automations', 'error');
+        return;
+      }
+      var flag = INTL_COUNTRY_FLAGS[camp.country] || '';
+      var header = flag + ' ' + camp.country + (editor ? ' · ' + mentionEditor(editor) : '');
+      var msg = header + ' — ' + buildManualVideoPushBody(a);
+      postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+        if (r && r.ok) {
+          recordManualVideoPush(editor || 'International', msg, 'manual-video-push-intl');
+          logAction('notified', '"' + (a.name || label) + '" manually posted to International thread');
+          toast('✓ Sent to International thread', 'success');
+          render();
+        } else {
+          var reason = (r && r.body) || 'unknown error';
+          logAction('deleted', 'Manual ' + label + ' push failed for International: ' + reason);
+          toast('Post failed: ' + reason, 'error');
+        }
+      }).catch(function(err) {
+        var reason = (err && (err.message || err.code)) || 'network error';
+        logAction('deleted', 'Manual ' + label + ' push failed for International: ' + reason);
+        toast('Post failed: ' + reason, 'error');
+      });
+    });
+  },
+
+  // Send to both the editor's daily thread AND the shared International thread.
+  // Editor-thread and intl-thread posts run independently; a failure on one
+  // doesn't block the other and each surfaces its own toast so the user sees
+  // which side landed. Requires an editor (mirrors the editor-thread path).
+  sendVideoToBothThreads: function(assetId) {
+    var a = findAssetById(assetId);
+    if (!a) { toast('Video not found', 'error'); return; }
+    if (!a.editor) { toast('No editor assigned — set one first', 'error'); return; }
+    App.sendVideoToEditorThread(assetId);
+    App.sendVideoToIntlThread(assetId);
   },
 
   // Build a deep link to a specific campaign and copy it to clipboard. Format uses URL
