@@ -477,7 +477,6 @@ var Fb = {
       editorStatsGroupCollapsed: STATE.editorStatsGroupCollapsed || {},
       gradingVideosCollapsed: !!STATE.gradingVideosCollapsed,
       editingStyleNotionUrl: STATE.editingStyleNotionUrl || '',
-      strategyNotionUrl: STATE.strategyNotionUrl || '',
       trainingModules: Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [],
       trainingCompletions: (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {},
       weeklyLog: (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {},
@@ -2464,7 +2463,6 @@ var STATE = {
   // Editing Style tab: public Notion page URL to embed. Shared across teammates
   // (in the snapshot) so everyone sees the same reference doc.
   editingStyleNotionUrl: '',
-  strategyNotionUrl: '',
   // Training library — item #12. Modules are admin-authored; completions are
   // per-editor and stored inline in the snapshot (small collection, fits fine).
   trainingModules: [],
@@ -5209,10 +5207,8 @@ var TAB_DEFS = {
   log:              { label: 'Weekly Log' },
   grading:          { label: 'Grading' },
   editingStyle:     { label: 'Editing Style' },
-  strategy:         { label: 'Strategy' },
   editorHome:       { label: 'My Day' },
   training:         { label: 'Training' },
-  clHome:           { label: 'CL Home' },
   notifications:    { label: 'Notifications', badge: true },
   automations:      { label: 'Automations' },
   reporting:        { label: 'Reporting' },
@@ -5221,7 +5217,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['clHome', 'campaigns', 'editorHome', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'editorHome', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -5234,26 +5230,25 @@ var DEFAULT_TAB_ORDER = ['clHome', 'campaigns', 'editorHome', 'notifications', '
 // so only Zidni/Sharm/Patty (own view) or the viewer list (Elsa, peer picker)
 // actually see the tab in the nav. Viewers land here on first sign-in — a broad
 // read-mostly set that excludes internal-ops tabs and the Strava page.
-var ALL_TABS = ['campaigns', 'today', 'catReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'strategy', 'notifications', 'automations', 'reporting', 'content', 'config'];
-var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'strategy', 'notifications', 'reporting', 'content'];
+var ALL_TABS = ['campaigns', 'today', 'catReview', 'training', 'editingCalendar', 'log', 'grading', 'editingStyle', 'notifications', 'automations', 'reporting', 'content', 'config'];
+var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'notifications', 'reporting', 'content'];
 // Master list of every tab id the app renders. Individual role sets pick from
 // here; new tabs get added here + explicitly to whichever roles should see them.
-var ALL_TABS_INTERNAL = ['clHome', 'editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'strategy', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var ALL_TABS_INTERNAL = ['editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 // Back-compat alias — some older comments still reference ALL_TABS.
 var ALL_TABS = ALL_TABS_INTERNAL.slice();
 var ROLE_TAB_VISIBILITY = {
   // Default landing role for brand-new sign-ins. Narrow read-only access to
   // the four core surfaces. An admin promotes them from Config.
   visitor:     ['campaigns', 'editingCalendar', 'today', 'reporting'],
-  // Editors see everything except Config (destructive admin panel) and CL Home
-  // (admin only). My Day is visible but gated inside renderEditorHomeView so
-  // non-admin viewers land on an "Under Construction" placeholder while the
-  // real UI is being iterated on.
-  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config' && t !== 'clHome'; }),
+  // Editors see everything except Config (destructive admin panel). My Day is
+  // visible but gated inside renderEditorHomeView so non-admin viewers land on
+  // an "Under Construction" placeholder while the real UI is being iterated on.
+  editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config'; }),
   // Category Heads: their own review surface + the shared context tabs.
   catHead:     ['campaigns', 'editingCalendar', 'today', 'catReview', 'reporting'],
-  // Content Leads: shared context tabs. CL Home is admin-only.
-  contentLead: ['campaigns', 'editingCalendar', 'reporting', 'editingStyle', 'strategy'],
+  // Content Leads: shared context tabs.
+  contentLead: ['campaigns', 'editingCalendar', 'reporting', 'editingStyle'],
   // Admins see everything. The functionality gate for editorHome lives inside
   // renderEditorHomeView (real-role admin only), not in tab visibility.
   admin:       ALL_TABS_INTERNAL.slice()
@@ -8946,10 +8941,8 @@ function isSafeEmbedUrl(u) {
   return /^https?:\/\//i.test(u.trim());
 }
 
-// Both Editing Style and Strategy tabs share the same shape: a header row, a
-// URL input (admins only), and either an iframe or an empty placeholder. Rather
-// than duplicate the ~60 lines of markup twice, both call this and pass the
-// stored URL, page title, and body copy. The scroll wrapper (overflow:auto,
+// Editing Style tab shape: a header row, a URL input (admins only), and
+// either an iframe or an empty placeholder. The scroll wrapper (overflow:auto,
 // height:100%) is what makes the tab scroll — .main has overflow:hidden, so
 // without it any content taller than the viewport gets clipped with no way to
 // reach it.
@@ -9043,20 +9036,6 @@ function renderEditingStyleView() {
     emptyPlaceholder: 'Paste your published Notion page URL above to embed it here.',
     inputId: 'editing-style-url-input',
     setterFn: 'setEditingStyleUrl'
-  });
-}
-
-// ── Strategy tab ─────────────────────────────────────────────────────────
-// Same shape as Editing Style, so it shares renderNotionEmbedTab. Persisted as
-// STATE.strategyNotionUrl so every teammate sees the same page.
-function renderStrategyView() {
-  return renderNotionEmbedTab({
-    rawUrl: STATE.strategyNotionUrl || '',
-    title: 'Strategy',
-    subtitle: 'Reference the shared Notion strategy page below. Paste the published (notion.site) URL to change it — everyone sees the same page.',
-    emptyPlaceholder: 'Paste your published Notion strategy page URL above to embed it here.',
-    inputId: 'strategy-url-input',
-    setterFn: 'setStrategyUrl'
   });
 }
 
@@ -12797,12 +12776,6 @@ function showEditTrainingModuleModal(moduleId) {
     closeModal();
     render();
   });
-}
-
-// ── Content Lead Home ──────────────────────────────────────────────────────
-// Admin-only surface. Cleared out — reserved for future rebuild.
-function renderContentLeadHomeView() {
-  return '<div class="content" style="padding:0;"></div>';
 }
 
 // ── Linear tasks widget (item #10) ─────────────────────────────────────────
@@ -16819,17 +16792,8 @@ function render() {
   else if (STATE.tab === 'log') body = renderDailyLogView();
   else if (STATE.tab === 'grading') body = renderGradingView();
   else if (STATE.tab === 'editingStyle') body = renderEditingStyleView();
-  else if (STATE.tab === 'strategy') body = renderStrategyView();
   else if (STATE.tab === 'editorHome') body = renderEditorHomeView();
   else if (STATE.tab === 'training') body = renderTrainingView();
-  else if (STATE.tab === 'clHome') {
-    // Defense-in-depth: only Admins can render the CL view. Tab visibility
-    // already hides it for other roles, but a hand-set STATE.tab from the
-    // console would still open it — fall through to Config in that case.
-    var _clRole = (Auth && Auth.user && Auth.user.role) || 'visitor';
-    if (_clRole === 'admin') body = renderContentLeadHomeView();
-    else body = renderConfigView();
-  }
   else if (STATE.tab === 'editorStats') body = renderEditorStatsView();
   else if (STATE.tab === 'notifications') body = renderNotificationsView();
   else if (STATE.tab === 'automations') body = renderAutomationsView();
@@ -17031,21 +16995,6 @@ var App = {
       return;
     }
     STATE.editingStyleNotionUrl = v;
-    saveState();
-    render();
-  },
-
-  // Strategy tab: same shape as setEditingStyleUrl — trimmed, http(s)-only,
-  // persisted to Firestore so every teammate sees the same page.
-  setStrategyUrl: function(url) {
-    var v = (url || '').trim();
-    if (v && !isSafeEmbedUrl(v)) {
-      if (typeof toast === 'function') {
-        toast('Only http:// or https:// URLs can be embedded', 'error');
-      }
-      return;
-    }
-    STATE.strategyNotionUrl = v;
     saveState();
     render();
   },
