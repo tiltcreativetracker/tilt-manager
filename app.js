@@ -14167,7 +14167,7 @@ function brollPaidCampaignSellers() {
     'livestream':1, 'livestream cta test':1,
     'livestream luxury (clips)':1, 'livestream sneakers (clips)':1,
     'livestream sneakers (rs clips)':1, 'sneakers livestream':1,
-    'clearance':1, 'clearance guys':1,
+    'clearance':1,
     'privilege supply':1, 'privilege supply – codzienny':1,
     'privilege supply – essentials':1, 'privilege supply – luxury':1,
     'privilege supply – moda':1, 'lujo privilegio – primavera':1,
