@@ -3245,6 +3245,26 @@ function mentionCategoryHead(category) {
   return id ? '<@' + id + '>' : head;
 }
 
+// Returns the Slack mention syntax for a content lead when their member ID is
+// configured, or the plain name otherwise. Content leads share the categoryHeadSlackIds
+// map — Millie already lives there because she also owns the "Content Lead" category.
+// Rivers falls back to her plain name unless / until her Slack ID is added.
+function mentionContentLead(lead) {
+  if (!lead) return '';
+  var ids = (STATE && STATE.categoryHeadSlackIds) || {};
+  var id = (ids[lead] || '').trim();
+  return id ? '<@' + id + '>' : lead;
+}
+
+// Returns the header mention block for a CL notification: the campaign's assigned
+// Content Lead if set, otherwise both leads (so nothing slips through when the
+// ownership tag is blank).
+function mentionContentLeadsForCampaign(camp) {
+  var lead = camp && (camp.contentLead || '').trim();
+  if (lead) return mentionContentLead(lead);
+  return CONTENT_LEADS.map(mentionContentLead).join(' ');
+}
+
 // Returns the Slack mention syntax for a country's PM when their member ID is
 // configured, or just the PM's plain name otherwise. Returns '' when no PM is
 // assigned for that country (US by default) so the message header
@@ -3559,12 +3579,16 @@ var EDITABLE_FIELDS = {
   },
   // Content Lead QC — Organic-only equivalent of categoryHeadQc.
   // On Organic campaigns, CL replaces CH as the reviewer.
+  // "Approved" is stored as-is (shared with CH QC's palette + auto-stamp logic)
+  // but shown as "Ready to go" per the CL vocabulary.
   contentLeadQc: {
     kind: 'select',
     options: function() { return CATEGORY_HEAD_QC_VALUES; },
+    optionLabel: function(v) { return v === 'Approved' ? 'Ready to go' : v; },
     display: function(a) {
       var v = a.contentLeadQc || 'Draft';
-      return '<span class="cat-head-status-badge st-' + v.replace(/ /g, '_') + '">' + v + '</span>';
+      var label = v === 'Approved' ? 'Ready to go' : v;
+      return '<span class="cat-head-status-badge st-' + v.replace(/ /g, '_') + '">' + label + '</span>';
     },
     value: function(a) { return a.contentLeadQc || 'Draft'; },
     appMethod: 'setAssetContentLeadQc'
@@ -16607,6 +16631,8 @@ function buildBatchMessage(recipient, items, opts) {
     // inbound actions (someone acted on the editor's video), 'sent to' for the
     // editor's own submission going out to the reviewer.
     var senderVerb = 'from';
+    // Content Lead mention block — resolved once per item and reused by the CL cases below.
+    var clM = mentionContentLeadsForCampaign(findCampaignById(it.campaignId));
     switch (status) {
       case 'Assigned':
       case 'In Progress':
@@ -16629,10 +16655,28 @@ function buildBatchMessage(recipient, items, opts) {
         recipientMention = editorM; senderMention = chM; break;
       case 'Approved (Category Head)':
         recipientMention = editorM; senderMention = chM; break;
+      // Content Lead QC — mirror the CH shape. The CL side (posts to the shared
+      // organic thread) reads "<@CL> — FOR REVIEW from <@editor>"; the editor's
+      // own confirmation reads "<@editor> — FOR REVIEW sent to <@CL>". "Ready to
+      // go" and Needs Revisions verdicts route to the editor's thread with the CL
+      // as the sender.
+      case 'For Review (Content Lead)':
+        recipientMention = clM; senderMention = editorM; break;
+      case 'For Review Sent (Content Lead)':
+        recipientMention = editorM; senderMention = clM; senderVerb = 'sent to'; break;
+      case 'Ready to go (Content Lead)':
+        recipientMention = editorM; senderMention = clM; break;
+      case 'Needs Revisions (Content Lead)':
+        recipientMention = editorM; senderMention = clM; break;
       default:
         recipientMention = editorM; break;
     }
-    var displayStatus = status.replace(' (Category Head)', '').replace('Needs Revisions', 'NEED REVISIONS').toUpperCase();
+    var displayStatus = status
+      .replace(' (Category Head)', '')
+      .replace(' (Content Lead)', '')
+      .replace('For Review Sent', 'For Review')
+      .replace('Needs Revisions', 'NEED REVISIONS')
+      .toUpperCase();
     var headerText = recipientMention + ' \u2014 ' + displayStatus;
     if (senderMention) headerText += ' ' + senderVerb + ' ' + senderMention;
     return headerText;
@@ -18933,6 +18977,27 @@ var App = {
     // Sends made today, not current state \u2014 never cleared on the return trip.
     if (newVal === 'Needs Revisions') a.clQcDateRevisions = todayLocalISO();
     logAction('updated', 'Asset "' + a.name + '" content-lead QC: ' + old + ' \u2192 ' + newVal);
+    // Notification triggers \u2014 mirror the CH QC pattern but simpler because all UK
+    // Organic activity routes to the single shared organic daily thread (both leads
+    // watch it), so a per-lead digest doesn't buy us anything.
+    //   \u2022 For Review  \u2192 ping the Content Lead(s) in the shared thread (CLQ:shared batch)
+    //   \u2022 Ready to go \u2192 ping the editor in their own daily thread
+    //   \u2022 Needs Revs  \u2192 ping the editor in their own daily thread
+    // Draft / Cancelled don't fire \u2014 no one needs a heads-up on those.
+    var _clCamp = findCampaignById(a.campaignId);
+    var _clType = _clCamp && (_clCamp.type || DEFAULT_CAMPAIGN_TYPE);
+    if (_clType === 'Organic') {
+      if (newVal === 'For Review' && old !== 'For Review') {
+        queueNotification('CLQ:shared', 'cl-for-review', a, '', { statusLabel: 'For Review (Content Lead)' });
+        if (a.editor) {
+          queueNotification(a.editor, 'cl-for-review-editor', a, '', { statusLabel: 'For Review Sent (Content Lead)' });
+        }
+      } else if (newVal === 'Approved' && old !== 'Approved' && a.editor) {
+        queueNotification(a.editor, 'cl-approved-editor', a, '', { statusLabel: 'Ready to go (Content Lead)' });
+      } else if (newVal === 'Needs Revisions' && old !== 'Needs Revisions' && a.editor) {
+        queueNotification(a.editor, 'cl-needs-revisions-editor', a, '', { statusLabel: 'Needs Revisions (Content Lead)' });
+      }
+    }
     render();
   },
 
