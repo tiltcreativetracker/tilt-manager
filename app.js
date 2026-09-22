@@ -539,6 +539,7 @@ var Fb = {
         tab: true,
         tabOrder: true,
         activeSubCampaignId: true,
+        activeTrainingModuleId: true,
         expandedCountries: true,
         sidebarCompact: true,
         sidebarMonthFilter: true,
@@ -2467,6 +2468,10 @@ var STATE = {
   // per-editor and stored inline in the snapshot (small collection, fits fine).
   trainingModules: [],
   trainingCompletions: {},
+  // Which training module the current viewer is looking at. Per-user (see
+  // PER_USER_UI_FIELDS) — everyone lands on the first visible module by
+  // default and picks their own from the Training sidebar.
+  activeTrainingModuleId: null,
 
   countries: [
     { code: 'UK', name: 'United Kingdom' },
@@ -12473,9 +12478,11 @@ function catReviewWaitLabel(iso) {
 
 
 // ── Training library (item #12) ────────────────────────────────────────────
-// Modules are admin-authored; each editor sees them in the Training tab and
-// can Start / Complete to log a completion. Admins/CLs see a matrix of who's
-// completed what.
+// Modules are admin-authored. The Training tab now mirrors Campaigns: a left
+// sidebar lists every module (with a completion badge), and the main pane
+// shows the selected module's header pills + a per-editor status table +
+// embeds. Editors see one row (themselves) with inline submission slots and a
+// Start/Complete pill; admins/CLs see the full team roster.
 function renderTrainingView() {
   var modules = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
   var completions = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
@@ -12483,19 +12490,25 @@ function renderTrainingView() {
   var isEditor = (role === 'editor');
   var isAdminOrCL = (role === 'admin' || role === 'contentLead');
   var currentEmail = (Auth && Auth.user && Auth.user.email) || '';
+  var canEdit = roleAtLeast('admin');
 
-  // Backward-compat read: the field was called `loomUrl` before it got repurposed
-  // for Google Drive walkthroughs. Existing modules still have the old key.
+  // Guard: roles other than editor/admin/CL never had access to the Training
+  // tab. Tab visibility already enforces this in renderTopbar — this branch
+  // catches a lingering STATE.tab='training' during a role change.
+  if (!isEditor && !isAdminOrCL) {
+    return '<div style="padding:32px;text-align:center;color:var(--text3);">' +
+      '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">Training</h1>' +
+      '<div>Training modules are for editors and admins.</div>' +
+    '</div>';
+  }
+
+  // Backward-compat read: the field was `loomUrl` before it got repurposed
+  // for Google Drive walkthroughs. Old modules still carry that key.
   function moduleGdrive(m) { return (m && (m.gdriveUrl || m.loomUrl)) || ''; }
-
-  // How many submissions the module expects from each editor. Legacy modules
-  // (no field) mean one — matches the pre-multi-submission behaviour.
   function moduleRequired(m) {
     var n = m && parseInt(m.requiredSubmissions, 10);
     return (isFinite(n) && n > 0) ? n : 1;
   }
-  // Return the editor's stored submissions as an array of length N (padded with
-  // ''). Back-compat: promote the legacy single `submissionUrl` string into slot 0.
   function readSubmissions(c, n) {
     var out = [];
     if (Array.isArray(c && c.submissionUrls)) out = c.submissionUrls.slice();
@@ -12506,20 +12519,8 @@ function renderTrainingView() {
   function countFilled(urls) {
     return urls.reduce(function(acc, u) { return acc + (String(u || '').trim() ? 1 : 0); }, 0);
   }
-
-  function moduleLinks(m) {
-    var parts = [];
-    if (m.notionUrl) parts.push('<a href="' + escapeHtml(m.notionUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Task Brief ↗</a>');
-    var g = moduleGdrive(m);
-    if (g) parts.push('<a href="' + escapeHtml(g) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">GDrive ↗</a>');
-    if (m.footageUrl) parts.push('<a href="' + escapeHtml(m.footageUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;">Assets ↗</a>');
-    return parts.join(' · ');
-  }
-
-  // Return inline <iframe> HTML for any Drive-file URLs on the module (uses the
-  // existing driveEmbedUrl helper, which normalises /view / open?id= / uc?id=
-  // shapes to /preview — the form Drive lets us embed without forcing download).
-  // Folder links can't be embedded; those fall through as plain links above.
+  // Inline <iframe> HTML for any Drive-file URLs on the module. Folder links
+  // can't be embedded and fall through to the header link pills instead.
   function moduleEmbeds(m) {
     var embeds = [];
     [{label: 'GDrive walkthrough', url: moduleGdrive(m)}, {label: 'Raw footage', url: m.footageUrl}].forEach(function(row) {
@@ -12531,200 +12532,258 @@ function renderTrainingView() {
     });
     return embeds.join('');
   }
-
-  // Editor view: practice cards
-  if (isEditor && currentEmail) {
-    var mine = completions[currentEmail] || {};
-    // Hide modules that have no links at all — editors have nothing to work with
-    // on those. Admin/CL view keeps the full list so admins can still see empty
-    // rows and either fill them in or delete them.
-    var visibleModules = modules.filter(function(m) {
-      return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl);
-    });
-    var cards = visibleModules.length === 0
-      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules with files yet. Ask an admin to add one in Config.</div>'
-      : visibleModules.map(function(m) {
-          var c = mine[m.id] || {};
-          var badge = c.completedAt
-            ? '<span class="training-status-pill training-status-done">✓ Completed ' + escapeHtml((c.completedAt || '').slice(0, 10)) + '</span>'
-            : c.startedAt
-              ? '<span class="training-status-pill training-status-progress">In progress</span>'
-              : '<span class="training-status-pill training-status-idle">Not started</span>';
-          var actions = c.completedAt
-            ? '<button class="training-action-pill" onclick="App.trainingUncomplete(\'' + m.id + '\')">Undo</button>'
-            : c.startedAt
-              ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark complete</button>'
-              : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
-          var embeds = moduleEmbeds(m);
-          // Submissions: one row per required slot. Filled slots show Frame ↗ + edit/clear
-          // pencils. Empty slots show an inline URL input that commits on Enter/blur and
-          // auto-starts the module. Legacy `submissionUrl` (string) is promoted into slot 0.
-          var required = moduleRequired(m);
-          var submissions = readSubmissions(c, required);
-          var filled = countFilled(submissions);
-          var subLabel = required > 1
-            ? 'Submissions <span style="color:var(--text2);">(' + filled + '/' + required + ')</span>:'
-            : 'Submission:';
-          var submissionRows = submissions.map(function(url, idx) {
-            var trimmed = (url || '').trim();
-            var slotLabel = required > 1 ? '<span style="font-size:12px;color:var(--text3);min-width:44px;">#' + (idx + 1) + '</span>' : '';
-            if (trimmed) {
-              return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-                slotLabel +
-                '<a href="' + escapeHtml(trimmed) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:14px;" title="' + escapeHtml(trimmed) + '">Frame ↗</a>' +
-                '<button type="button" class="url-edit-pencil" title="Edit submission link" ' +
-                  'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
-                '<button type="button" class="url-edit-pencil" title="Clear submission link" ' +
-                  'onclick="App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', \'\')">×</button>' +
-                '<input type="url" class="form-input" style="display:none;flex:1 1 240px;min-width:180px;max-width:420px;padding:6px 10px;font-size:13px;" ' +
-                  'placeholder="https://frame.io/... or Drive link" value="' + escapeHtml(trimmed) + '" ' +
-                  'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(trimmed) + '\';this.blur();}" ' +
-                  'onblur="App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', this.value)">' +
-              '</div>';
-            }
-            return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-              slotLabel +
-              '<input type="url" class="form-input" style="flex:1 1 240px;min-width:180px;max-width:420px;padding:6px 10px;font-size:13px;" ' +
-                'placeholder="Paste Frame.io / Drive link" ' +
-                'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
-                'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', this.value)">' +
-            '</div>';
-          }).join('');
-          var submissionRow =
-            '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">' +
-              '<span style="font-size:12px;color:var(--text3);">' + subLabel + '</span>' +
-              submissionRows +
-            '</div>';
-          return '<div class="auto-card" style="margin-bottom:10px;">' +
-            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
-              '<div style="flex:1 1 320px;min-width:280px;">' +
-                '<div style="font-size:14px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + ' &nbsp; ' + badge + '</div>' +
-                '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
-                submissionRow +
-                (embeds ? '<div class="training-embeds">' + embeds + '</div>' : '') +
-              '</div>' +
-              '<div style="flex-shrink:0;">' + actions + '</div>' +
-            '</div>' +
-          '</div>';
-        }).join('');
-
-    return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;">' +
-      '<h1 style="margin:0 0 4px;font-size:22px;">Training</h1>' +
-      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;">' +
-        'Practice briefs. Start one when you\'re idle, edit the demanded video, then mark complete.' +
-      '</div>' +
-      cards +
-    '</div></div>';
-  }
-
-  // Admin/CL view: same card list editors see (module title, brief, links,
-  // embeds), plus a per-card completion strip so we can still tell at a glance
-  // who's done what, and a "Send to editor threads" button that posts the
-  // training brief into each editor's daily Slack thread. Matches what Elsa
-  // wants: "same list as the editors" instead of the old matrix.
-  if (isAdminOrCL) {
-    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
-    // Map editor display name → the email that carries the completion record.
-    // Uses EDITOR_EMAILS aliases (e.g. Sharm has both 'sharm' and 'sharmaine').
-    // Picks whichever alias has any completion record, else the first alias.
-    function completionForEditor(name, moduleId) {
-      var aliases = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[name]) || [];
-      for (var i = 0; i < aliases.length; i++) {
-        var email = aliases[i] + '@tilt.app';
-        var c = (completions[email] || {})[moduleId];
-        var hasAny = c && (c.startedAt || c.completedAt || c.submissionUrl ||
-          (Array.isArray(c.submissionUrls) && c.submissionUrls.some(function(u){return u && u.trim();})));
-        if (hasAny) return c;
-      }
-      return {};
+  // Map editor display name → their completion record on whichever email alias
+  // holds one (EDITOR_EMAILS covers cases like Sharm/sharmaine sharing a person).
+  var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
+  function completionForEditor(name, moduleId) {
+    var aliases = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[name]) || [];
+    for (var i = 0; i < aliases.length; i++) {
+      var email = aliases[i] + '@tilt.app';
+      var c = (completions[email] || {})[moduleId];
+      var hasAny = c && (c.startedAt || c.completedAt || c.submissionUrl ||
+        (Array.isArray(c.submissionUrls) && c.submissionUrls.some(function(u){return u && u.trim();})));
+      if (hasAny) return c;
     }
-
-    var visibleModules = modules.filter(function(m) {
-      return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl);
-    });
-
-    var canEdit = roleAtLeast('admin');
-    var cards = visibleModules.length === 0
-      ? '<div style="padding:32px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px;background:var(--bg2);">No training modules with files yet.' + (canEdit ? ' Use <strong>+ Add module</strong> above to create one.' : ' Ask an admin to add one.') + '</div>'
-      : visibleModules.map(function(m) {
-          // Per-editor status strip: "Zidni ✓ · Sharm … · Patty —"
-          // For multi-submission modules, show "#/N" beside the mark and one ↗ per
-          // filled slot so heads can jump straight to each cut.
-          var required = moduleRequired(m);
-          var statusBits = TRAINING_EDS.map(function(ed) {
-            var c = completionForEditor(ed, m.id);
-            var mark, color;
-            if (c.completedAt) { mark = '✓'; color = '#22c55e'; }
-            else if (c.startedAt) { mark = '…'; color = '#f59e0b'; }
-            else { mark = '—'; color = 'var(--text3)'; }
-            var subs = readSubmissions(c, required);
-            var filledCount = countFilled(subs);
-            var countTag = required > 1
-              ? ' <span style="color:var(--text3);font-size:12px;">' + filledCount + '/' + required + '</span>'
-              : '';
-            var subLinks = subs.map(function(u, i) {
-              var t = (u || '').trim();
-              if (!t) return '';
-              var label = required > 1 ? ('#' + (i + 1)) : '↗';
-              return ' <a href="' + escapeHtml(t) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;" title="Open ' + escapeHtml(ed) + '\'s submission ' + (i + 1) + '">' + label + '</a>';
-            }).join('');
-            return '<span style="color:var(--text2);">' + escapeHtml(ed) + '</span> ' +
-                   '<span style="color:' + color + ';font-weight:700;">' + mark + '</span>' + countTag + subLinks;
-          }).join(' &nbsp;·&nbsp; ');
-          var statusStrip = '<div style="margin-top:6px;font-size:14px;">' + statusBits + '</div>';
-
-          var embeds = moduleEmbeds(m);
-          var perEditorSend = TRAINING_EDS.map(function(ed) {
-            return '<button class="training-action-pill" onclick="App.sendTrainingToEditor(\'' + m.id + '\',\'' + ed + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ ' + escapeHtml(ed) + '</button>';
-          }).join(' ');
-          var editRow = canEdit
-            ? '<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">' +
-                '<button class="training-action-pill" onclick="App.trainingEditModule(\'' + m.id + '\')" title="Edit this module">✎ Edit</button>' +
-                '<button class="training-action-pill" style="color:var(--red-text);border-color:var(--red);" onclick="App.trainingDeleteModule(\'' + m.id + '\')" title="Delete this module">Delete</button>' +
-              '</div>'
-            : '';
-
-          return '<div class="auto-card" style="margin-bottom:10px;">' +
-            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">' +
-              '<div style="flex:1 1 320px;min-width:280px;">' +
-                '<div style="font-size:18px;font-weight:600;color:var(--text1);">' + escapeHtml(m.title || '') + '</div>' +
-                statusStrip +
-                '<div style="font-size:12px;color:var(--text2);margin-top:8px;white-space:pre-wrap;">' + escapeHtml(m.brief || '') + '</div>' +
-                '<div style="margin-top:8px;">' + moduleLinks(m) + '</div>' +
-                (embeds ? '<div class="training-embeds">' + embeds + '</div>' : '') +
-              '</div>' +
-              '<div style="flex-shrink:0;display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' +
-                '<button class="training-action-pill training-action-start" onclick="App.sendTrainingToAllEditors(\'' + m.id + '\')" title="Post to every editor\'s daily Slack thread">→ Send to all editor threads</button>' +
-                '<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">' + perEditorSend + '</div>' +
-                '<button class="training-action-pill" onclick="App.copyTrainingModule(\'' + m.id + '\')" title="Copy the message to paste anywhere">Copy message</button>' +
-                editRow +
-              '</div>' +
-            '</div>' +
-          '</div>';
-        }).join('');
-
-    var addBtn = canEdit
-      ? '<button class="btn btn-primary" onclick="App.trainingBeginAdd()" style="flex-shrink:0;">+ Add module</button>'
-      : '';
-    return '<div class="content" style="padding:0;"><div style="padding:24px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;">' +
-      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;">' +
-        '<div style="flex:1 1 320px;min-width:0;">' +
-          '<h1 style="margin:0 0 4px;font-size:22px;">Training</h1>' +
-          '<div style="font-size:13px;color:var(--text3);">' +
-            'Same list the editors see. Use the send buttons to push a module into each editor\'s daily Slack thread.' +
-          '</div>' +
-        '</div>' +
-        addBtn +
-      '</div>' +
-      cards +
-    '</div></div>';
+    return {};
   }
 
-  // Fallback for other roles
-  return '<div style="padding:32px;text-align:center;color:var(--text3);">' +
-    '<h1 style="margin:0 0 12px;font-size:22px;color:var(--text1);">Training</h1>' +
-    '<div>Training modules are for editors and admins.</div>' +
+  // Editors and admins/CLs see the same "has at least one link" filter — an
+  // empty module is useless to both. Admins add links via the edit modal.
+  var visibleModules = modules.filter(function(m) {
+    return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl);
+  });
+
+  // Resolve active module; fall back to first visible so the pane never
+  // renders blank when modules exist.
+  var activeId = STATE.activeTrainingModuleId;
+  var active = null;
+  if (activeId) {
+    for (var k = 0; k < visibleModules.length; k++) {
+      if (String(visibleModules[k].id) === String(activeId)) { active = visibleModules[k]; break; }
+    }
+  }
+  if (!active && visibleModules.length) {
+    active = visibleModules[0];
+    STATE.activeTrainingModuleId = active.id;
+  }
+
+  // ── Sidebar ─────────────────────────────────────────────────────────────
+  // Flat list, reuses .sidebar / .subcamp-item CSS so it matches Campaigns.
+  function moduleTeamCompletion(m) {
+    var doneCount = 0;
+    TRAINING_EDS.forEach(function(ed) {
+      var c = completionForEditor(ed, m.id);
+      if (c && c.completedAt) doneCount++;
+    });
+    return { done: doneCount, total: TRAINING_EDS.length };
+  }
+  function moduleStatusForEditor(m) {
+    var c = ((completions[currentEmail] || {})[m.id]) || {};
+    if (c.completedAt) return 'done';
+    if (c.startedAt) return 'progress';
+    var subs = readSubmissions(c, moduleRequired(m));
+    if (subs.some(function(u){return (u || '').trim();})) return 'progress';
+    return 'idle';
+  }
+  var sidebarRows = visibleModules.length === 0
+    ? '<div style="padding:20px 16px;font-size:12px;color:var(--text3);text-align:center;">No modules yet' + (canEdit ? '. Click + to add.' : '.') + '</div>'
+    : visibleModules.map(function(m) {
+        var isActive = active && String(m.id) === String(active.id);
+        var badge;
+        if (isAdminOrCL) {
+          var tc = moduleTeamCompletion(m);
+          var color = tc.done === tc.total ? '#22c55e' : tc.done > 0 ? '#f59e0b' : 'var(--text3)';
+          badge = '<span style="color:' + color + ';font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:600;">' + tc.done + '/' + tc.total + '</span>';
+        } else {
+          var st = moduleStatusForEditor(m);
+          badge = st === 'done'
+            ? '<span style="color:#22c55e;font-size:14px;">✓</span>'
+            : st === 'progress'
+              ? '<span style="color:#f59e0b;font-size:14px;">•</span>'
+              : '<span style="color:var(--text3);font-size:14px;">○</span>';
+        }
+        return '<div class="subcamp-item ' + (isActive ? 'active' : '') + '" ' +
+          'style="padding-left:16px;margin:0 6px 2px;" ' +
+          'onclick="App.selectTrainingModule(\'' + m.id + '\')" ' +
+          'title="' + escapeHtml(m.title || '') + '">' +
+            '<div class="subcamp-name">' + escapeHtml(m.title || '(untitled)') + '</div>' +
+            badge +
+        '</div>';
+      }).join('');
+  var sidebar = '<div class="sidebar">' +
+    '<div class="sidebar-header">' +
+      '<span class="sidebar-title">TRAINING</span>' +
+      (canEdit ? '<button class="sidebar-toggle" onclick="App.trainingBeginAdd()" title="Add training module">+</button>' : '') +
+    '</div>' +
+    '<div class="sidebar-scroll">' + sidebarRows + '</div>' +
   '</div>';
+
+  // ── Main pane ───────────────────────────────────────────────────────────
+  if (!active) {
+    return sidebar +
+      '<div class="content"><div class="empty-state-big">' +
+        '<div class="title">No training modules</div>' +
+        '<div class="sub">' + (canEdit ? 'Click + in the sidebar to add one.' : 'Ask an admin to add one.') + '</div>' +
+      '</div></div>';
+  }
+
+  var m = active;
+  var required = moduleRequired(m);
+  var moduleIdx = 0;
+  for (var j = 0; j < visibleModules.length; j++) {
+    if (String(visibleModules[j].id) === String(m.id)) { moduleIdx = j + 1; break; }
+  }
+
+  // Meta chips — mirrors Campaigns' `.meta-chip` header row. Completion count,
+  // in-progress count, required-submissions, plus link pills for brief / gdrive
+  // / assets. The link-pill styling comes from Campaigns' `a.meta-chip.link-pill`.
+  function linkPill(label, url) {
+    if (!url) return '';
+    var host = hostnameFromUrl(url) || 'link';
+    return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" class="meta-chip link-pill" title="' + escapeHtml(url) + '">' +
+      '<span class="meta-chip-label">' + label + '</span>' +
+      '<span class="link-pill-host">' + escapeHtml(host) + '</span>' +
+      '<span class="link-pill-arrow">↗</span>' +
+    '</a>';
+  }
+  var completedCount = 0, progressCount = 0;
+  TRAINING_EDS.forEach(function(ed) {
+    var c = completionForEditor(ed, m.id);
+    if (c && c.completedAt) completedCount++;
+    else if (c && c.startedAt) progressCount++;
+  });
+  var metaChips =
+    '<span class="meta-chip"><span class="meta-chip-label">completed</span>' + completedCount + '/' + TRAINING_EDS.length + '</span>' +
+    (progressCount ? '<span class="meta-chip"><span class="meta-chip-label">in progress</span>' + progressCount + '</span>' : '') +
+    (required > 1 ? '<span class="meta-chip"><span class="meta-chip-label">req</span>' + required + '</span>' : '') +
+    linkPill('brief', m.notionUrl || '') +
+    linkPill('gdrive', moduleGdrive(m)) +
+    linkPill('assets', m.footageUrl || '');
+
+  // Title-row actions. Admins get Send/Copy/Edit/Delete; CLs get Send/Copy.
+  // Editors see the title alone.
+  var titleActions = '';
+  if (isAdminOrCL) {
+    titleActions =
+      '<button class="edit-btn ml-auto" onclick="App.sendTrainingToAllEditors(\'' + m.id + '\')" title="Post to every editor\'s daily Slack thread" style="color:var(--accent);border-color:var(--accent);">→ Send to all threads</button>' +
+      '<button class="edit-btn" onclick="App.copyTrainingModule(\'' + m.id + '\')" title="Copy the message to paste anywhere">Copy message</button>' +
+      (canEdit
+        ? '<button class="edit-btn" onclick="App.trainingEditModule(\'' + m.id + '\')">Edit</button>' +
+          '<button class="edit-btn del-camp-btn" onclick="App.trainingDeleteModule(\'' + m.id + '\')">Delete</button>'
+        : '');
+  }
+
+  var briefBlock = m.brief
+    ? '<div class="camp-brief" style="white-space:pre-wrap;">' + escapeHtml(m.brief) + '</div>'
+    : '';
+
+  // Per-editor rows in the main table. Admin/CL: one row per editor with a
+  // per-editor Slack button. Editor: one row (themselves) with inline
+  // submission slots + Start/Complete pill.
+  var tableRows;
+  if (isAdminOrCL) {
+    tableRows = TRAINING_EDS.map(function(ed) {
+      var c = completionForEditor(ed, m.id);
+      var statusLabel, statusColor;
+      if (c.completedAt) { statusLabel = '✓ Completed'; statusColor = '#22c55e'; }
+      else if (c.startedAt) { statusLabel = 'In progress'; statusColor = '#f59e0b'; }
+      else { statusLabel = 'Not started'; statusColor = 'var(--text3)'; }
+      var startedCell = c.startedAt ? escapeHtml((c.startedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
+      var completedCell = c.completedAt ? escapeHtml((c.completedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
+      var subs = readSubmissions(c, required);
+      var filledN = countFilled(subs);
+      var subsLinks = subs.map(function(u, i) {
+        var t = (u || '').trim();
+        if (!t) return '';
+        var label = required > 1 ? ('#' + (i + 1)) : 'Frame ↗';
+        return '<a href="' + escapeHtml(t) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;margin-right:6px;" title="' + escapeHtml(t) + '">' + label + '</a>';
+      }).join('');
+      var subsCell = subsLinks
+        ? (required > 1 ? '<span style="color:var(--text3);font-size:11px;margin-right:6px;">' + filledN + '/' + required + '</span>' : '') + subsLinks
+        : '<span style="color:var(--text3);">—</span>';
+      return '<tr>' +
+        '<td style="font-weight:600;">' + escapeHtml(ed) + '</td>' +
+        '<td style="color:' + statusColor + ';font-weight:600;">' + statusLabel + '</td>' +
+        '<td>' + startedCell + '</td>' +
+        '<td>' + completedCell + '</td>' +
+        '<td>' + subsCell + '</td>' +
+        '<td><button class="training-action-pill" onclick="App.sendTrainingToEditor(\'' + m.id + '\',\'' + ed + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ Slack</button></td>' +
+      '</tr>';
+    }).join('');
+  } else {
+    var myC = ((completions[currentEmail] || {})[m.id]) || {};
+    var mStatusLabel, mStatusColor;
+    if (myC.completedAt) { mStatusLabel = '✓ Completed'; mStatusColor = '#22c55e'; }
+    else if (myC.startedAt) { mStatusLabel = 'In progress'; mStatusColor = '#f59e0b'; }
+    else { mStatusLabel = 'Not started'; mStatusColor = 'var(--text3)'; }
+    var mStartedCell = myC.startedAt ? escapeHtml((myC.startedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
+    var mCompletedCell = myC.completedAt ? escapeHtml((myC.completedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
+    var mySubs = readSubmissions(myC, required);
+    var mySubRows = mySubs.map(function(url, idx) {
+      var trimmed = (url || '').trim();
+      var slotLabel = required > 1 ? '<span style="font-size:11px;color:var(--text3);min-width:28px;display:inline-block;">#' + (idx + 1) + '</span>' : '';
+      if (trimmed) {
+        return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
+          slotLabel +
+          '<a href="' + escapeHtml(trimmed) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:13px;" title="' + escapeHtml(trimmed) + '">Frame ↗</a>' +
+          '<button type="button" class="url-edit-pencil" title="Edit link" ' +
+            'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
+          '<button type="button" class="url-edit-pencil" title="Clear link" ' +
+            'onclick="App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', \'\')">×</button>' +
+          '<input type="url" class="form-input" style="display:none;min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
+            'placeholder="Frame.io / Drive link" value="' + escapeHtml(trimmed) + '" ' +
+            'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(trimmed) + '\';this.blur();}" ' +
+            'onblur="App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', this.value)">' +
+        '</div>';
+      }
+      return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
+        slotLabel +
+        '<input type="url" class="form-input" style="min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
+          'placeholder="Paste Frame.io / Drive link" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
+          'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', this.value)">' +
+      '</div>';
+    }).join('');
+    var actionPill = myC.completedAt
+      ? '<button class="training-action-pill" onclick="App.trainingUncomplete(\'' + m.id + '\')">Undo</button>'
+      : myC.startedAt
+        ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark complete</button>'
+        : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
+    tableRows =
+      '<tr>' +
+        '<td style="font-weight:600;">You (' + escapeHtml((currentEmail.split('@')[0] || 'me')) + ')</td>' +
+        '<td style="color:' + mStatusColor + ';font-weight:600;">' + mStatusLabel + '</td>' +
+        '<td>' + mStartedCell + '</td>' +
+        '<td>' + mCompletedCell + '</td>' +
+        '<td>' + mySubRows + '</td>' +
+        '<td>' + actionPill + '</td>' +
+      '</tr>';
+  }
+  var table =
+    '<div class="table-wrap"><table><thead><tr>' +
+      '<th>Editor</th><th>Status</th><th>Started</th><th>Completed</th><th>Submissions</th><th style="width:140px">Actions</th>' +
+    '</tr></thead><tbody>' + tableRows + '</tbody></table></div>';
+
+  var embeds = moduleEmbeds(m);
+  var embedsBlock = embeds
+    ? '<div class="training-embeds" style="padding:16px 20px;">' + embeds + '</div>'
+    : '';
+
+  var content = '<div class="content">' +
+    '<div class="camp-header">' +
+      '<div class="breadcrumb"><span>Training</span><span class="breadcrumb-sep">/</span><span>Module #' + moduleIdx + '</span></div>' +
+      '<div class="camp-title-row">' +
+        '<div class="camp-title">' + escapeHtml(m.title || '(untitled)') + '</div>' +
+        titleActions +
+      '</div>' +
+      briefBlock +
+      '<div class="camp-meta">' + metaChips + '</div>' +
+    '</div>' +
+    table +
+    embedsBlock +
+  '</div>';
+
+  return sidebar + content;
 }
 
 // Admin-only modal used from the Training tab to add a new module or edit an
@@ -17910,6 +17969,12 @@ var App = {
     Presence.update();
     render();
   },
+  // Training sidebar click — mirrors selectCampaign but for the Training tab's
+  // module list. Per-user selection; not synced.
+  selectTrainingModule: function(id) {
+    STATE.activeTrainingModuleId = id;
+    render();
+  },
   // Send an "openAdReport" event out to the host app (ForceStaff dashboard).
   // If the tracker isn't running inside the host frame, fall back to a toast so
   // the user knows the button only works from inside ForceStaff.
@@ -19162,6 +19227,9 @@ var App = {
     if (!roleAtLeast('admin')) return;
     if (!confirm('Delete this training module? Completions for it stay in the log but the module disappears.')) return;
     STATE.trainingModules = (STATE.trainingModules || []).filter(function(m) { return m.id !== moduleId; });
+    // If the Training-sidebar selection pointed at the just-deleted module,
+    // clear it so renderTrainingView falls back to the first remaining module.
+    if (STATE.activeTrainingModuleId === moduleId) STATE.activeTrainingModuleId = null;
     saveState();
     render();
   },
