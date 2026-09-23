@@ -1335,7 +1335,7 @@ var Fb = {
       // trust the sync. Fired only after the first apply so first-load never pings.
       if (data._lastEditedByTab && data._lastEditedByTab !== Fb._tabId && Fb._crossTabSignalReady) {
         showCrossTabUpdatePill(data._lastEditedByName || null);
-        markStaleIfAway();
+        markStaleIfAway(data._lastEditedByName);
       }
       Fb._crossTabSignalReady = true;
       if (typeof render === 'function' && Auth._booted) render();
@@ -3190,11 +3190,14 @@ function showCrossTabUpdatePill(fromName) {
 // mid-edit (open modal / focused input) or with an unsaved upload pending; the
 // flag stays set and the next return tries again.
 var _reloadOnReturn = false;
+var _reloadOnReturnBy = null; // first name of the latest teammate, for the post-reload toast
 function isTabAway() {
   return document.hidden || (typeof document.hasFocus === 'function' && !document.hasFocus());
 }
-function markStaleIfAway() {
-  if (isTabAway()) _reloadOnReturn = true;
+function markStaleIfAway(fromName) {
+  if (!isTabAway()) return;
+  _reloadOnReturn = true;
+  if (fromName) _reloadOnReturnBy = String(fromName).split(' ')[0];
 }
 function _maybeReloadOnReturn() {
   if (!_reloadOnReturn || document.hidden || _idleReloadScheduled) return;
@@ -3202,7 +3205,7 @@ function _maybeReloadOnReturn() {
   if (typeof Fb !== 'undefined' && (Fb._uploadTimer || Fb._pendingLocalJson)) return;
   _reloadOnReturn = false;
   _idleReloadScheduled = true;
-  reloadPreservingView();
+  reloadPreservingView({ kind: 'teammate', by: _reloadOnReturnBy });
 }
 document.addEventListener('visibilitychange', _maybeReloadOnReturn);
 window.addEventListener('focus', _maybeReloadOnReturn);
@@ -3225,9 +3228,11 @@ function dismissCrossTabPill() {
 // back on boot to restore the view. Called by every in-app reload path (the
 // cross-tab pill and the auto-update flow).
 var _PERSIST_KEY = 'tilt-view-prefs';
-function persistViewPrefs() {
+function persistViewPrefs(reloadReason) {
   try {
     var prefs = {
+      // Why the reload happened ({kind, by}), so boot can explain it with a toast.
+      reloadReason: reloadReason || null,
       tab: STATE.tab || null,
       activeSubCampaignId: STATE.activeSubCampaignId != null ? STATE.activeSubCampaignId : null,
       calendarMonth: (typeof STATE.calendarMonth === 'string') ? STATE.calendarMonth : null,
@@ -3247,8 +3252,8 @@ function hydratePersistedView() {
     return prefs;
   } catch (_) { return null; }
 }
-function reloadPreservingView() {
-  persistViewPrefs();
+function reloadPreservingView(reloadReason) {
+  persistViewPrefs(reloadReason);
   window.location.reload();
 }
 window.reloadPreservingView = reloadPreservingView;
@@ -22526,6 +22531,13 @@ bootApp = function() {
       // last reload came through reloadPreservingView(). Hash-based deep links below
       // still win because they're set intentionally by a click from Slack/etc.
       var _persisted = (typeof hydratePersistedView === 'function') ? hydratePersistedView() : null;
+      var _rr = _persisted && _persisted.reloadReason;
+      if (_rr && _rr.kind === 'teammate') {
+        // Deferred past the first render so the toast isn't lost in boot churn.
+        setTimeout(function() {
+          toast('Refreshed \u2014 ' + (_rr.by || 'a teammate') + ' made changes while you were away', 'info');
+        }, 400);
+      }
       if (_persisted && !location.hash) {
         if (_persisted.tab) STATE.tab = _persisted.tab;
         if (_persisted.activeSubCampaignId != null) {
