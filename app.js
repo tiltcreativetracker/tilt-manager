@@ -616,6 +616,12 @@ var Fb = {
       // Snapshot the local thread values BEFORE the forEach overwrites STATE, then
       // restore any slot where the incoming value is null but the local one has today's
       // UK date. Same treatment for catHeadDailyThreads and intlDailyThread.
+      // Remember what the server holds for each thread field so uploadNow can
+      // tell which slots this tab actually changed (see Fb.threadSlotWrites).
+      Fb._serverThreadFields = {};
+      Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS).forEach(function(f) {
+        Fb._serverThreadFields[f] = data[f] ? JSON.parse(JSON.stringify(data[f])) : null;
+      });
       var _todayUK = todayUK();
       var _savedThreads = {};
       if (STATE.dailyThreads) {
@@ -1406,6 +1412,51 @@ var Fb = {
     }
   },
 
+  THREAD_MAP_FIELDS: ['dailyThreads', 'catHeadDailyThreads', 'contentLeadDailyThreads'],
+  THREAD_SINGLE_FIELDS: ['intlDailyThread', 'organicDailyThread'],
+
+  // Per-slot writes for the daily-thread fields. A slot is uploaded only when it
+  // differs from the server AND this tab has a reason to own it: it holds a
+  // today-dated thread (set here, or rescued by applySnapshot), or the user
+  // pressed Clear in the last 15s. Midnight-sweep nulls and stale leftovers are
+  // never uploaded — the server may already hold a fresher slot we haven't seen.
+  threadSlotWrites: function(snap) {
+    var today = todayUK();
+    var server = Fb._serverThreadFields || {};
+    var now = Date.now();
+    var clears = {
+      dailyThreads: Fb._recentlyClearedThreads || {},
+      catHeadDailyThreads: Fb._recentlyClearedCatThreads || {},
+      contentLeadDailyThreads: {}
+    };
+    var singleClears = {
+      intlDailyThread: Fb._recentlyClearedIntlThread || 0,
+      organicDailyThread: Fb._recentlyClearedOrganicThread || 0
+    };
+    function wants(local, srv, clearedAt) {
+      if (JSON.stringify(local || null) === JSON.stringify(srv || null)) return false;
+      if (local && local.date === today) return true;
+      return !local && !!clearedAt && (now - clearedAt) < 15000;
+    }
+    var writes = [];
+    Fb.THREAD_MAP_FIELDS.forEach(function(f) {
+      var local = snap[f] || {};
+      var srv = server[f] || {};
+      var keys = Object.keys(local).concat(Object.keys(srv)).filter(function(k, i, a) { return a.indexOf(k) === i; });
+      keys.forEach(function(k) {
+        if (wants(local[k], srv[k], clears[f][k])) {
+          writes.push({ path: new firebase.firestore.FieldPath(f, k), value: local[k] || null });
+        }
+      });
+    });
+    Fb.THREAD_SINGLE_FIELDS.forEach(function(f) {
+      if (wants(snap[f], server[f], singleClears[f])) {
+        writes.push({ path: new firebase.firestore.FieldPath(f), value: snap[f] || null });
+      }
+    });
+    return writes;
+  },
+
   scheduleUpload: function() {
     if (Fb._suppressUpload) return;
     if (!Auth.user) {
@@ -1464,7 +1515,19 @@ var Fb = {
     Fb._updateSyncDom();
 
     var batch = fbDb.batch();
-    if (mainDocChanged) batch.set(fbDb.doc(Fb.STATE_DOC), snap);
+    if (mainDocChanged) {
+      // Daily-thread fields are left out of the whole-doc write and patched per
+      // slot instead. A tab that slept overnight would otherwise upload its
+      // swept-to-null threads and wipe the links the 9am scheduler just wrote.
+      var threadFields = Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS);
+      var mainFields = Object.keys(snap).filter(function(k) {
+        return threadFields.indexOf(k) < 0 && snap[k] !== undefined;
+      });
+      batch.set(fbDb.doc(Fb.STATE_DOC), snap, { mergeFields: mainFields });
+      Fb.threadSlotWrites(snap).forEach(function(w) {
+        batch.update(fbDb.doc(Fb.STATE_DOC), w.path, w.value);
+      });
+    }
     assetsToWrite.forEach(function(a) {
       batch.set(fbDb.collection(Fb.ASSETS_COLL).doc(String(a.id)), a);
     });
@@ -15795,10 +15858,11 @@ function sweepStaleDailyThreads() {
     if (t.date === today) return;
     if (!STATE.dailyThreadHistory) STATE.dailyThreadHistory = {};
     if (!STATE.dailyThreadHistory[editor]) STATE.dailyThreadHistory[editor] = [];
-    STATE.dailyThreadHistory[editor].unshift({ date: t.date, url: t.url });
+    var fresh = !STATE.dailyThreadHistory[editor].some(function(x) { return x.date === t.date && x.url === t.url; });
+    if (fresh) STATE.dailyThreadHistory[editor].unshift({ date: t.date, url: t.url });
     while (STATE.dailyThreadHistory[editor].length > 7) STATE.dailyThreadHistory[editor].pop();
     STATE.dailyThreads[editor] = null;
-    logAction('updated', 'Daily thread reset for ' + editor + ' (was ' + t.date + ')');
+    if (fresh) logAction('updated', 'Daily thread reset for ' + editor + ' (was ' + t.date + ')');
     changed = true;
   });
   if (STATE.catHeadDailyThreads) {
@@ -15808,10 +15872,11 @@ function sweepStaleDailyThreads() {
       if (t.date === today) return;
       if (!STATE.catHeadDailyThreadHistory) STATE.catHeadDailyThreadHistory = {};
       if (!STATE.catHeadDailyThreadHistory[cat]) STATE.catHeadDailyThreadHistory[cat] = [];
-      STATE.catHeadDailyThreadHistory[cat].unshift({ date: t.date, url: t.url });
+      var fresh = !STATE.catHeadDailyThreadHistory[cat].some(function(x) { return x.date === t.date && x.url === t.url; });
+      if (fresh) STATE.catHeadDailyThreadHistory[cat].unshift({ date: t.date, url: t.url });
       while (STATE.catHeadDailyThreadHistory[cat].length > 7) STATE.catHeadDailyThreadHistory[cat].pop();
       STATE.catHeadDailyThreads[cat] = null;
-      logAction('updated', 'Category head thread reset for ' + cat + ' (was ' + t.date + ')');
+      if (fresh) logAction('updated', 'Category head thread reset for ' + cat + ' (was ' + t.date + ')');
       changed = true;
     });
   }
@@ -15819,10 +15884,11 @@ function sweepStaleDailyThreads() {
     var ti = STATE.intlDailyThread;
     if (ti.date !== today) {
       if (!STATE.intlDailyThreadHistory) STATE.intlDailyThreadHistory = [];
-      STATE.intlDailyThreadHistory.unshift({ date: ti.date, url: ti.url });
+      var fresh = !STATE.intlDailyThreadHistory.some(function(x) { return x.date === ti.date && x.url === ti.url; });
+      if (fresh) STATE.intlDailyThreadHistory.unshift({ date: ti.date, url: ti.url });
       while (STATE.intlDailyThreadHistory.length > 7) STATE.intlDailyThreadHistory.pop();
       STATE.intlDailyThread = null;
-      logAction('updated', 'Intl daily thread reset (was ' + ti.date + ')');
+      if (fresh) logAction('updated', 'Intl daily thread reset (was ' + ti.date + ')');
       changed = true;
     }
   }
@@ -15830,10 +15896,11 @@ function sweepStaleDailyThreads() {
     var to = STATE.organicDailyThread;
     if (to.date !== today) {
       if (!STATE.organicDailyThreadHistory) STATE.organicDailyThreadHistory = [];
-      STATE.organicDailyThreadHistory.unshift({ date: to.date, url: to.url });
+      var fresh = !STATE.organicDailyThreadHistory.some(function(x) { return x.date === to.date && x.url === to.url; });
+      if (fresh) STATE.organicDailyThreadHistory.unshift({ date: to.date, url: to.url });
       while (STATE.organicDailyThreadHistory.length > 7) STATE.organicDailyThreadHistory.pop();
       STATE.organicDailyThread = null;
-      logAction('updated', 'Organic daily thread reset (was ' + to.date + ')');
+      if (fresh) logAction('updated', 'Organic daily thread reset (was ' + to.date + ')');
       changed = true;
     }
   }
@@ -15844,10 +15911,11 @@ function sweepStaleDailyThreads() {
       if (t.date === today) return;
       if (!STATE.contentLeadDailyThreadHistory) STATE.contentLeadDailyThreadHistory = {};
       if (!STATE.contentLeadDailyThreadHistory[lead]) STATE.contentLeadDailyThreadHistory[lead] = [];
-      STATE.contentLeadDailyThreadHistory[lead].unshift({ date: t.date, url: t.url });
+      var fresh = !STATE.contentLeadDailyThreadHistory[lead].some(function(x) { return x.date === t.date && x.url === t.url; });
+      if (fresh) STATE.contentLeadDailyThreadHistory[lead].unshift({ date: t.date, url: t.url });
       while (STATE.contentLeadDailyThreadHistory[lead].length > 7) STATE.contentLeadDailyThreadHistory[lead].pop();
       STATE.contentLeadDailyThreads[lead] = null;
-      logAction('updated', 'Content Lead thread reset for ' + lead + ' (was ' + t.date + ')');
+      if (fresh) logAction('updated', 'Content Lead thread reset for ' + lead + ' (was ' + t.date + ')');
       changed = true;
     });
   }
