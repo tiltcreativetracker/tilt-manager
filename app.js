@@ -12477,6 +12477,17 @@ function catReviewWaitLabel(iso) {
 }
 
 
+// Resolves whose training record a handler writes to: the signed-in user by
+// default, or `targetEmail` when an admin is editing another editor's row.
+function trainingTargetEmail(targetEmail) {
+  var own = Auth && Auth.user && Auth.user.email;
+  if (!targetEmail || targetEmail === own) return own || null;
+  // Strict role check — editors also pass roleAtLeast('admin') (rank 3), and
+  // they must never write another editor's record.
+  if (!(Auth && Auth.user && Auth.user.role === 'admin')) { if (typeof toast === 'function') toast('Admin only', 'error'); return null; }
+  return targetEmail;
+}
+
 // ── Training library (item #12) ────────────────────────────────────────────
 // Modules are admin-authored. The Training tab now mirrors Campaigns: a left
 // sidebar lists every module (with a completion badge), and the main pane
@@ -12515,9 +12526,6 @@ function renderTrainingView() {
     else if (c && c.submissionUrl) out = [c.submissionUrl];
     while (out.length < n) out.push('');
     return out.slice(0, n);
-  }
-  function countFilled(urls) {
-    return urls.reduce(function(acc, u) { return acc + (String(u || '').trim() ? 1 : 0); }, 0);
   }
   // Inline <iframe> HTML for any Drive-file URLs on the module. Folder links
   // can't be embedded and fall through to the header link pills instead.
@@ -12677,91 +12685,157 @@ function renderTrainingView() {
     ? '<div class="camp-brief" style="white-space:pre-wrap;">' + escapeHtml(m.brief) + '</div>'
     : '';
 
-  // Per-editor rows in the main table. Admin/CL: one row per editor with a
-  // per-editor Slack button. Editor: one row (themselves) with inline
-  // submission slots + Start/Complete pill.
+  // Video rows in the main table — one row per submitted training video
+  // (editor, video link, submitted date), grouped by editor. The editor's
+  // status + action cells span their group via rowspan. Admin/CL see every
+  // editor (an editor with no videos gets one placeholder row); editors see
+  // their own videos plus a blank "add video" entry row.
+  var DASH = '<span style="color:var(--text3);">—</span>';
+  function readStamps(c) {
+    return Array.isArray(c && c.submissionAt) ? c.submissionAt : [];
+  }
+  // Filled slots only, keeping the original slot index so edits/clears hit
+  // the right entry in submissionUrls.
+  function videoEntries(c) {
+    var urls = Array.isArray(c && c.submissionUrls) ? c.submissionUrls : (c && c.submissionUrl ? [c.submissionUrl] : []);
+    var stamps = readStamps(c);
+    var out = [];
+    urls.forEach(function(u, i) {
+      var t = String(u || '').trim();
+      if (t) out.push({ url: t, index: i, at: stamps[i] || '' });
+    });
+    return out;
+  }
+  function statusCell(c, n) {
+    var label, color;
+    if (c.completedAt) { label = '✓ Completed'; color = '#22c55e'; }
+    else if (c.startedAt || n > 0) { label = 'In progress'; color = '#f59e0b'; }
+    else { label = 'Not started'; color = 'var(--text3)'; }
+    return '<div style="color:' + color + ';font-weight:600;">' + label + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + n + '/' + required + ' video' + (required === 1 ? '' : 's') + '</div>';
+  }
+  function videoLink(v) {
+    var host = hostnameFromUrl(v.url) || 'link';
+    return '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;" title="' + escapeHtml(v.url) + '">' +
+      'Video #' + (v.index + 1) + ' <span style="color:var(--text3);font-size:11px;">' + escapeHtml(host) + ' ↗</span></a>';
+  }
+  // Submitted dates render as the UK calendar day (BIZ_TZ), matching the rest
+  // of the tracker — a raw UTC slice shows the previous day after midnight BST.
+  function ukDay(iso) {
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? String(iso).slice(0, 10) : d.toLocaleDateString('en-CA', { timeZone: BIZ_TZ });
+  }
+  function dateCell(v) { return v.at ? escapeHtml(ukDay(v.at)) : DASH; }
+  // Emits the <tr>s for one editor: `cells` is an array of [videoHtml, dateHtml]
+  // (at least one entry), `lead` / `tail` are the rowspanned editor+status and
+  // action cells.
+  function groupRows(lead, cells, tail) {
+    var span = cells.length;
+    var rs = span > 1 ? ' rowspan="' + span + '"' : '';
+    var top = ' style="vertical-align:top;"';
+    return cells.map(function(cell, i) {
+      return '<tr>' +
+        (i === 0 ? '<td' + rs + top + '>' + lead[0] + '</td><td' + rs + top + '>' + lead[1] + '</td>' : '') +
+        '<td>' + cell[0] + '</td><td>' + cell[1] + '</td>' +
+        (i === 0 ? '<td' + rs + top + '>' + tail + '</td>' : '') +
+      '</tr>';
+    }).join('');
+  }
+
   var tableRows;
+  var totalVideos = 0;
+  // Admins can edit every editor's row (links, dates, status); editors can
+  // edit their own. `tgt` is the JS arg suffix that routes a handler call at
+  // another editor's record — '' means "the signed-in user".
+  function tgtArg(email) { return email ? ', \'' + escapeHtml(email) + '\'' : ''; }
+  function editableVideo(v, tgt) {
+    return '<div style="display:flex;align-items:center;gap:6px;">' +
+      videoLink(v) +
+      '<button type="button" class="url-edit-pencil" title="Edit link" ' +
+        'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
+      '<button type="button" class="url-edit-pencil" title="Remove video" ' +
+        'onclick="App.trainingSetSubmission(\'' + m.id + '\', ' + v.index + ', \'\'' + tgt + ')">×</button>' +
+      '<input type="url" class="form-input" style="display:none;min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
+        'placeholder="Frame.io / Drive link" value="' + escapeHtml(v.url) + '" ' +
+        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(v.url) + '\';this.blur();}" ' +
+        'onblur="App.trainingSetSubmission(\'' + m.id + '\', ' + v.index + ', this.value' + tgt + ')">' +
+    '</div>';
+  }
+  function editableDate(v, tgt) {
+    return '<input type="date" class="form-input" style="padding:3px 6px;font-size:12px;max-width:140px;" ' +
+      'value="' + escapeHtml(v.at ? ukDay(v.at) : '') + '" ' +
+      'onchange="App.trainingSetSubmissionDate(\'' + m.id + '\', ' + v.index + ', this.value' + tgt + ')">';
+  }
+  // Blank entry row — fills the first empty slot, or appends a new one once
+  // every slot is taken, so there's always room to log another video.
+  function addVideoCell(c, tgt) {
+    var slots = Array.isArray(c.submissionUrls) ? c.submissionUrls : (c.submissionUrl ? [c.submissionUrl] : []);
+    var nextIdx = slots.length;
+    for (var s = 0; s < slots.length; s++) {
+      if (!String(slots[s] || '').trim()) { nextIdx = s; break; }
+    }
+    return [
+      '<input type="url" class="form-input" style="min-width:220px;max-width:340px;padding:4px 8px;font-size:12px;" ' +
+        'placeholder="+ Add video — paste Frame.io / Drive link" ' +
+        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
+        'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', ' + nextIdx + ', this.value' + tgt + ')">',
+      DASH
+    ];
+  }
+  function actionPill(c, tgt) {
+    return c.completedAt
+      ? '<button class="training-action-pill" onclick="App.trainingUncomplete(\'' + m.id + '\'' + tgt + ')">Undo</button>'
+      : (c.startedAt || videoEntries(c).length)
+        ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\'' + tgt + ')">✓ Mark complete</button>'
+        : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\'' + tgt + ')">▶ Start</button>';
+  }
+  // Which email holds this editor's record for the module — the alias with
+  // data if any, otherwise their primary alias — so admin edits land on the
+  // same record completionForEditor reads.
+  function recordEmailForEditor(name) {
+    var aliases = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[name]) || [];
+    for (var i = 0; i < aliases.length; i++) {
+      var email = aliases[i] + '@tilt.app';
+      if ((completions[email] || {})[m.id]) return email;
+    }
+    return aliases.length ? aliases[0] + '@tilt.app' : '';
+  }
+  var adminEdits = (role === 'admin');
   if (isAdminOrCL) {
     tableRows = TRAINING_EDS.map(function(ed) {
       var c = completionForEditor(ed, m.id);
-      var statusLabel, statusColor;
-      if (c.completedAt) { statusLabel = '✓ Completed'; statusColor = '#22c55e'; }
-      else if (c.startedAt) { statusLabel = 'In progress'; statusColor = '#f59e0b'; }
-      else { statusLabel = 'Not started'; statusColor = 'var(--text3)'; }
-      var startedCell = c.startedAt ? escapeHtml((c.startedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
-      var completedCell = c.completedAt ? escapeHtml((c.completedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
-      var subs = readSubmissions(c, required);
-      var filledN = countFilled(subs);
-      var subsLinks = subs.map(function(u, i) {
-        var t = (u || '').trim();
-        if (!t) return '';
-        var label = required > 1 ? ('#' + (i + 1)) : 'Frame ↗';
-        return '<a href="' + escapeHtml(t) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;margin-right:6px;" title="' + escapeHtml(t) + '">' + label + '</a>';
-      }).join('');
-      var subsCell = subsLinks
-        ? (required > 1 ? '<span style="color:var(--text3);font-size:11px;margin-right:6px;">' + filledN + '/' + required + '</span>' : '') + subsLinks
-        : '<span style="color:var(--text3);">—</span>';
-      return '<tr>' +
-        '<td style="font-weight:600;">' + escapeHtml(ed) + '</td>' +
-        '<td style="color:' + statusColor + ';font-weight:600;">' + statusLabel + '</td>' +
-        '<td>' + startedCell + '</td>' +
-        '<td>' + completedCell + '</td>' +
-        '<td>' + subsCell + '</td>' +
-        '<td><button class="training-action-pill" onclick="App.sendTrainingToEditor(\'' + m.id + '\',\'' + ed + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ Slack</button></td>' +
-      '</tr>';
+      var vids = videoEntries(c);
+      totalVideos += vids.length;
+      var tgt = adminEdits ? tgtArg(recordEmailForEditor(ed)) : '';
+      var cells;
+      if (adminEdits) {
+        cells = vids.map(function(v) { return [editableVideo(v, tgt), editableDate(v, tgt)]; });
+        cells.push(addVideoCell(c, tgt));
+      } else {
+        cells = vids.length
+          ? vids.map(function(v) { return [videoLink(v), dateCell(v)]; })
+          : [['<span style="color:var(--text3);">No videos yet</span>', DASH]];
+      }
+      var lead = ['<span style="font-weight:600;">' + escapeHtml(ed) + '</span>', statusCell(c, vids.length)];
+      var tail =
+        '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">' +
+          (adminEdits ? actionPill(c, tgt) : '') +
+          '<button class="training-action-pill" onclick="App.sendTrainingToEditor(\'' + m.id + '\',\'' + ed + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ Slack</button>' +
+        '</div>';
+      return groupRows(lead, cells, tail);
     }).join('');
   } else {
     var myC = ((completions[currentEmail] || {})[m.id]) || {};
-    var mStatusLabel, mStatusColor;
-    if (myC.completedAt) { mStatusLabel = '✓ Completed'; mStatusColor = '#22c55e'; }
-    else if (myC.startedAt) { mStatusLabel = 'In progress'; mStatusColor = '#f59e0b'; }
-    else { mStatusLabel = 'Not started'; mStatusColor = 'var(--text3)'; }
-    var mStartedCell = myC.startedAt ? escapeHtml((myC.startedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
-    var mCompletedCell = myC.completedAt ? escapeHtml((myC.completedAt || '').slice(0, 10)) : '<span style="color:var(--text3);">—</span>';
-    var mySubs = readSubmissions(myC, required);
-    var mySubRows = mySubs.map(function(url, idx) {
-      var trimmed = (url || '').trim();
-      var slotLabel = required > 1 ? '<span style="font-size:11px;color:var(--text3);min-width:28px;display:inline-block;">#' + (idx + 1) + '</span>' : '';
-      if (trimmed) {
-        return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
-          slotLabel +
-          '<a href="' + escapeHtml(trimmed) + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:13px;" title="' + escapeHtml(trimmed) + '">Frame ↗</a>' +
-          '<button type="button" class="url-edit-pencil" title="Edit link" ' +
-            'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
-          '<button type="button" class="url-edit-pencil" title="Clear link" ' +
-            'onclick="App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', \'\')">×</button>' +
-          '<input type="url" class="form-input" style="display:none;min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
-            'placeholder="Frame.io / Drive link" value="' + escapeHtml(trimmed) + '" ' +
-            'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(trimmed) + '\';this.blur();}" ' +
-            'onblur="App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', this.value)">' +
-        '</div>';
-      }
-      return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
-        slotLabel +
-        '<input type="url" class="form-input" style="min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
-          'placeholder="Paste Frame.io / Drive link" ' +
-          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
-          'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', ' + idx + ', this.value)">' +
-      '</div>';
-    }).join('');
-    var actionPill = myC.completedAt
-      ? '<button class="training-action-pill" onclick="App.trainingUncomplete(\'' + m.id + '\')">Undo</button>'
-      : myC.startedAt
-        ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\')">✓ Mark complete</button>'
-        : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\')">▶ Start</button>';
-    tableRows =
-      '<tr>' +
-        '<td style="font-weight:600;">You (' + escapeHtml((currentEmail.split('@')[0] || 'me')) + ')</td>' +
-        '<td style="color:' + mStatusColor + ';font-weight:600;">' + mStatusLabel + '</td>' +
-        '<td>' + mStartedCell + '</td>' +
-        '<td>' + mCompletedCell + '</td>' +
-        '<td>' + mySubRows + '</td>' +
-        '<td>' + actionPill + '</td>' +
-      '</tr>';
+    var myVids = videoEntries(myC);
+    totalVideos = myVids.length;
+    var cells = myVids.map(function(v) { return [editableVideo(v, ''), dateCell(v)]; });
+    cells.push(addVideoCell(myC, ''));
+    var myLead = ['<span style="font-weight:600;">You (' + escapeHtml((currentEmail.split('@')[0] || 'me')) + ')</span>', statusCell(myC, myVids.length)];
+    tableRows = groupRows(myLead, cells, actionPill(myC, ''));
   }
   var table =
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th>Editor</th><th>Status</th><th>Started</th><th>Completed</th><th>Submissions</th><th style="width:140px">Actions</th>' +
+      '<th>Editor</th><th>Status</th><th>Video</th><th>Submitted</th><th style="width:140px">Actions</th>' +
     '</tr></thead><tbody>' + tableRows + '</tbody></table></div>';
 
   var embeds = moduleEmbeds(m);
@@ -12777,7 +12851,7 @@ function renderTrainingView() {
         titleActions +
       '</div>' +
       briefBlock +
-      '<div class="camp-meta">' + metaChips + '</div>' +
+      '<div class="camp-meta"><span class="meta-chip"><span class="meta-chip-label">videos</span>' + totalVideos + '</span>' + metaChips + '</div>' +
     '</div>' +
     table +
     embedsBlock +
@@ -19069,8 +19143,8 @@ var App = {
   // Training library (item #12) handlers — read/write STATE.trainingModules and
   // STATE.trainingCompletions. Modules keyed by id (short random string). Per-editor
   // completion path: trainingCompletions[email][moduleId] = { startedAt, completedAt }.
-  trainingStart: function(moduleId) {
-    var email = Auth && Auth.user && Auth.user.email;
+  trainingStart: function(moduleId, targetEmail) {
+    var email = trainingTargetEmail(targetEmail);
     if (!email) return;
     STATE.trainingCompletions = STATE.trainingCompletions || {};
     STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
@@ -19081,13 +19155,14 @@ var App = {
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: (new Date()).toISOString(),
       completedAt: '',
-      submissionUrls: carry
+      submissionUrls: carry,
+      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : []
     };
     saveState();
     render();
   },
-  trainingComplete: function(moduleId) {
-    var email = Auth && Auth.user && Auth.user.email;
+  trainingComplete: function(moduleId, targetEmail) {
+    var email = trainingTargetEmail(targetEmail);
     if (!email) return;
     STATE.trainingCompletions = STATE.trainingCompletions || {};
     STATE.trainingCompletions[email] = STATE.trainingCompletions[email] || {};
@@ -19098,14 +19173,15 @@ var App = {
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || (new Date()).toISOString(),
       completedAt: (new Date()).toISOString(),
-      submissionUrls: carry
+      submissionUrls: carry,
+      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : []
     };
     saveState();
     render();
     if (typeof toast === 'function') toast('Marked complete', 'success');
   },
-  trainingUncomplete: function(moduleId) {
-    var email = Auth && Auth.user && Auth.user.email;
+  trainingUncomplete: function(moduleId, targetEmail) {
+    var email = trainingTargetEmail(targetEmail);
     if (!email) return;
     if (!(STATE.trainingCompletions && STATE.trainingCompletions[email])) return;
     var existing = STATE.trainingCompletions[email][moduleId] || {};
@@ -19115,7 +19191,8 @@ var App = {
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || '',
       completedAt: '',
-      submissionUrls: carry
+      submissionUrls: carry,
+      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : []
     };
     saveState();
     render();
@@ -19129,8 +19206,9 @@ var App = {
   //
   // Callable as trainingSetSubmission(moduleId, newUrl) — legacy shape, treated
   // as slot 0 — or trainingSetSubmission(moduleId, index, newUrl).
-  trainingSetSubmission: function(moduleId, indexOrUrl, maybeUrl) {
-    var email = Auth && Auth.user && Auth.user.email;
+  // Admins pass a 4th `targetEmail` arg to edit another editor's record.
+  trainingSetSubmission: function(moduleId, indexOrUrl, maybeUrl, targetEmail) {
+    var email = trainingTargetEmail(targetEmail);
     if (!email) return;
     var index, newUrl;
     if (arguments.length >= 3) { index = parseInt(indexOrUrl, 10) || 0; newUrl = maybeUrl; }
@@ -19153,19 +19231,29 @@ var App = {
     var current = Array.isArray(existing.submissionUrls)
       ? existing.submissionUrls.slice()
       : (existing.submissionUrl ? [existing.submissionUrl] : []);
+    // Parallel array of ISO timestamps — one per video slot — so the Training
+    // table can show when each video was handed in.
+    var stamps = Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : [];
     while (current.length <= index) current.push('');
+    while (stamps.length < current.length) stamps.push('');
     var prior = (current[index] || '').trim();
     if (prior === trimmed) { render(); return; }
     var wasSet = !!prior;
     current[index] = trimmed;
+    // New video → stamp now. Edited link → keep the original submitted date
+    // (admins may have corrected it). Cleared → drop it.
+    if (!trimmed) stamps[index] = '';
+    else if (!wasSet || !stamps[index]) stamps[index] = (new Date()).toISOString();
     // Trim trailing empties so we don't grow forever if `required` drops.
     while (current.length > 0 && !(current[current.length - 1] || '').trim() && current.length > required) {
       current.pop();
     }
+    stamps.length = current.length;
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || (trimmed ? (new Date()).toISOString() : ''),
       completedAt: existing.completedAt || '',
-      submissionUrls: current
+      submissionUrls: current,
+      submissionAt: stamps
     };
     logAction('updated', 'Training "' + moduleTitle + '" submission #' + (index + 1) + ' ' +
       (trimmed ? (wasSet ? 'updated' : 'submitted') : 'cleared') + ' by ' + email);
@@ -19179,7 +19267,10 @@ var App = {
     // it without checking the Training tab. Only on new/updated links, never
     // on clears. If no thread is set for today, log and skip — a webhook
     // fallback would broadcast to the main channel.
+    // Also skip when an admin is editing on an editor's behalf — the ping
+    // reads "<editor> submitted", which would be misleading.
     if (!trimmed) return;
+    if (email !== (Auth && Auth.user && Auth.user.email)) return;
     var editor = (typeof emailToEditor === 'function') ? emailToEditor(email) : null;
     if (!editor) return;
     var thread = (typeof resolveDailyThreadForEditor === 'function') ? resolveDailyThreadForEditor(editor) : null;
@@ -19187,7 +19278,8 @@ var App = {
       logAction('skipped-notify', 'Training submission ping skipped — no daily thread for ' + editor);
       return;
     }
-    var slotLabel = required > 1 ? (' (#' + (index + 1) + ' of ' + required + ')') : '';
+    var slotLabel = index + 1 > required ? (' (#' + (index + 1) + ')')
+      : required > 1 ? (' (#' + (index + 1) + ' of ' + required + ')') : '';
     var msg = '🎬 *' + editor + '* submitted training: *' + moduleTitle + '*' + slotLabel + '\n<' + trimmed + '|Watch submission ↗>';
     postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
       if (r && r.ok) {
@@ -19198,6 +19290,23 @@ var App = {
     }).catch(function(err) {
       logAction('skipped-notify', 'Training submission ping errored for ' + editor + ': ' + ((err && err.message) || 'unknown'));
     });
+  },
+  // Admin-only: change the submitted date on one video slot. `dateStr` is a
+  // YYYY-MM-DD from <input type=date>; empty clears the date.
+  trainingSetSubmissionDate: function(moduleId, index, dateStr, targetEmail) {
+    if (!(Auth && Auth.user && Auth.user.role === 'admin')) { if (typeof toast === 'function') toast('Admin only', 'error'); return; }
+    var email = trainingTargetEmail(targetEmail);
+    if (!email) return;
+    var rec = ((STATE.trainingCompletions || {})[email] || {})[moduleId];
+    if (!rec) return;
+    var i = parseInt(index, 10) || 0;
+    var stamps = Array.isArray(rec.submissionAt) ? rec.submissionAt.slice() : [];
+    while (stamps.length <= i) stamps.push('');
+    stamps[i] = /^\d{4}-\d{2}-\d{2}$/.test(dateStr || '') ? dateStr + 'T12:00:00.000Z' : '';
+    rec.submissionAt = stamps;
+    logAction('updated', 'Training submission #' + (i + 1) + ' date set to ' + (dateStr || '(none)') + ' for ' + email);
+    saveState();
+    render();
   },
   trainingAddModule: function() {
     if (!roleAtLeast('admin')) { if (typeof toast === 'function') toast('Admin only', 'error'); return; }
