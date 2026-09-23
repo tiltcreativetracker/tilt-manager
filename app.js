@@ -1335,6 +1335,7 @@ var Fb = {
       // trust the sync. Fired only after the first apply so first-load never pings.
       if (data._lastEditedByTab && data._lastEditedByTab !== Fb._tabId && Fb._crossTabSignalReady) {
         showCrossTabUpdatePill(data._lastEditedByName || null);
+        markStaleIfAway();
       }
       Fb._crossTabSignalReady = true;
       if (typeof render === 'function' && Auth._booted) render();
@@ -1675,6 +1676,15 @@ var Fb = {
   },
 
   _applyAssets: function(assets) {
+    // A teammate's asset edit landing while this tab is in the background
+    // flags a reload for when the user comes back (see markStaleIfAway).
+    if (Auth._booted && Fb._crossTabSignalReady && isTabAway()) {
+      var prev = Fb._lastUploadedAssets;
+      var changed = assets.length !== Object.keys(prev).length || assets.some(function(a) {
+        return prev[String(a.id)] !== JSON.stringify(a);
+      });
+      if (changed) markStaleIfAway();
+    }
     Fb._suppressUpload = true;
     STATE.assets = assets;
     // Keep the diff map in sync so uploadNow doesn't re-write what we just received.
@@ -3172,6 +3182,31 @@ function showCrossTabUpdatePill(fromName) {
     }
   }, _CROSS_TAB_COALESCE_MS);
 }
+// Reload-on-return: a background tab holds a copy of every asset, and its next
+// save writes that whole copy back, silently reverting whatever a teammate
+// changed meanwhile (e.g. a PM status flip undone by a CL QC edit). So if a
+// teammate's change lands while this tab is hidden or unfocused, reload the
+// moment the user returns, before they can edit anything stale. Skipped while
+// mid-edit (open modal / focused input) or with an unsaved upload pending; the
+// flag stays set and the next return tries again.
+var _reloadOnReturn = false;
+function isTabAway() {
+  return document.hidden || (typeof document.hasFocus === 'function' && !document.hasFocus());
+}
+function markStaleIfAway() {
+  if (isTabAway()) _reloadOnReturn = true;
+}
+function _maybeReloadOnReturn() {
+  if (!_reloadOnReturn || document.hidden || _idleReloadScheduled) return;
+  if (_isBusyForIdleReload()) return;
+  if (typeof Fb !== 'undefined' && (Fb._uploadTimer || Fb._pendingLocalJson)) return;
+  _reloadOnReturn = false;
+  _idleReloadScheduled = true;
+  reloadPreservingView();
+}
+document.addEventListener('visibilitychange', _maybeReloadOnReturn);
+window.addEventListener('focus', _maybeReloadOnReturn);
+
 function dismissCrossTabPill() {
   var el = document.getElementById('cross-tab-pill');
   if (el) el.classList.remove('visible');
