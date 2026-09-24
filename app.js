@@ -2313,8 +2313,8 @@ var EDITOR_ALLOWED_DIFF = {
 var EDITOR_AUTO_SCHEDULE = { Zidni: true, Sharm: true, Patty: true, Elsa: false, Seller: false };
 var EDITOR_RULES = {
   Zidni: { cap: 4, countryOrder: ['ES', 'IT', 'UK'], idealMix: { Low: 1, Moderate: 1, High: 1, Max: 1 } },
-  Sharm: { cap: 3, countryOrder: ['UK'], idealMix: { Low: 1, Moderate: 2 } },
-  Patty: { cap: 3, countryOrder: ['UK'], idealMix: { Low: 2, Moderate: 1 } }
+  Sharm: { cap: 3, countryOrder: ['UK', 'ES', 'IT'], idealMix: { Low: 1, Moderate: 2 } },
+  Patty: { cap: 3, countryOrder: ['UK', 'ES', 'IT'], idealMix: { Low: 2, Moderate: 1 } }
 };
 
 // Batching thresholds \u2014 the size gate is effectively disabled (set absurdly high) so
