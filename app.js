@@ -379,6 +379,9 @@ var Fb = {
   STATE_DOC: 'state/app',
   ASSETS_COLL: 'state/app/assets',
   BROLL_COLL: 'state/app/broll',
+  // Editor EOD records, one doc per editor per day ({date}__{editor}). Kept out
+  // of the main state doc so the full history can grow without hitting the 1MB cap.
+  EOD_COLL: 'state/app/eod',
   BROLL_CONFIG_DOC: 'config/broll',
   // A random id unique to THIS tab. Stamped into every snapshot we upload as
   // `_lastEditedByTab` so incoming snapshots can be attributed to "this tab" vs
@@ -1749,6 +1752,45 @@ var Fb = {
     STATE.broll = [];
   },
 
+  // Subscribe to the EOD subcollection. Snapshots rebuild STATE.eod wholesale —
+  // each record is written as a whole doc by Fb.saveEOD, so there's nothing to
+  // merge. Local writes echo back immediately via latency compensation.
+  subscribeEOD: function() {
+    if (Fb._eodUnsub) return;
+    Fb._eodUnsub = fbDb.collection(Fb.EOD_COLL).onSnapshot(function(snapshot) {
+      if (snapshot.metadata.fromCache && snapshot.empty) return;
+      var out = {};
+      snapshot.forEach(function(d) {
+        var rec = d.data() || {};
+        if (!rec.editor || !rec.date) return;
+        if (!out[rec.editor]) out[rec.editor] = {};
+        out[rec.editor][rec.date] = rec;
+      });
+      STATE.eod = out;
+      if (typeof render === 'function' && Auth._booted &&
+          (STATE.tab === 'editorHome' || STATE.tab === 'log')) render();
+    }, function(err) {
+      console.warn('[Fb] eod listener error:', err);
+      if (Fb._eodUnsub) { try { Fb._eodUnsub(); } catch (_) {} Fb._eodUnsub = null; }
+      setTimeout(function() { Fb.subscribeEOD(); }, 5000);
+    });
+  },
+
+  // Write one editor's EOD record for one day as a whole doc (full set, not
+  // merge, so removed "Other" items don't linger).
+  saveEOD: function(editor, dateISO) {
+    if (!Auth.user) return Promise.reject(new Error('Not signed in'));
+    var rec = STATE.eod && STATE.eod[editor] && STATE.eod[editor][dateISO];
+    if (!rec) return Promise.resolve();
+    rec.editor = editor;
+    rec.date = dateISO;
+    var docId = dateISO + '__' + String(editor).replace(/[\/]/g, '_');
+    return fbDb.doc(Fb.EOD_COLL + '/' + docId).set(JSON.parse(JSON.stringify(rec))).catch(function(err) {
+      console.warn('[Fb] saveEOD failed:', err);
+      toast('Couldn\'t save EOD — check your connection', 'error');
+    });
+  },
+
   // Write per-clip tag updates. Bypasses uploadNow/buildSnapshot because broll
   // docs live in a subcollection, not in the main state doc. Merges into the
   // existing doc so server-managed Drive fields (name, folderPath, thumbnail…)
@@ -2479,6 +2521,8 @@ var STATE = {
   //       assets: [{ assetId, name, campaignId, campaignName, category, status }],
   //       other:  [{ id, text, addedAt, addedByName }],
   //       slackChannelId, slackParentTs, slackReplyTs, slackReplyUrl } } }
+  // Persisted in the state/app/eod subcollection (Fb.saveEOD / Fb.subscribeEOD),
+  // not the main state doc. Also surfaced read-only in the Weekly Log.
   // Once submittedAt is set the day is read-only ("locked") — the EOD panel
   // switches to a summary card. Tag source is the same a.doneToday stamp the
   // My Day checkbox writes; assets are snapshotted at submit time so later
@@ -7087,11 +7131,37 @@ function assetExistedOnDay(a, dateISO) {
   return true; // Default: treat as existed. Conservative; status will be Draft if uninitialized.
 }
 
-// Return the sorted list of Weekly Log activity entries for the given date.
+// Turn an editor's submitted EOD for one day into read-only Weekly Log entries
+// (source: 'eod'). Derived at render time rather than copied into weeklyLog, so
+// the EOD record stays the single source of truth.
+function getEODWeeklyLogEntries(dateISO, editor) {
+  var rec = editor && STATE.eod && STATE.eod[editor] && STATE.eod[editor][dateISO];
+  if (!rec || !rec.submittedAt) return [];
+  var at = new Date(rec.submittedAt).getTime() || 0;
+  var base = { source: 'eod', addedAt: at, addedByName: editor, slackReplyUrl: rec.slackReplyUrl || null };
+  var out = [];
+  (Array.isArray(rec.assets) ? rec.assets : []).forEach(function(a, i) {
+    var bits = [a.campaignName, a.status].filter(Boolean).join(' · ');
+    out.push(Object.assign({}, base, { id: 'eod_a_' + i, category: 'Editing',
+      text: (a.name || 'Untitled') + (bits ? ' — ' + bits : '') }));
+  });
+  (Array.isArray(rec.training) ? rec.training : []).forEach(function(t, i) {
+    out.push(Object.assign({}, base, { id: 'eod_t_' + i, category: 'Training',
+      text: (t.title || 'Untitled module') + (t.state ? ' — ' + t.state : '') }));
+  });
+  (Array.isArray(rec.other) ? rec.other : []).forEach(function(o, i) {
+    out.push(Object.assign({}, base, { id: 'eod_o_' + i, category: 'Other', text: o.text || '' }));
+  });
+  return out;
+}
+
+// Return the sorted list of Weekly Log activity entries for the given date,
+// plus the selected editor's submitted EOD items when `editor` is passed.
 // Newest first (by addedAt) so the most recent activity is easiest to skim.
-function getWeeklyLogEntries(dateISO) {
+function getWeeklyLogEntries(dateISO, editor) {
   var m = (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {};
   var list = Array.isArray(m[dateISO]) ? m[dateISO].slice() : [];
+  list = list.concat(getEODWeeklyLogEntries(dateISO, editor));
   list.sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
   return list;
 }
@@ -7117,8 +7187,8 @@ function weeklyLogCategoryClass(cat) {
 
 // Render the activities panel for one day (input form + entries list). Used
 // inside each day-card on the Weekly Log tab.
-function renderWeeklyLogActivitiesPanel(dateISO) {
-  var entries = getWeeklyLogEntries(dateISO);
+function renderWeeklyLogActivitiesPanel(dateISO, editor) {
+  var entries = getWeeklyLogEntries(dateISO, editor);
   var inputId = 'wlog-input-' + dateISO;
   var catId = 'wlog-cat-' + dateISO;
   var catOpts = WEEKLY_LOG_CATEGORIES.map(function(c) {
@@ -7127,12 +7197,19 @@ function renderWeeklyLogActivitiesPanel(dateISO) {
   var entriesHtml = entries.length === 0
     ? '<div class="wlog-empty">No activities logged yet — add one above.</div>'
     : entries.map(function(e) {
+        var isEOD = e.source === 'eod';
+        // EOD rows are read-only here — they're edited (pre-submit) in My Day.
+        var tail = isEOD
+          ? (e.slackReplyUrl
+              ? '<a class="wlog-eod-tag" href="' + escapeHtml(e.slackReplyUrl) + '" target="_blank" rel="noopener" title="From ' + escapeHtml(e.addedByName) + '\'s EOD — open Slack reply">EOD ↗</a>'
+              : '<span class="wlog-eod-tag" title="From ' + escapeHtml(e.addedByName) + '\'s EOD">EOD</span>')
+          : '<button class="wlog-entry-del" title="Delete this entry" ' +
+              'onclick="App.deleteWeeklyLogEntry(\'' + dateISO + '\',\'' + escapeHtml(e.id) + '\')">×</button>';
         return '<div class="wlog-entry">' +
           '<span class="wlog-cat-chip ' + weeklyLogCategoryClass(e.category) + '">' + escapeHtml(e.category || 'Other') + '</span>' +
           '<span class="wlog-entry-text">' + escapeHtml(e.text || '') + '</span>' +
           '<span class="wlog-entry-by" title="Added by ' + escapeHtml(e.addedByName || 'unknown') + '">' + escapeHtml(formatWeeklyLogEntryByline(e)) + '</span>' +
-          '<button class="wlog-entry-del" title="Delete this entry" ' +
-            'onclick="App.deleteWeeklyLogEntry(\'' + dateISO + '\',\'' + escapeHtml(e.id) + '\')">×</button>' +
+          tail +
         '</div>';
       }).join('');
   return '<div class="wlog-panel">' +
@@ -7504,7 +7581,7 @@ function renderDailyLogView() {
         '</div>';
       }).join('');
     }
-    var activitiesHtml = renderWeeklyLogActivitiesPanel(dayIso);
+    var activitiesHtml = renderWeeklyLogActivitiesPanel(dayIso, selectedEditor);
     return '<div class="log-day-card' + (isToday ? ' is-today' : '') + '">' +
       '<div class="log-day-card-header">' +
         '<div class="log-day-card-date">' +
@@ -19791,7 +19868,7 @@ var App = {
       addedByName: (Auth.user && (Auth.user.displayName || Auth.user.email)) || 'unknown'
     });
     input.value = '';
-    saveState();
+    Fb.saveEOD(editor, today);
     render();
   },
   removeEODOther: function(editor, entryId) {
@@ -19803,7 +19880,7 @@ var App = {
     if (!bucket || bucket.submittedAt) return;
     if (!Array.isArray(bucket.other)) return;
     bucket.other = bucket.other.filter(function(e) { return e && e.id !== entryId; });
-    saveState();
+    Fb.saveEOD(editor, today);
     render();
   },
 
@@ -19887,7 +19964,7 @@ var App = {
       slackReplyTs: null,
       slackReplyUrl: null
     };
-    saveState();
+    Fb.saveEOD(editor, today);
     render();
     toast('EOD submitted', 'success');
 
@@ -19896,7 +19973,7 @@ var App = {
     // notify her by default.
     ensureDailyThreadForEditor(editor).then(function(thread) {
       if (!thread || !thread.channelId || !thread.threadTs) {
-        toast('Saved locally — Slack thread unavailable', 'info');
+        toast('EOD saved — Slack thread unavailable', 'info');
         return;
       }
       var mention = (typeof mentionElsaForIntl === 'function') ? mentionElsaForIntl() : '@Elsa';
@@ -19912,14 +19989,14 @@ var App = {
           logAction('notified', 'EOD posted for ' + editor + ' (' + today + ')');
         } else {
           logAction('skipped-notify', 'EOD Slack post failed for ' + editor + ': ' + ((r && r.body) || 'unknown'));
-          toast('Saved locally — Slack post failed', 'info');
+          toast('EOD saved — Slack post failed', 'info');
         }
-        saveState();
+        Fb.saveEOD(editor, today);
         render();
       });
     }).catch(function(err) {
       logAction('skipped-notify', 'EOD ensureDailyThread errored: ' + ((err && err.message) || 'unknown'));
-      toast('Saved locally — Slack post failed', 'info');
+      toast('EOD saved — Slack post failed', 'info');
     });
   },
 
@@ -22634,6 +22711,9 @@ bootApp = function() {
 
   // Subscribe to the assets subcollection (separate from the main state doc).
   Fb.subscribeAssets();
+
+  // EOD records (My Day + Weekly Log) live in their own subcollection too.
+  Fb.subscribeEOD();
 
   // Subscribe to the broll subcollection (Clips tab). Only fetches for roles that
   // can see the tab (admin/editor) — saves quota + listener count for viewers/PMs.

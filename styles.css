@@ -1139,6 +1139,8 @@
   .wlog-entry-by { font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
   .wlog-entry-del { background: transparent; color: var(--text3); border: none; border-radius: 4px; width: 22px; height: 22px; font-size: 16px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
   .wlog-entry-del:hover { background: var(--red-bg); color: var(--red-text); }
+  .wlog-eod-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: var(--accent2); background: var(--accent-dim); border-radius: 4px; padding: 2px 6px; white-space: nowrap; text-decoration: none; }
+  a.wlog-eod-tag:hover { text-decoration: underline; }
 
   .wlog-cat-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; border: 1px solid transparent; white-space: nowrap; }
   .wlog-cat-chip.wlog-cat-tagging   { background: var(--blue-bg);   color: var(--blue-text);   border-color: rgba(133,183,235,0.35); }
