@@ -4199,6 +4199,8 @@ function queueNotification(recipient, changeType, asset, detail, opts) {
     recipientLabel = 'PM \u2014 ' + recipient.slice(3);
   } else if (typeof recipient === 'string' && recipient.indexOf('CHQ:') === 0) {
     recipientLabel = 'Category Head \u2014 ' + recipient.slice(4);
+  } else if (recipient === 'CLQ:shared') {
+    recipientLabel = 'Organic \u2014 Content Lead review';
   } else {
     recipientLabel = recipient; // editor name as-is
   }
@@ -9810,6 +9812,7 @@ function renderNotificationsView() {
     var isPm = recipient.indexOf('PM:') === 0;
     var isChq = recipient.indexOf('CHQ:') === 0;
     var isCha = recipient.indexOf('CHA:') === 0;
+    var isClq = recipient.indexOf('CLQ:') === 0;
     var countryCode = isPm ? recipient.slice(3) : (isCha ? recipient.slice(4) : null);
     // CHQ batches are now keyed per manager (CHQ:<head>), so the suffix is the head
     // name. The subtitle lists the categories that head owns.
@@ -9825,6 +9828,9 @@ function renderNotificationsView() {
         + (headCats.length ? '<div class="batch-card-title-sub">' + escapeHtml(headCats.join(' \u00b7 ')) + '</div>' : '');
     } else if (isCha) {
       displayName = escapeHtml(countryCode + ' \u2014 Category Head Approved');
+    } else if (isClq) {
+      displayName = '<div class="batch-card-title-main">Organic \u2014 Content Lead review</div>' +
+        '<div class="batch-card-title-sub">' + escapeHtml(CONTENT_LEADS.join(' \u00b7 ')) + '</div>';
     } else {
       displayName = escapeHtml(recipient);
     }
@@ -9846,6 +9852,11 @@ function renderNotificationsView() {
       avatarHtml = '<div class="pm-avatar" title="Category Head QC for ' + escapeHtml(head) + '">' +
         '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
         '<div class="country-flag flag-PM" style="width:20px; height:14px; font-size:8px;">' + escapeHtml(head.slice(0, 2).toUpperCase()) + '</div>' +
+        '</div>';
+    } else if (isClq) {
+      avatarHtml = '<div class="pm-avatar" title="Organic Content Lead review queue">' +
+        '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F331}</div>' +
+        '<div class="country-flag flag-PM" style="width:20px; height:14px; font-size:8px;">CL</div>' +
         '</div>';
     } else {
       avatarHtml = '<div class="editor-avatar av-' + recipient + '">' + editorInitials(recipient) + '</div>';
@@ -9883,7 +9894,7 @@ function renderNotificationsView() {
     var itemsHtml = count === 0
       ? '<div style="padding:20px; text-align:center; color:var(--text3); font-size:12px; background:var(--bg3); border-radius:6px; border:1px dashed var(--border2);">No pending notifications</div>'
       : batch.items.map(function(it, i) {
-          var changeLabel = ({ 'assigned': 'new assignment', 'for-review': 'ready for review', 'needs-revisions': 'needs revisions', 'created': 'new task', 'reassigned': 'reassigned', 'status': 'status change' })[it.change] || it.change;
+          var changeLabel = ({ 'assigned': 'new assignment', 'for-review': 'ready for review', 'needs-revisions': 'needs revisions', 'created': 'new task', 'reassigned': 'reassigned', 'status': 'status change', 'cl-for-review': 'content lead review' })[it.change] || it.change;
           var detailHtml = it.detail
             ? '<div style="grid-column:1 / -1; font-size:10.5px; color:var(--text3); font-family:\'JetBrains Mono\', monospace; padding:2px 0 0 22px; word-break:break-all;">' + escapeHtml(it.detail) + '</div>'
             : '';
@@ -9979,6 +9990,17 @@ function renderNotificationsView() {
       }
     }
 
+    var clqRouteHtml = '';
+    if (isClq) {
+      var clqRoute = describeOrganicQueueRoute(previewItems);
+      if (!willSplit) {
+        cardWebhookReady = clqRoute.ok;
+        sendTitle = clqRoute.ok ? 'POST to the ' + clqRoute.label : 'Can\u2019t send \u2014 ' + clqRoute.label;
+      }
+      clqRouteHtml = '<div style="font-size:11px; color:' + (clqRoute.ok ? 'var(--text3)' : 'var(--amber-text)') + '; padding:4px 2px 0;">' +
+        '\u2192 Sends to ' + escapeHtml(clqRoute.label) + '</div>';
+    }
+
     var sendBtnAttrs = cardWebhookReady
       ? 'class="batch-flush-btn" title="' + escapeHtml(sendTitle) + '"'
       : 'class="batch-flush-btn" title="' + escapeHtml(sendTitle) + '" disabled style="opacity:0.45; cursor:not-allowed;"';
@@ -10000,7 +10022,7 @@ function renderNotificationsView() {
     }
 
     // PM, CHQ, and CHA batches have no per-editor Slack channel, so hide the Open Slack button
-    var openSlackBtn = (isPm || isChq || isCha) ? '' : '<button class="batch-slack-btn" title="Open Slack channel" onclick="App.openSlack(\'' + recipient + '\')">\u{1F517}</button>';
+    var openSlackBtn = (isPm || isChq || isCha || isClq) ? '' : '<button class="batch-slack-btn" title="Open Slack channel" onclick="App.openSlack(\'' + recipient + '\')">\u{1F517}</button>';
 
     var actions = count > 0
       ? '<div class="batch-actions">' +
@@ -10018,6 +10040,7 @@ function renderNotificationsView() {
         '<div class="batch-card-title">' + displayName + '</div>' +
         '<div class="batch-header-right">' + statusLabel + '</div>' +
       '</div>' +
+      clqRouteHtml +
       '<div class="batch-progress-bar"><div class="batch-progress-fill ' + progressClass + '" style="width:' + progressPct + '%;"></div></div>' +
       '<div class="batch-items">' + itemsHtml + '</div>' +
       actions +
@@ -10036,6 +10059,7 @@ function renderNotificationsView() {
   // queue from PM Review so the two signals don't get visually mixed up.
   var CHA_COUNTRY_ALLOWLIST = ['UK', 'US'];
   var chaCards = CHA_COUNTRY_ALLOWLIST.map(function(cc) { return renderBatchCard('CHA:' + cc); }).join('');
+  var clqCards = renderBatchCard('CLQ:shared');
 
   // Sent notifications log
   var sentHtml = STATE.sentNotifications.length === 0
@@ -10059,6 +10083,7 @@ function renderNotificationsView() {
         var isPmEntry = typeof n.editor === 'string' && n.editor.indexOf('PM:') === 0;
         var isChqEntry = typeof n.editor === 'string' && n.editor.indexOf('CHQ:') === 0;
         var isChaEntry = typeof n.editor === 'string' && n.editor.indexOf('CHA:') === 0;
+        var isClqEntry = typeof n.editor === 'string' && n.editor.indexOf('CLQ:') === 0;
         var entryCountry = isPmEntry ? n.editor.slice(3) : (isChaEntry ? n.editor.slice(4) : null);
         var entryHead = isChqEntry ? n.editor.slice(4) : null;
         var avatarHtml;
@@ -10077,12 +10102,18 @@ function renderNotificationsView() {
             '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F50D}</div>' +
             '<div class="country-flag flag-PM" style="width:20px; height:14px; font-size:8px;">' + escapeHtml((entryHead || '').slice(0, 2).toUpperCase()) + '</div>' +
             '</div>';
+        } else if (isClqEntry) {
+          avatarHtml = '<div class="pm-avatar" title="Organic Content Lead review queue">' +
+            '<div class="country-flag flag-PM" style="width:28px; height:20px; font-size:14px;">\u{1F331}</div>' +
+            '<div class="country-flag flag-PM" style="width:20px; height:14px; font-size:8px;">CL</div>' +
+            '</div>';
         } else {
           avatarHtml = '<div class="editor-avatar av-' + n.editor + '">' + editorInitials(n.editor) + '</div>';
         }
         var displayName = isPmEntry ? ('PM review \u2014 ' + entryCountry)
                         : isChqEntry ? ('Category Head QC \u2014 ' + entryHead)
                         : isChaEntry ? ('Category Head Approved \u2014 ' + entryCountry)
+                        : isClqEntry ? 'Organic \u2014 Content Lead review'
                         : n.editor;
         return '<div class="sent-entry">' +
           '<div class="sent-entry-header">' +
@@ -10213,6 +10244,10 @@ function renderNotificationsView() {
     '<div class="section-title">Category Head Approved <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires when a video’s Category Head QC flips to Approved — pings country PM with the video link)</span></div>' +
     '<div class="auto-card">' +
       '<div class="batch-grid">' + chaCards + '</div>' +
+    '</div>' +
+    '<div class="section-title">Organic Queue <span style="font-weight:400; color:var(--text3); margin-left:6px; font-size:10px;">(fires when an Organic video\u2019s Content Lead QC flips to For Review \u2014 @-mentions the Content Lead)</span></div>' +
+    '<div class="auto-card">' +
+      '<div class="batch-grid">' + clqCards + '</div>' +
     '</div>' +
     (function() {
       // Daily Clip-Tagging Task \u2014 morning nudge posted in each editor's daily
@@ -15876,6 +15911,38 @@ function resolveDailyThreadForOrganic(items) {
   if (!t.channelId || !t.threadTs) return null;
   if (!itemsAllOrganicUK(items)) return null;
   return t;
+}
+
+// Human-readable destination for the Organic (Content Lead) review queue —
+// mirrors sendPendingBatch's route for 'CLQ:shared': the shared Organic (UK)
+// daily thread when it's set today and every item is UK Organic, otherwise the
+// webhook chain (campaign override → country webhook → global fallback).
+// With no items, reports where a UK Organic video WOULD go right now.
+function describeOrganicQueueRoute(items) {
+  var t = STATE.organicDailyThread;
+  var threadToday = !!(t && t.date === todayUK() && t.channelId && t.threadTs);
+  var probe = (items && items.length) ? items : null;
+  if (threadToday && (!probe || itemsAllOrganicUK(probe))) {
+    // sendPendingBatch still refuses to send without a valid webhook, even when
+    // the post itself goes to the thread.
+    var ok = webhookValid(resolveWebhookForEditor('CLQ:shared', probe || []));
+    return { ok: ok, kind: 'thread', label: 'Organic (UK) daily Slack thread' + (ok ? '' : ' (blocked \u2014 no webhook set)') };
+  }
+  var why = !threadToday ? 'Organic (UK) thread not set today' : 'batch has non-UK items';
+  var countries = {};
+  (probe || [{ country: 'UK' }]).forEach(function(it) { if (it.country) countries[it.country] = true; });
+  var list = Object.keys(countries);
+  var cw = STATE.countryWebhooks || {};
+  if (probe && sharedCampaignOverride(probe)) {
+    return { ok: true, kind: 'webhook', label: 'campaign Slack override webhook (' + why + ')' };
+  }
+  if (list.length === 1 && webhookValid(cw[list[0]])) {
+    return { ok: true, kind: 'webhook', label: list[0] + ' country webhook (' + why + ')' };
+  }
+  if (webhookValid(STATE.webhookUrl)) {
+    return { ok: true, kind: 'webhook', label: 'global fallback webhook (' + why + ')' };
+  }
+  return { ok: false, kind: 'none', label: 'nowhere \u2014 ' + why + ' and no webhook set' };
 }
 
 // Send a message to a daily thread. Prefers chat.postMessage (bot token) because
