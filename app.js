@@ -1310,7 +1310,7 @@ var Fb = {
         if (!STATE.dailyThreadHistory.Elsa) STATE.dailyThreadHistory.Elsa = [];
         setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
       }
-      // Migration: routing collapsed from per-lead (Millie/Rivers) → one shared
+      // Migration: routing collapsed from per-lead → one shared
       // organicDailyThread. Port any today-dated per-lead thread over so the
       // handoff is seamless — first non-null slot wins. Legacy state is left in
       // place; sweepStaleDailyThreads will retire it at midnight.
@@ -2447,8 +2447,8 @@ var STATE = {
   // shape as per-editor threads: { date, url, channelId, threadTs }.
   intlDailyThread: null,
   intlDailyThreadHistory: [],
-  // Single shared daily Slack thread for ALL Organic activity (Millie + Rivers
-  // both watch it). When set, every Organic-only editor batch, Organic-only CHQ
+  // Single shared daily Slack thread for ALL Organic activity (Millie
+  // watches it). When set, every Organic-only editor batch, Organic-only CHQ
   // batch, and Organic sub-campaign QC report posts as a reply here — regardless
   // of country, editor, category, or Content Lead assignment. Mixed batches
   // (any non-Organic item) fall through to the existing paid routing (per-editor,
@@ -2458,8 +2458,8 @@ var STATE = {
   organicDailyThreadHistory: [],
   // Legacy per-lead threads — kept in the schema so old snapshots load cleanly.
   // Migrated into organicDailyThread on first load (see boot migration below).
-  contentLeadDailyThreads: { Millie: null, Rivers: null },
-  contentLeadDailyThreadHistory: { Millie: [], Rivers: [] },
+  contentLeadDailyThreads: { Millie: null },
+  contentLeadDailyThreadHistory: { Millie: [] },
   // Weekly Log tab: remembered editor selection so it survives re-renders and sessions.
   // Null = show first editor. Changed via the dropdown; persisted by saveState.
   logEditor: null,
@@ -3363,7 +3363,6 @@ function mentionCategoryHead(category) {
 // Returns the Slack mention syntax for a content lead when their member ID is
 // configured, or the plain name otherwise. Content leads share the categoryHeadSlackIds
 // map — Millie already lives there because she also owns the "Content Lead" category.
-// Rivers falls back to her plain name unless / until her Slack ID is added.
 function mentionContentLead(lead) {
   if (!lead) return '';
   var ids = (STATE && STATE.categoryHeadSlackIds) || {};
@@ -3376,7 +3375,7 @@ function mentionContentLead(lead) {
 // ownership tag is blank).
 function mentionContentLeadsForCampaign(camp) {
   var lead = camp && (camp.contentLead || '').trim();
-  if (lead) return mentionContentLead(lead);
+  if (lead && CONTENT_LEADS.indexOf(lead) >= 0) return mentionContentLead(lead);
   return CONTENT_LEADS.map(mentionContentLead).join(' ');
 }
 
@@ -10462,7 +10461,7 @@ function renderAutomationsView() {
     var row = '<div style="margin-top:10px;">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
         '<span style="font-weight:600;font-size:13px;color:var(--text1);">Organic (UK)</span>' +
-        '<span style="font-size:12px;color:var(--text3);">Millie · Rivers · UK only · all categories</span>' +
+        '<span style="font-size:12px;color:var(--text3);">Millie · UK only · all categories</span>' +
         '<span class="webhook-dot ' + dot + '" title="' + escapeHtml(dotTitle) + '" style="margin-left:auto;"></span>' +
       '</div>' +
       '<div class="webhook-row">' +
@@ -10472,7 +10471,7 @@ function renderAutomationsView() {
       '</div>' + histHtml +
     '</div>';
     return '<div class="auto-card">' +
-      '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack thread (Organic · UK)</div><div class="auto-sub">one shared thread — Millie and Rivers both watch. UK Organic only.</div></div></div>' +
+      '<div class="auto-header"><div class="auto-icon">\u{1F4AC}</div><div><div class="auto-title">Daily Slack thread (Organic · UK)</div><div class="auto-sub">one shared thread — Millie watches. UK Organic only.</div></div></div>' +
       '<div class="auto-desc">Shared daily thread for UK Organic activity. When set, any UK-Organic-only editor batch, UK-Organic-only CHQ batch, and UK Organic QC report posts as a reply here — regardless of editor, category, or Content Lead assignment. Intl Organic (IT / ES / US) uses the intl thread instead. Mixed batches (any Paid Ads item, or any intl item) fall through to paid routing (per-editor / intl / category). Resets at UK midnight; falls back to the ORG webhook chain when unset or stale.</div>' +
       row +
     '</div>';
@@ -15674,11 +15673,11 @@ function resolveDailyThreadForCategory(category) {
 // Content Leads that own Organic sub-campaigns. Ownership tag on Organic
 // sub-campaigns; not part of routing anymore (all Organic activity routes to
 // the single shared organicDailyThread).
-var CONTENT_LEADS = ['Millie', 'Rivers'];
+var CONTENT_LEADS = ['Millie'];
 
 // For a UK Organic sub-campaign, returns the shared Organic daily thread IFF
-// it's set today. Content Lead assignment (Millie / Rivers) is no longer part
-// of the route — routing collapsed to one shared thread that both leads watch.
+// it's set today. Content Lead assignment is no longer part
+// of the route — routing collapsed to one shared thread.
 // The contentLead field is preserved on sub-campaigns as an ownership tag only.
 // Intl Organic (IT/ES/US), non-Organic campaigns, and stale threads return
 // null (→ caller uses the QC webhook chain instead).
@@ -21633,8 +21632,8 @@ var App = {
     render();
   },
 
-  // Save/clear the single shared Organic daily Slack thread (both Millie and
-  // Rivers watch it). Replaces the per-lead thread pickers.
+  // Save/clear the single shared Organic daily Slack thread (Millie watches
+  // it). Replaces the per-lead thread pickers.
   saveOrganicDailyThread: function() {
     var input = document.getElementById('organic-thread-input');
     if (!input) return;
