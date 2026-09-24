@@ -203,6 +203,11 @@
   .cat-head-status-badge.st-For_Review      { color: #5eead4; border: 1px solid rgba(94,234,212,0.35); background: rgba(94,234,212,0.08); }
   .cat-head-status-badge.st-Needs_Revisions { background: var(--red-bg); color: var(--red-text); }
   .cat-head-status-badge.st-Approved        { background: var(--green-bg); color: var(--green-text); }
+  /* Distribution (Organic) */
+  .cat-head-status-badge.st-Backlog         { background: var(--bg4); color: var(--text3); }
+  .cat-head-status-badge.st-Scheduled       { background: var(--amber-bg); color: var(--amber-text); }
+  .cat-head-status-badge.st-Posted          { background: var(--green-bg); color: var(--green-text); }
+  .cat-head-status-badge.st-Cancelled       { background: var(--bg4); color: var(--text3); text-decoration: line-through; }
   .type-pill { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid transparent; }
   .type-pill-paid { background: var(--accent-dim); color: var(--accent2); border-color: rgba(127,119,221,0.35); }
   .type-pill-organic { background: #222234; color: #a6b1c9; border-color: #333348; }

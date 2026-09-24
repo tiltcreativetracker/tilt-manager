@@ -2300,6 +2300,9 @@ function typeForListKey(listKey) { return listKey === 'organic' ? 'Organic' : 'P
 // Footage QC values (which track raw-files / pricing readiness) — these track
 // the head's review verdict on the produced video.
 var CATEGORY_HEAD_QC_VALUES = ['Draft', 'For Review', 'Needs Revisions', 'Approved', 'Cancelled'];
+// Organic-only posting lifecycle, set after the CL signs a video off. 'Posted'
+// auto-stamps datePosted (mirrors contentLeadQc → clQcDateApproved).
+var DISTRIBUTION_VALUES = ['Backlog', 'Scheduled', 'Posted', 'Cancelled'];
 // Countries currently in scope for category-head review (tab visibility + Slack pings).
 // Other countries are out of scope until those teams are onboarded — widen here to expand.
 var CHQ_COUNTRY_ALLOWLIST = { UK: 1, US: 1 };
@@ -3048,6 +3051,10 @@ function mkAsset(id, pn, campaignId, name, editor, difficulty, estDelivery, vers
     // Never cleared — reflects "sends made" so day-of counters stay truthful even
     // after the editor re-flips to For Review later that day.
     clQcDateRevisions: '',
+    // Organic-only: posting status + the date it went live. Setting distribution to
+    // 'Posted' stamps datePosted; moving off 'Posted' clears it. Editable manually.
+    distribution: '',
+    datePosted: '',
     // Editor home / EOD: doneToday is an ISO date the editor tags when they wrap
     // work on the video for the day. decisions is an append-only log of notes the
     // editor jots about creative choices on this video. Both are Editor Home surface.
@@ -3708,6 +3715,24 @@ var EDITABLE_FIELDS = {
     display: function(a) { return '<span class="date-cell">' + (a.clQcDateApproved ? escapeHtml(formatDate(a.clQcDateApproved)) : '—') + '</span>'; },
     value: function(a) { return toISODate(a.clQcDateApproved); },
     appMethod: 'setAssetClQcDateApproved'
+  },
+  // Organic-only Distribution status. Empty reads as 'Backlog'.
+  distribution: {
+    kind: 'select',
+    options: function() { return DISTRIBUTION_VALUES; },
+    display: function(a) {
+      var v = a.distribution || 'Backlog';
+      return '<span class="cat-head-status-badge st-' + v.replace(/ /g, '_') + '">' + v + '</span>';
+    },
+    value: function(a) { return a.distribution || 'Backlog'; },
+    appMethod: 'setAssetDistribution'
+  },
+  // Organic-only Date Posted. Auto-stamped when distribution goes to 'Posted'.
+  datePosted: {
+    kind: 'date',
+    display: function(a) { return '<span class="date-cell">' + (a.datePosted ? escapeHtml(formatDate(a.datePosted)) : '—') + '</span>'; },
+    value: function(a) { return toISODate(a.datePosted); },
+    appMethod: 'setAssetDatePosted'
   }
 };
 
@@ -6026,8 +6051,9 @@ function renderCampaignsView() {
   var hideCHQC = ['IT', 'ES'].indexOf(camp.country) !== -1 || isOrganic;
   // Total column count for full-width rows (empty state, week-group headers). Mirrors the
   // conditional columns in the <thead>/row markup below. Organic adds back 2 slots for
-  // CL QC + CL Date Approved (replacing the hidden CH QC + CH Date Approved).
-  var colCount = 12 + (hideLinkCols ? 0 : 2) + (showSparksCode ? 1 : 0) + (showIgLink ? 1 : 0) + (hideCHQC ? 0 : 2) + (isOrganic ? 2 : 0);
+  // CL QC + CL Date Approved (replacing the hidden CH QC + CH Date Approved), plus
+  // Distribution + Date Posted.
+  var colCount = 12 + (hideLinkCols ? 0 : 2) + (showSparksCode ? 1 : 0) + (showIgLink ? 1 : 0) + (hideCHQC ? 0 : 2) + (isOrganic ? 4 : 0);
 
   // Build one <tr> for an asset. Extracted so it can be emitted either flat or under
   // weekly group headers.
@@ -6065,9 +6091,11 @@ function renderCampaignsView() {
           '<td>' + renderEditableCell(a, 'chDateApproved') + '</td>') +
         (isOrganic
           ? '<td>' + renderEditableCell(a, 'contentLeadQc') + '</td>' +
-            '<td>' + renderEditableCell(a, 'clQcDateApproved') + '</td>'
+            '<td>' + renderEditableCell(a, 'clQcDateApproved') + '</td>' +
+            '<td>' + renderEditableCell(a, 'distribution') + '</td>'
           : '') +
         (showIgLink ? '<td class="link-cell">' + renderEditableCell(a, 'igLink') + '</td>' : '') +
+        (isOrganic ? '<td>' + renderEditableCell(a, 'datePosted') + '</td>' : '') +
         '<td><div class="row-actions"><button class="action-btn row-actions-menu-btn" onclick="App.showRowActionsMenu(event, \'' + a.id + '\')" title="Row actions">Actions ▾</button></div></td>' +
       '</tr>';
   }
@@ -6268,7 +6296,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>' + (isOrganic ? 'Date Assigned' : 'Estimated Delivery') + '</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>' + (isOrganic ? 'Date Assigned' : 'Estimated Delivery') + '</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th><th>Distribution</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + (isOrganic ? '<th>Date Posted</th>' : '') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -19836,6 +19864,33 @@ var App = {
     if (a.clQcDateApproved === iso) { render(); return; }
     a.clQcDateApproved = iso;
     logAction('updated', 'Asset "' + a.name + '" CL QC date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    render();
+  },
+
+  // Distribution \u2014 Organic posting lifecycle. 'Posted' stamps datePosted; moving
+  // off 'Posted' clears it (same shape as contentLeadQc \u2192 clQcDateApproved).
+  setAssetDistribution: function(id, newVal) {
+    var a = findAssetById(id);
+    if (!a) return;
+    if (DISTRIBUTION_VALUES.indexOf(newVal) < 0) { render(); return; }
+    var old = a.distribution || 'Backlog';
+    if (old === newVal) { render(); return; }
+    recordUndo(a, ['distribution', 'datePosted'], 'Distribution');
+    a.distribution = newVal;
+    if (newVal === 'Posted') a.datePosted = todayLocalISO();
+    else if (old === 'Posted') a.datePosted = '';
+    logAction('updated', 'Asset "' + a.name + '" distribution: ' + old + ' \u2192 ' + newVal);
+    render();
+  },
+
+  setAssetDatePosted: function(id, newDate) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var iso = toISODate(newDate);
+    if (a.datePosted === iso) { render(); return; }
+    recordUndo(a, ['datePosted'], 'Date posted');
+    a.datePosted = iso;
+    logAction('updated', 'Asset "' + a.name + '" date posted \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     render();
   },
 
