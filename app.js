@@ -1929,13 +1929,13 @@ var Fb = {
       } else if (newRole !== 'admin' && prevRole === 'admin') {
         Fb.unsubscribeAllUsers();
       }
-      // Same dynamic attach for the broll (Clips) listener: admin + editor
+      // Same dynamic attach for the broll (Clips) listener: admin + editor + contentLead
       // can see the tab, so subscribe when the role enters that set and
       // release the listener when it leaves. Handles the boot-time race where
       // Auth.user.role is still undefined when bootAfterAuth's synchronous
       // subscribeBroll gate at ~line 18180 first evaluates.
-      var canSeeClips = newRole === 'admin' || newRole === 'editor';
-      var couldSeeClips = prevRole === 'admin' || prevRole === 'editor';
+      var canSeeClips = newRole === 'admin' || newRole === 'editor' || newRole === 'contentLead';
+      var couldSeeClips = prevRole === 'admin' || prevRole === 'editor' || prevRole === 'contentLead';
       if (canSeeClips && !couldSeeClips) {
         Fb.subscribeBroll();
       } else if (!canSeeClips && couldSeeClips) {
@@ -5449,8 +5449,8 @@ var ROLE_TAB_VISIBILITY = {
   editor:      ALL_TABS_INTERNAL.filter(function(t) { return t !== 'config'; }),
   // Category Heads: their own review surface + the shared context tabs.
   catHead:     ['campaigns', 'editingCalendar', 'today', 'catReview', 'reporting'],
-  // Content Leads: shared context tabs.
-  contentLead: ['campaigns', 'editingCalendar', 'reporting', 'editingStyle'],
+  // Content Leads: shared context tabs + Clips (Millie browses the b-roll library).
+  contentLead: ['campaigns', 'editingCalendar', 'reporting', 'editingStyle', 'clips'],
   // Admins see everything. The functionality gate for editorHome lives inside
   // renderEditorHomeView (real-role admin only), not in tab visibility.
   admin:       ALL_TABS_INTERNAL.slice()
@@ -22716,9 +22716,9 @@ bootApp = function() {
   Fb.subscribeEOD();
 
   // Subscribe to the broll subcollection (Clips tab). Only fetches for roles that
-  // can see the tab (admin/editor) — saves quota + listener count for viewers/PMs.
+  // can see the tab (admin/editor/contentLead) — saves quota + listener count for viewers.
   var _role = (Auth.user && Auth.user.role) || 'visitor';
-  if (_role === 'admin' || _role === 'editor') {
+  if (_role === 'admin' || _role === 'editor' || _role === 'contentLead') {
     Fb.subscribeBroll();
   }
 
