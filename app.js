@@ -3631,7 +3631,7 @@ var EDITABLE_FIELDS = {
   difficulty: {
     kind: 'select',
     options: function() { return DIFFICULTIES; },
-    display: function(a) { return '<span class="diff-badge diff-' + a.difficulty + '">' + a.difficulty + '</span>'; },
+    display: function(a) { return '<span class="diff-badge diff-' + escapeHtml(a.difficulty) + '">' + escapeHtml(a.difficulty) + '</span>'; },
     value: function(a) { return a.difficulty; },
     appMethod: 'setAssetDifficulty'
   },
@@ -3659,7 +3659,7 @@ var EDITABLE_FIELDS = {
     options: function() { return [''].concat(EDITORS); },
     optionLabel: function(v) { return v === '' ? '\u2014 Unassigned \u2014' : v; },
     display: function(a) {
-      return '<div class="editor-cell"><div class="editor-avatar av-' + a.editor + '">' + editorInitials(a.editor) + '</div><span class="editor-name">' + (a.editor || '\u2014') + '</span></div>';
+      return '<div class="editor-cell"><div class="editor-avatar av-' + escapeHtml(a.editor) + '">' + editorInitials(a.editor) + '</div><span class="editor-name">' + (escapeHtml(a.editor) || '\u2014') + '</span></div>';
     },
     value: function(a) { return a.editor || ''; },
     appMethod: 'setAssetEditor'
@@ -3819,11 +3819,11 @@ function renderEditableCell(asset, field) {
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" title="' + escapeHtml(url) + '">' + label + ' \u2197</a>'
       : '<span class="no-link">\u2014</span>';
     var copyBtn = (field === 'finalVideo' && url)
-      ? ' <button type="button" class="url-copy-btn" onclick="App.copyVideoMessage(\'' + asset.id + '\')" title="Copy video name and link">\u29C9</button>'
+      ? ' <button type="button" class="url-copy-btn" onclick="App.copyVideoMessage(\'' + escapeAttr(asset.id) + '\')" title="Copy video name and link">\u29C9</button>'
       : '';
     return '<span class="link-cell-inline">' + link +
       ' <button type="button" class="url-edit-pencil" ' +
-        'onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" ' +
+        'onclick="App.startEdit(\'' + escapeAttr(asset.id) + '\', \'' + field + '\')" ' +
         'title="Edit ' + field + ' URL">\u270E</button>' +
       copyBtn +
     '</span>';
@@ -3839,11 +3839,11 @@ function renderEditableCell(asset, field) {
     if ((field === 'dateApproved' || field === 'chDateApproved') && def.value(asset)) {
       var appMethod = def.appMethod;
       return '<div class="editable-cell date-approved-cell">' +
-        '<span onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" title="Click to edit">' + def.display(asset) + '</span>' +
-        ' <button type="button" class="date-clear-btn" onclick="event.stopPropagation();App.' + appMethod + '(\'' + asset.id + '\', \'\')" title="Remove date">×</button>' +
+        '<span onclick="App.startEdit(\'' + escapeAttr(asset.id) + '\', \'' + field + '\')" title="Click to edit">' + def.display(asset) + '</span>' +
+        ' <button type="button" class="date-clear-btn" onclick="event.stopPropagation();App.' + appMethod + '(\'' + escapeAttr(asset.id) + '\', \'\')" title="Remove date">×</button>' +
       '</div>';
     }
-    return '<div class="editable-cell" onclick="App.startEdit(\'' + asset.id + '\', \'' + field + '\')" title="Click to edit ' + field + '">' +
+    return '<div class="editable-cell" onclick="App.startEdit(\'' + escapeAttr(asset.id) + '\', \'' + field + '\')" title="Click to edit ' + field + '">' +
       def.display(asset) +
     '</div>';
   }
@@ -3899,7 +3899,7 @@ function renderStatusSelect(asset) {
     return '<option value="' + s + '"' + (s === asset.status ? ' selected' : '') + '>' + s + '</option>';
   }).join('');
   return '<select class="status-select ' + statusClass(asset.status) + '" ' +
-         'onchange="App.setAssetStatus(\'' + asset.id + '\', this.value)">' +
+         'onchange="App.setAssetStatus(\'' + escapeAttr(asset.id) + '\', this.value)">' +
          opts + '</select>';
 }
 
@@ -5236,7 +5236,7 @@ function showAssetModal(existing) {
 
   var allowed = a.editor ? (EDITOR_ALLOWED_DIFF[a.editor] || []) : null;
   var mismatchWarning = (isEdit && allowed && allowed.indexOf(a.difficulty) < 0)
-    ? '<div style="grid-column:span 2; padding:8px 10px; background:var(--amber-bg); color:var(--amber-text); border-radius:6px; font-size:12px;">\u26A0 ' + a.editor + ' doesn\'t handle ' + a.difficulty + ' difficulty. Scheduler will overflow to Zidni.</div>'
+    ? '<div style="grid-column:span 2; padding:8px 10px; background:var(--amber-bg); color:var(--amber-text); border-radius:6px; font-size:12px;">\u26A0 ' + escapeHtml(a.editor) + ' doesn\'t handle ' + escapeHtml(a.difficulty) + ' difficulty. Scheduler will overflow to Zidni.</div>'
     : '';
 
   var html =
@@ -6871,7 +6871,7 @@ function renderTodayView() {
         '<span class="version-tag">' + escapeHtml(a.version) + '</span>' +
       '</div>' +
       '<div class="today-card-meta">' +
-        '<div class="editor-avatar av-' + (a.editor || '') + '">' + editorInitials(a.editor || '') + '</div>' +
+        '<div class="editor-avatar av-' + escapeHtml(a.editor) + '">' + editorInitials(a.editor || '') + '</div>' +
         '<span>' + escapeHtml(a.editor || 'unassigned') + '</span>' +
         '<span style="color:var(--text3);">\u00B7</span>' +
         '<span title="' + escapeHtml(campName) + '" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;">' + escapeHtml(campName) + '</span>' +
@@ -7638,7 +7638,7 @@ function renderDailyLogView() {
         '</div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-left:auto;">' +
-        '<button class="run-btn" style="white-space:nowrap;" onclick="App.showDailyLogSlack(' + weekOffset + ',\'' + escapeHtml(selectedEditor) + '\')" title="Copy this week\'s log as a Slack message">💬 Copy for Slack</button>' +
+        '<button class="run-btn" style="white-space:nowrap;" onclick="App.showDailyLogSlack(' + weekOffset + ',\'' + escapeAttr(selectedEditor) + '\')" title="Copy this week\'s log as a Slack message">💬 Copy for Slack</button>' +
         '<button class="run-btn" style="white-space:nowrap;" onclick="App.exportDailyLog(' + weekOffset + ')" title="Export this week\'s log for all editors as CSV">📤 Export CSV</button>' +
       '</div>' +
       legend +
@@ -12358,7 +12358,7 @@ function renderReportingView() {
         var isCollapsed = !!collapsed[colKey];
         var chevron = isCollapsed ? '▶' : '▼';
         sectionHtml +=
-          '<div onclick="App.toggleReportingCategory(\'' + escapeHtml(cat).replace(/'/g, "\\'") + '\')" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 2px 6px;user-select:none;" class="report-cat-header">' +
+          '<div onclick="App.toggleReportingCategory(\'' + escapeAttr(cat) + '\')" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 2px 6px;user-select:none;" class="report-cat-header">' +
             '<span style="font-size:9px;color:var(--text3);font-family:\'JetBrains Mono\',monospace">' + chevron + '</span>' +
             '<span style="font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3)">' + escapeHtml(cat) + '</span>' +
             '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--text3);background:var(--bg4);padding:1px 7px;border-radius:4px">' + rows.length + ' campaign' + (rows.length !== 1 ? 's' : '') + '</span>' +
@@ -13031,7 +13031,7 @@ function renderTrainingView() {
         'onclick="App.trainingSetSubmission(\'' + m.id + '\', ' + v.index + ', \'\'' + tgt + ')">×</button>' +
       '<input type="url" class="form-input" style="display:none;min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
         'placeholder="Frame.io / Drive link" value="' + escapeHtml(v.url) + '" ' +
-        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeHtml(v.url) + '\';this.blur();}" ' +
+        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeAttr(v.url) + '\';this.blur();}" ' +
         'onblur="App.trainingSetSubmission(\'' + m.id + '\', ' + v.index + ', this.value' + tgt + ')">' +
     '</div>';
   }
@@ -13480,7 +13480,7 @@ function renderEditorHomeView() {
 
     var titleEl = a.campaignId
       ? '<button class="eod-task-title-link" title="Jump to this video in Campaigns" ' +
-          'onclick="App.jumpToAsset(\'' + escapeHtml(String(a.campaignId)) + '\', \'' + escapeHtml(a.id) + '\')">' +
+          'onclick="App.jumpToAsset(\'' + escapeAttr(a.campaignId) + '\', \'' + escapeAttr(a.id) + '\')">' +
           escapeHtml(a.name || 'Untitled') +
         '</button>'
       : '<div class="eod-task-title">' + escapeHtml(a.name || 'Untitled') + '</div>';
@@ -13664,7 +13664,7 @@ function renderEditorHomeView() {
         ? otherItems.map(function(o) {
             return '<li>' +
               '<span>' + escapeHtml(o.text || '') + '</span>' +
-              '<button class="eod-other-remove" title="Remove" onclick="App.removeEODOther(\'' + escapeHtml(currentEditor) + '\', \'' + escapeHtml(o.id) + '\')">×</button>' +
+              '<button class="eod-other-remove" title="Remove" onclick="App.removeEODOther(\'' + escapeAttr(currentEditor) + '\', \'' + escapeAttr(o.id) + '\')">×</button>' +
             '</li>';
           }).join('')
         : '<li class="eod-other-empty">Nothing yet.</li>';
@@ -14875,7 +14875,7 @@ function renderClipCard(c) {
     var taggerEd = (typeof emailToEditor === 'function') ? emailToEditor(c.taggedBy) : null;
     var viewerEd = (typeof currentEditorFromAuth === 'function') ? currentEditorFromAuth() : null;
     if (taggerEd && taggerEd !== viewerEd) {
-      taggerChip = '<span class="clip-tagger-chip av-' + escapeAttr(taggerEd) + '" ' +
+      taggerChip = '<span class="clip-tagger-chip av-' + escapeHtml(taggerEd) + '" ' +
         'title="Last tagged by ' + escapeHtml(taggerEd) + ' — retagging will move this to your tally and out of theirs">' +
         escapeHtml(editorInitials(taggerEd)) + '</span>';
     }
@@ -14883,7 +14883,7 @@ function renderClipCard(c) {
   return '<div class="clip-card' + (selected ? ' clip-card-selected' : '') + (bulk ? ' clip-card-bulk' : '') +
     (c.archived ? ' clip-card-archived' : '') + (c.dismissed ? ' clip-card-dismissed' : '') +
     (c.taggedComplete ? ' clip-card-done' : '') + '" ' +
-    'data-clip-id="' + escapeAttr(c.id) + '" ' +
+    'data-clip-id="' + escapeHtml(c.id) + '" ' +
     'onclick="App.onClipCardClick(event, \'' + escapeAttr(c.id) + '\')" ' +
     'title="' + escapeHtml((c.folderPath || '') + ' / ' + (c.name || '')) + '">' +
     '<div class="clip-thumb">' + thumb + untaggedFlag + taggerChip + '</div>' +
@@ -14895,7 +14895,14 @@ function renderClipCard(c) {
 // escapeAttr: same-quote safety for onclick payloads that carry file IDs. Drive
 // IDs are [A-Za-z0-9_-]+ so this mostly no-ops, but a defensive escape keeps
 // the pattern robust if IDs ever contain a stray quote.
-function escapeAttr(s) { return String(s == null ? '' : s).replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+// Escapes a value for a single-quoted JS string inside an inline on* handler.
+// Uses \uNNNN escapes so the output has no &, quotes or angle brackets
+// for the HTML parser to decode back (escapeHtml is NOT safe in that position).
+function escapeAttr(s) {
+  return String(s == null ? '' : s).replace(/[\\'"&<>\r\n\u2028\u2029]/g, function(c) {
+    return '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4);
+  });
+}
 
 // The right-hand tag panel with preview + editable fields.
 function renderClipTagPanel(c, visibleList) {
@@ -15097,7 +15104,7 @@ function renderConfigView() {
           'placeholder="U07ABC123 (member ID)" ' +
           'title="Slack member ID for ' + escapeHtml(name) + ' — pings them when their category videos hit For Review." ' +
           'value="' + slackIdEsc + '" ' +
-          'onblur="App.saveCategoryHeadSlackId(\'' + escapeHtml(name).replace(/'/g, "\\'") + '\', this.value)">' +
+          'onblur="App.saveCategoryHeadSlackId(\'' + escapeAttr(name) + '\', this.value)">' +
         '<div style="font-size:11px; color:var(--text3); flex:1;">' + escapeHtml(cats.join(', ')) + '</div>' +
       '</div>';
     }).join('');
@@ -15226,7 +15233,7 @@ function renderConfigView() {
         var roleSelect =
           '<select class="team-role-select" ' +
             (disabled ? 'disabled title="' + escapeHtml(disabledReason) + '"' : '') + ' ' +
-            'onchange="App.setUserRole(\'' + escapeHtml(usr.uid) + '\', this.value, \'' + escapeHtml(displayName) + '\')">' +
+            'onchange="App.setUserRole(\'' + escapeAttr(usr.uid) + '\', this.value, \'' + escapeAttr(displayName) + '\')">' +
             '<option value="visitor"'     + (role === 'visitor'     ? ' selected' : '') + '>Visitor</option>' +
             '<option value="editor"'      + (role === 'editor'      ? ' selected' : '') + '>Editor</option>' +
             '<option value="catHead"'     + (role === 'catHead'     ? ' selected' : '') + '>Cat Head</option>' +
