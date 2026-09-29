@@ -14531,8 +14531,10 @@ function brollClipMatches(c) {
     if (STATE.brollProductFilter === 'unset') { if (c.product) return false; }
     else if (c.product !== STATE.brollProductFilter) return false;
   }
-  if (STATE.brollTaggedFilter === 'tagged' && !c.type && !c.category && !c.seller && !c.product && !(c.tags && c.tags.length)) return false;
-  if (STATE.brollTaggedFilter === 'untagged' && (c.type || c.category || c.seller || c.product || (c.tags && c.tags.length))) return false;
+  // Tagged/untagged filter is hidden in the Content Lead view (already tagged-only).
+  var taggedFilter = brollTaggedOnlyView() ? 'all' : STATE.brollTaggedFilter;
+  if (taggedFilter === 'tagged' && !c.type && !c.category && !c.seller && !c.product && !(c.tags && c.tags.length)) return false;
+  if (taggedFilter === 'untagged' && (c.type || c.category || c.seller || c.product || (c.tags && c.tags.length))) return false;
   var q = (STATE.brollSearch || '').trim().toLowerCase();
   if (q) {
     var hay = [c.name || '', c.folderPath || '', c.seller || '', c.product || '',
@@ -14596,8 +14598,21 @@ function brollPaidCampaignSellers() {
 
 // Sort visible clips: newest Drive-modification first (matches how editors think
 // about their own recent work). Archived slide to the bottom.
+// Content Leads (Millie) browse the library rather than tag it, so they only
+// see clips a tagger has finished (same "Done" set as the tagging shelf).
+function brollTaggedOnlyView() {
+  return !!(Auth && Auth.user && Auth.user.role === 'contentLead');
+}
+function brollIsDone(c) {
+  return !!(c.taggedComplete && isBrollFullyTagged(c));
+}
+function brollVisibleSource() {
+  var list = STATE.broll || [];
+  return brollTaggedOnlyView() ? list.filter(brollIsDone) : list;
+}
+
 function brollSortedClips() {
-  var list = (STATE.broll || []).filter(brollClipMatches);
+  var list = brollVisibleSource().filter(brollClipMatches);
   list.sort(function(a, b) {
     if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1;
     if (!!a.dismissed !== !!b.dismissed) return a.dismissed ? 1 : -1;
@@ -14612,12 +14627,13 @@ function brollSortedClips() {
 function renderClipsView() {
   // Numbers for the top bar. Use the raw list (unfiltered) for "total" so users
   // see how many clips exist overall vs. how many match their current filter.
-  var all = (STATE.broll || []).filter(function(c) {
+  var taggedOnly = brollTaggedOnlyView();
+  var all = brollVisibleSource().filter(function(c) {
     return (STATE.brollShowArchived || !c.archived) && (STATE.brollShowDismissed || !c.dismissed);
   });
   var visible = brollSortedClips();
   var untagged = all.filter(function(c) { return !c.type && !c.category && !c.seller && !c.product && !(c.tags && c.tags.length); }).length;
-  var dismissedCount = (STATE.broll || []).filter(function(c) { return c.dismissed && !c.archived; }).length;
+  var dismissedCount = brollVisibleSource().filter(function(c) { return c.dismissed && !c.archived; }).length;
 
   // Assemble filter dropdowns. Category list also gets an "Uncategorised" special.
   function opt(v, cur, label) {
@@ -14659,7 +14675,7 @@ function renderClipsView() {
         '<select class="form-select" onchange="App.setBrollFilter(\'category\', this.value)">' + catOptions + '</select>' +
         '<select class="form-select" onchange="App.setBrollFilter(\'seller\', this.value)">' + sellerOptions + '</select>' +
         '<select class="form-select" onchange="App.setBrollFilter(\'product\', this.value)">' + productOptions + '</select>' +
-        '<select class="form-select" onchange="App.setBrollFilter(\'tagged\', this.value)">' + taggedOptions + '</select>' +
+        (taggedOnly ? '' : '<select class="form-select" onchange="App.setBrollFilter(\'tagged\', this.value)">' + taggedOptions + '</select>') +
         '<button class="save-btn clips-sync-btn" ' + (STATE.brollSyncBusy ? 'disabled' : '') + ' ' +
           'onclick="App.syncBrollNow()" title="Pull the latest clips from Google Drive">' +
           (STATE.brollSyncBusy ? '⏳ Syncing…' : '↻ Sync now') +
@@ -14667,7 +14683,7 @@ function renderClipsView() {
       '</div>' +
       '<div class="clips-topbar-meta">' +
         '<span>' + visible.length + ' of ' + all.length + ' clip(s)' +
-          (untagged > 0 ? ' · <b>' + untagged + ' untagged</b>' : '') +
+          (untagged > 0 && !taggedOnly ? ' · <b>' + untagged + ' untagged</b>' : '') +
         '</span>' +
         (syncSummary ? '<span class="clips-sync-summary">' + escapeHtml(syncSummary) + '</span>' : '') +
         '<label class="clips-archived-toggle"><input type="checkbox"' + (STATE.brollShowArchived ? ' checked' : '') +
@@ -14709,12 +14725,18 @@ function renderClipsView() {
   var doneList = [];
   var activeList = [];
   visible.forEach(function(c) {
-    if (c.taggedComplete && isBrollFullyTagged(c)) doneList.push(c);
+    if (!taggedOnly && brollIsDone(c)) doneList.push(c);
     else activeList.push(c);
   });
 
   var gridHtml;
-  if (all.length === 0) {
+  if (all.length === 0 && taggedOnly) {
+    gridHtml = '<div class="clips-empty">' +
+      '<div class="clips-empty-icon">🎬</div>' +
+      '<div class="clips-empty-title">No tagged clips yet</div>' +
+      '<div class="clips-empty-body">Clips appear here once the editors have finished tagging them.</div>' +
+    '</div>';
+  } else if (all.length === 0) {
     gridHtml = '<div class="clips-empty">' +
       '<div class="clips-empty-icon">🎬</div>' +
       '<div class="clips-empty-title">No clips synced yet</div>' +
@@ -14786,7 +14808,7 @@ function renderClipsView() {
   // display:flex row) treats us as ONE child and our internal rows stack
   // vertically like every other tab.
   return '<div class="clips-wrap">' +
-    topBar + renderClipsTaggingLeaderboard() + doneStripHtml + bulkBar +
+    topBar + renderClipsTaggingLeaderboard() + (taggedOnly ? '' : doneStripHtml) + bulkBar +
     '<div class="clips-body" style="' + bodyStyle + '">' +
       '<div class="clips-grid-wrap">' + gridHtml + '</div>' +
       '<div class="clips-resize-handle" data-side="right" onmousedown="App.onBrollResizeStart(event, \'right\')" title="Drag to resize"></div>' +
