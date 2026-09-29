@@ -14393,6 +14393,7 @@ function renderClipLibraryConfigBlock() {
       (cfg.lastSyncBy ? ' by ' + escapeHtml(cfg.lastSyncBy) : '') +
       ' · scanned ' + (stats.scanned || 0) + ', ' +
       'added ' + (stats.added || 0) + ', updated ' + (stats.updated || 0) + ', archived ' + (stats.archived || 0) +
+      (stats.skippedFinished ? ', ' + stats.skippedFinished + ' finished edits (V_…) skipped' : '') +
     '</div>';
   }
   // Surface any folders the last sync couldn't read — usually they need
@@ -14662,7 +14663,8 @@ function renderClipsView() {
   var syncSummary = '';
   if (STATE.brollLastSyncStats) {
     var s = STATE.brollLastSyncStats;
-    syncSummary = 'Synced ' + s.scanned + ' clip(s) · ' + s.added + ' new, ' + s.updated + ' updated, ' + s.archived + ' archived';
+    syncSummary = 'Synced ' + s.scanned + ' clip(s) · ' + s.added + ' new, ' + s.updated + ' updated, ' + s.archived + ' archived' +
+      (s.skippedFinished ? ' · ' + s.skippedFinished + ' finished edits skipped' : '');
   }
 
   var topBar =
@@ -17841,6 +17843,7 @@ var App = {
       STATE.brollLastSyncErrors = errors;
       if (typeof toast === 'function' && stats) {
         var msg = 'Sync complete — ' + stats.added + ' new · ' + stats.updated + ' updated · ' + stats.archived + ' archived';
+        if (stats.skippedFinished) msg += ' · ' + stats.skippedFinished + ' finished edits skipped';
         if (errors.length > 0) msg += ' · ⚠ ' + errors.length + ' folder(s) skipped (see Config)';
         toast(msg, errors.length ? 'error' : 'ok');
       }

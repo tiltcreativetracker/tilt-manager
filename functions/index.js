@@ -647,6 +647,10 @@ const DRIVE_FOLDER_FIELDS = 'files(id,name),nextPageToken';
 // Cap recursion so a misconfigured root can't infinitely spider.
 const DRIVE_MAX_FOLDERS = 5000;
 const DRIVE_MAX_FILES = 20000;
+// Finished edits follow the house naming convention "V_<Category>_…" (optionally
+// prefixed "Copy of "). Editors sometimes save exports back into raw-footage
+// folders — skip them so the Clip Library only holds source footage.
+const FINISHED_VIDEO_NAME = /^(copy of\s+)?V_/i;
 
 // Load a Google Auth client for Drive using the service-account secret.
 // The secret value is the full JSON of the key file (single-line pasted in
@@ -795,7 +799,12 @@ async function runDriveSync({ trigger, byEmail }) {
 
   // 2. Walk Drive.
   const drive = driveClient();
-  const { files: driveFiles, folders: foldersVisited, errors: walkErrors } = await driveWalkFolders(drive, folderIds);
+  const walk = await driveWalkFolders(drive, folderIds);
+  const { folders: foldersVisited, errors: walkErrors } = walk;
+  // Drop finished edits. They then count as "not seen", so any already indexed
+  // get archived below (tags preserved) and vanish from the Clips tab.
+  const driveFiles = walk.files.filter((f) => !FINISHED_VIDEO_NAME.test(f.name || ''));
+  const skippedFinished = walk.files.length - driveFiles.length;
 
   // 3. Load current broll subcollection so we can diff.
   const existingSnap = await db.collection('state/app/broll').get();
@@ -882,6 +891,7 @@ async function runDriveSync({ trigger, byEmail }) {
     updated,
     unarchived,
     archived: archiveIds.length,
+    skippedFinished,
     foldersVisited: foldersVisited.size,
     errorCount: walkErrors.length,
   };
