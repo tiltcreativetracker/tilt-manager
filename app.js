@@ -8965,7 +8965,7 @@ function gradeRecommendation(primaryCard, fallbackCard) {
   var pillars = [
     { key: 'brand', label: 'brand alignment', pct: card.brandRate, fill: card.ptsBrand / GRADE_POINTS.brand },
     { key: 'qa',    label: 'QA',              pct: card.qaRate,    fill: card.ptsQa    / GRADE_POINTS.qa },
-    { key: 'rev',   label: 'revision discipline', pct: card.capRate, fill: card.ptsRev / GRADE_POINTS.speedRevisions },
+    { key: 'rev',   label: 'too many revision rounds', pct: card.capRate, fill: card.ptsRev / GRADE_POINTS.speedRevisions },
     { key: 'innov', label: 'edit-style innovation', pct: (card.ideas >= 1 ? 100 : 0), fill: card.ptsInnov / GRADE_POINTS.innovation }
   ];
   if (card.hasOutput) {
@@ -8977,6 +8977,7 @@ function gradeRecommendation(primaryCard, fallbackCard) {
   var wPct = Math.round(weakest.pct);
   var missingOutputData = !card.hasOutput;
   var N = card.total;
+  var overCap = N - Math.round(card.capRate / 100 * N);
   var basedOn = (primaryCard && primaryCard.total > 0) ? 'primary' : 'month';
 
   // Per-pillar three-beat templates. `evidence` cites the actual numbers, `why`
@@ -8984,21 +8985,21 @@ function gradeRecommendation(primaryCard, fallbackCard) {
   var pillarFocus = {
     brand:  'Push on brand alignment.',
     qa:     'Push on QA hygiene.',
-    rev:    'Push on revision discipline.',
+    rev:    'Too many videos being sent back for changes.',
     innov:  'Push on edit-style innovation.',
     output: 'Push on delivery pace.'
   };
   var pillarEvidence = {
     brand:  'Brand pass rate at ' + wPct + '% across ' + N + ' videos this cycle.',
     qa:     'QA-clean rate at ' + wPct + '% across ' + N + ' videos this cycle.',
-    rev:    'Only ' + wPct + '% of cuts landed inside the revision cap.',
+    rev:    overCap + ' of ' + N + ' video' + (N === 1 ? '' : 's') + ' went over the round limit (Net New: 4, Maintenance: 2).',
     innov:  (wPct === 0 ? 'No new-idea flags across any of the ' + N + ' videos graded.' : 'New-idea flag on only ' + wPct + '% of their videos.'),
     output: 'Delivering ' + fmt1(card.avgPerDay) + '/day against a ' + fmt1(card.targetDay) + '/day target.'
   };
   var pillarWhy = {
     brand:  "Off-brand cuts bounce back to Avy, which slows every approval on the campaign.",
     qa:     "Every cut caught in QA stretches the timeline. Half snagging on QA means twice the review load for Elsa.",
-    rev:    "Extra revision rounds cost 24-48h each. Repeat that across a campaign and the launch date slips.",
+    rev:    "Each extra round adds 1–2 days. Aim to get it right in fewer rounds.",
     innov:  "Safe cuts get watched but not remembered. Distinctive edit style is what separates Solid editors from Excellent ones.",
     output: "The team is planning around a higher pace than they're hitting. Every gap widens the backlog."
   };
