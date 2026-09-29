@@ -14393,7 +14393,7 @@ function renderClipLibraryConfigBlock() {
       (cfg.lastSyncBy ? ' by ' + escapeHtml(cfg.lastSyncBy) : '') +
       ' · scanned ' + (stats.scanned || 0) + ', ' +
       'added ' + (stats.added || 0) + ', updated ' + (stats.updated || 0) + ', archived ' + (stats.archived || 0) +
-      (stats.skippedFinished ? ', ' + stats.skippedFinished + ' finished edits (V_…) skipped' : '') +
+      (stats.skippedFinished ? ', ' + stats.skippedFinished + ' finished edits skipped' : '') +
     '</div>';
   }
   // Surface any folders the last sync couldn't read — usually they need

@@ -647,10 +647,13 @@ const DRIVE_FOLDER_FIELDS = 'files(id,name),nextPageToken';
 // Cap recursion so a misconfigured root can't infinitely spider.
 const DRIVE_MAX_FOLDERS = 5000;
 const DRIVE_MAX_FILES = 20000;
-// Finished edits follow the house naming convention "V_<Category>_…" (optionally
-// prefixed "Copy of "). Editors sometimes save exports back into raw-footage
-// folders — skip them so the Clip Library only holds source footage.
-const FINISHED_VIDEO_NAME = /^(copy of\s+)?V_/i;
+// Finished edits follow the house naming conventions "V_<Category>_…" or
+// "<Category>_<ConceptCode>_…" (e.g. "Luxury_4N_HateUs_V1_…"), optionally
+// prefixed "Copy of ". Editors sometimes save exports back into raw-footage
+// folders — skip them so the Clip Library only holds source footage. Raw takes
+// like "1N_V1_3.mov" / "OP2_V4_1.MOV" start with the concept code, so they
+// don't match.
+const FINISHED_VIDEO_NAME = /^(copy of\s+)?(V_|[A-Za-z]+_\d+[A-Za-z]+_)/i;
 
 // Load a Google Auth client for Drive using the service-account secret.
 // The secret value is the full JSON of the key file (single-line pasted in
