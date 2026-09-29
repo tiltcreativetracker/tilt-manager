@@ -8963,13 +8963,13 @@ function gradeRecommendation(primaryCard, fallbackCard) {
   function fmt1(x) { return (Math.round((Number(x) || 0) * 10) / 10).toFixed(1); }
   var rating = card.rating.key;
   var pillars = [
-    { key: 'brand', label: 'brand alignment', pct: card.brandRate, fill: card.ptsBrand / GRADE_POINTS.brand },
-    { key: 'qa',    label: 'QA',              pct: card.qaRate,    fill: card.ptsQa    / GRADE_POINTS.qa },
+    { key: 'brand', label: 'off-brand videos', pct: card.brandRate, fill: card.ptsBrand / GRADE_POINTS.brand },
+    { key: 'qa',    label: 'QA mistakes', pct: card.qaRate,    fill: card.ptsQa    / GRADE_POINTS.qa },
     { key: 'rev',   label: 'too many revision rounds', pct: card.capRate, fill: card.ptsRev / GRADE_POINTS.speedRevisions },
-    { key: 'innov', label: 'edit-style innovation', pct: (card.ideas >= 1 ? 100 : 0), fill: card.ptsInnov / GRADE_POINTS.innovation }
+    { key: 'innov', label: 'no new ideas', pct: (card.ideas >= 1 ? 100 : 0), fill: card.ptsInnov / GRADE_POINTS.innovation }
   ];
   if (card.hasOutput) {
-    pillars.push({ key: 'output', label: 'delivery pace', pct: card.avgPerDay / card.targetDay * 100, fill: card.ptsOut / GRADE_POINTS.speedOutput });
+    pillars.push({ key: 'output', label: 'below daily target', pct: card.avgPerDay / card.targetDay * 100, fill: card.ptsOut / GRADE_POINTS.speedOutput });
   }
   pillars.sort(function(a, b) { return a.fill - b.fill; });
   var weakest = pillars[0];
@@ -8978,51 +8978,54 @@ function gradeRecommendation(primaryCard, fallbackCard) {
   var missingOutputData = !card.hasOutput;
   var N = card.total;
   var overCap = N - Math.round(card.capRate / 100 * N);
+  var offBrand = N - Math.round(card.brandRate / 100 * N);
+  var qaFails = N - Math.round(card.qaRate / 100 * N);
+  function vids(n) { return n + ' video' + (n === 1 ? '' : 's'); }
   var basedOn = (primaryCard && primaryCard.total > 0) ? 'primary' : 'month';
 
   // Per-pillar three-beat templates. `evidence` cites the actual numbers, `why`
   // grounds it in a downstream business consequence.
   var pillarFocus = {
-    brand:  'Push on brand alignment.',
-    qa:     'Push on QA hygiene.',
+    brand:  'Too many videos are off-brand.',
+    qa:     'Too many videos have mistakes.',
     rev:    'Too many videos being sent back for changes.',
-    innov:  'Push on edit-style innovation.',
-    output: 'Push on delivery pace.'
+    innov:  'Try something new in the edit.',
+    output: 'Delivering fewer videos than the target.'
   };
   var pillarEvidence = {
-    brand:  'Brand pass rate at ' + wPct + '% across ' + N + ' videos this cycle.',
-    qa:     'QA-clean rate at ' + wPct + '% across ' + N + ' videos this cycle.',
+    brand:  offBrand + ' of ' + vids(N) + ' failed the brand check.',
+    qa:     qaFails + ' of ' + vids(N) + ' failed the QA check.',
     rev:    overCap + ' of ' + N + ' video' + (N === 1 ? '' : 's') + ' went over the round limit (Net New: 4, Maintenance: 2).',
-    innov:  (wPct === 0 ? 'No new-idea flags across any of the ' + N + ' videos graded.' : 'New-idea flag on only ' + wPct + '% of their videos.'),
-    output: 'Delivering ' + fmt1(card.avgPerDay) + '/day against a ' + fmt1(card.targetDay) + '/day target.'
+    innov:  'None of their ' + vids(N) + ' were marked as a new idea.',
+    output: 'Doing ' + fmt1(card.avgPerDay) + ' a day, target is ' + fmt1(card.targetDay) + ' a day.'
   };
   var pillarWhy = {
-    brand:  "Off-brand cuts bounce back to Avy, which slows every approval on the campaign.",
-    qa:     "Every cut caught in QA stretches the timeline. Half snagging on QA means twice the review load for Elsa.",
+    brand:  "Off-brand videos get sent back, which slows down approvals.",
+    qa:     "Every mistake caught in review means another round and more checking time.",
     rev:    "Each extra round adds 1–2 days. Aim to get it right in fewer rounds.",
-    innov:  "Safe cuts get watched but not remembered. Distinctive edit style is what separates Solid editors from Excellent ones.",
-    output: "The team is planning around a higher pace than they're hitting. Every gap widens the backlog."
+    innov:  "Trying a fresh editing style is what moves an editor from Solid to Excellent.",
+    output: "Falling short of the target builds up a backlog."
   };
 
   var tone = rating, focus, evidence, why;
 
   // Excellent: no weakness to fix, just anchor + coach.
   if (rating === 'excellent') {
-    focus    = 'Anchor level.';
-    evidence = 'Composite ' + comp + '/100 with every pillar green.';
-    why      = "Give them the hardest brief this cycle and let them coach whoever's dragging.";
-  }
-  // Solid + all pillars ≥ 85%: nothing weak enough to target — stretch them.
-  else if (rating === 'solid' && weakest.fill >= 0.85) {
-    focus    = 'Reliable across every pillar.';
-    evidence = 'Composite ' + comp + '/100, no pillar below ' + Math.round(weakest.fill * 100) + '% fill.';
-    why      = 'Hand them a harder brief next cycle and see if they can jump to Excellent.';
+    focus    = 'Doing great.';
+    evidence = 'Composite ' + comp + '/100, strong on everything.';
+    why      = "Give them the hardest briefs and let them help editors who are struggling.";
   }
   // Missing Avg/Day and everything else is strong → the real fix is data entry.
   else if (missingOutputData && weakest.fill >= 0.85 && (rating === 'solid' || rating === 'needswork')) {
-    focus    = 'Set Avg/Day for this editor.';
-    evidence = 'Output scores 0 because Avg/Day is blank. Composite ' + comp + '/100 without it.';
-    why      = "The real composite is masked. Fill in Avg/Day so the score reflects what they're actually shipping.";
+    focus    = 'Fill in Avg/Day for this editor.';
+    evidence = 'Output is 0 because Avg/Day is empty, so the composite is only ' + comp + '/100.';
+    why      = "Their real score is higher. Add Avg/Day so it counts their output.";
+  }
+  // Solid + all pillars ≥ 85%: nothing weak enough to target — stretch them.
+  else if (rating === 'solid' && weakest.fill >= 0.85) {
+    focus    = 'Solid on everything.';
+    evidence = 'Composite ' + comp + '/100, no weak spots.';
+    why      = 'Give them a harder brief next time to push them to Excellent.';
   }
   // Everything else: focus on the weakest pillar with the three-beat template.
   else {
@@ -9762,7 +9765,7 @@ function renderGradingView() {
         '</td>';
     }
     var basedOnLabel = rec.basedOn === 'primary' ? 'current scope' : 'this month';
-    return '<td class="grading-sc-rec grading-sc-rec-' + rec.tone + '" title="' + escapeHtml('Based on ' + basedOnLabel + ' · weakest pillar: ' + rec.weakestPillar + ' (' + Math.round(rec.weakestPct) + '%)') + '">' +
+    return '<td class="grading-sc-rec grading-sc-rec-' + rec.tone + '" title="' + escapeHtml('Based on ' + basedOnLabel + ' · weakest area: ' + rec.weakestPillar) + '">' +
         '<span class="grading-rec-tag grading-rec-tag-' + rec.tone + '">' + escapeHtml(basedOnLabel) + '</span>' +
         '<span class="grading-rec-focus">' + escapeHtml(rec.focus) + '</span>' +
         '<span class="grading-rec-evidence">' + escapeHtml(rec.evidence) + '</span>' +
