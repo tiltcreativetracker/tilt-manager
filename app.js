@@ -581,6 +581,7 @@ var Fb = {
         gradingShowDismissed: true,
         gradingType: true,
         gradingWeek: true,
+        gradingScorecardPeriod: true,
         // Clips tab: per-user UI. `broll` (the array) is populated by
         // Fb.subscribeBroll from the subcollection, so it must never be
         // overwritten by an incoming main-doc snapshot either.
@@ -2562,6 +2563,7 @@ var STATE = {
   gradingType: 'all',         // 'all' | 'Paid Ads' | 'Organic' — paid/organic filter
   gradingWeek: null,          // null = whole month; else a Monday ISO ('YYYY-MM-DD') scoping to one week
   gradingQuarter: null,       // null = auto (quarter of selected month); else '1'..'4' pinned to gradingYear.
+  gradingScorecardPeriod: 'month', // Editor Scorecard main columns: 'week' | 'month' | 'quarter'
                               //   Used by the Quarterly KPI copy button so the export follows the picker.
                               //   Auto-clears when the user changes month/year to something outside the pinned quarter.
   // Shared streak: which day grading last happened (UK date), the current consecutive-day
@@ -9661,7 +9663,6 @@ function renderGradingView() {
     '</div>';
 
   // ── Editor Scorecard (rolls up the selected month's grades within the active filters) ──
-  var cards = GRADING_EDITORS.map(function(e) { return computeScorecard(e, scopedGrades, suggestedTarget); });
   var targetAutoTitle = gradingType === 'Organic'
     ? 'Auto target for Organic: 1 Net New/day'
     : (gradingType === 'Paid Ads' ? 'Auto target for Paid: 3–4/day (OP or N)' : '');
@@ -9700,6 +9701,26 @@ function renderGradingView() {
   }
   if (!_rollupWeekStart) _rollupWeekStart = isoWeekStart(_rollupYM + '-01');
   var gradesInScopeWeek = gradesInScopeMonth.filter(function(g) { return isoWeekStart(g.date) === _rollupWeekStart; });
+  // Period toggle for the main scorecard columns. Monthly = the selected month (+ Week
+  // filter if picked) — the original behaviour. Weekly = the Sel Week resolved above.
+  // Quarterly = the pinned quarter, else the quarter of the selected month. All three
+  // respect Paid/Organic; like Monthly they pool every campaign.
+  var scPeriod = STATE.gradingScorecardPeriod || 'month';
+  var _scQuarter = STATE.gradingQuarter ? parseInt(STATE.gradingQuarter, 10) : (Math.floor((parseInt(selMonth, 10) - 1) / 3) + 1);
+  var _scQuarterYMs = [0, 1, 2].map(function(i) { return selYear + '-' + String((_scQuarter - 1) * 3 + 1 + i).padStart(2, '0'); });
+  var periodGrades, periodLabel;
+  if (scPeriod === 'week') {
+    periodGrades = (STATE.grades || []).filter(function(g) { return _inScopeType(g) && isoWeekStart(g.date) === _rollupWeekStart; });
+    periodLabel = weekRangeLabel(_rollupWeekStart) + ' · ' + typeLabel;
+  } else if (scPeriod === 'quarter') {
+    periodGrades = (STATE.grades || []).filter(function(g) { return _inScopeType(g) && _scQuarterYMs.indexOf((g.date || '').slice(0, 7)) >= 0; });
+    periodLabel = 'Q' + _scQuarter + ' ' + selYear + ' · ' + typeLabel;
+  } else {
+    periodGrades = scopedGrades;
+    periodLabel = sel.label + ' · ' + typeLabel + (week ? ' · ' + weekLabel : '');
+  }
+  var cards = GRADING_EDITORS.map(function(e) { return computeScorecard(e, periodGrades, suggestedTarget); });
+
   var weekByEditor = {}, monthByEditor = {};
   GRADING_EDITORS.forEach(function(e) {
     weekByEditor[e]  = computeScorecard(e, gradesInScopeWeek,  suggestedTarget);
@@ -9786,7 +9807,7 @@ function renderGradingView() {
   // Populate the Wrapped image context every render, so App.copyScorecardImage can
   // pull fresh data for the clicked editor. Coaching mirrors the row-level cell:
   // primary card + monthly fallback → gradeRecommendation → focus/evidence beats.
-  _scorecardImageCtx = { byEditor: {}, scope: scopeNote };
+  _scorecardImageCtx = { byEditor: {}, scope: periodLabel };
   cards.forEach(function(c) {
     _scorecardImageCtx.byEditor[c.editor] = {
       card:      c,
@@ -9836,7 +9857,14 @@ function renderGradingView() {
 
   var scorecard =
     '<div class="grading-section">' +
-      '<div class="grading-section-title">Editor Scorecard <span class="grading-section-note">' + scopeNote + (gradingType === 'all' && !week ? ' · all campaigns' : '') + '</span></div>' +
+      '<div class="grading-section-title">Editor Scorecard <span class="grading-section-note">' + escapeHtml(periodLabel) + (gradingType === 'all' && (scPeriod !== 'month' || !week) ? ' · all campaigns' : '') + '</span>' +
+        '<div class="gr-seg grading-sc-period" role="tablist" aria-label="Scorecard period">' +
+          [['week', 'Weekly'], ['month', 'Monthly'], ['quarter', 'Quarterly']].map(function(t) {
+            var on = scPeriod === t[0];
+            return '<button type="button" class="gr-seg-btn' + (on ? ' is-active' : '') + '" aria-pressed="' + on + '" onclick="App.setGradingScorecardPeriod(\'' + t[0] + '\')">' + t[1] + '</button>';
+          }).join('') +
+        '</div>' +
+      '</div>' +
       teamStrip +
       '<div class="grading-table-scroll grading-scroll-scorecard">' +
       '<table class="grading-scorecard">' +
@@ -18091,6 +18119,8 @@ var App = {
   setGradingType: function(t) { STATE.gradingType = (t === 'Paid Ads' || t === 'Organic') ? t : 'all'; STATE.gradingCampaignId = null; render(); },
   // Weekly filter. Empty string ('Whole month') clears it.
   setGradingWeek: function(w) { STATE.gradingWeek = w || null; render(); },
+  // Editor Scorecard period toggle (Weekly / Monthly / Quarterly).
+  setGradingScorecardPeriod: function(p) { STATE.gradingScorecardPeriod = (p === 'week' || p === 'quarter') ? p : 'month'; render(); },
   // Quarter filter. Empty string ('Auto') clears the pin so the KPI export follows the
   // quarter of the selected month. Picking Q1..Q4 snaps Month to the first month of that
   // quarter so the grading view moves with the picker; the pin governs the copy button.
