@@ -1684,6 +1684,7 @@ var Fb = {
       GSheets.scheduleSync();
       Fb.ensureTodayGradesBackup();
       Fb.ensureTodayLogBackup();
+      Fb.ensureTrainingBackup();
     }).catch(function(err) {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
@@ -1775,6 +1776,40 @@ var Fb = {
     }).catch(function(err) {
       console.warn('[Fb] logBackup write failed:', err);
       Fb._todayLogBackup = null; // let the next successful save try again
+    });
+  },
+
+  // Hourly snapshot of STATE.trainingModules + STATE.trainingCompletions to
+  // state/app/logBackups/training-{yyyy-mm-dd}T{HH}-{uid} (UK hour). Keyed per
+  // user so a stale tab can't overwrite another teammate's good snapshot of the
+  // same hour. Waits for the first server snapshot (Fb._serverTraining) so an
+  // unloaded, empty STATE is never recorded. Rotation drops the same hour's doc
+  // from 14 days ago.
+  _lastTrainingBackup: null,
+  ensureTrainingBackup: function() {
+    if (!Auth.user || !Auth.user.uid || !Fb._serverTraining) return;
+    var mods = Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [];
+    var comps = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
+    if (!mods.length && !Object.keys(comps).length) return;
+    var hh = String(parseInt(new Date().toLocaleString('en-GB', { timeZone: BIZ_TZ, hour: '2-digit', hour12: false }), 10) % 24).padStart(2, '0');
+    var key = todayUK() + 'T' + hh;
+    if (Fb._lastTrainingBackup === key) return;
+    Fb._lastTrainingBackup = key;
+    var uid = Auth.user.uid;
+    var col = fbDb.collection(Fb.LOG_BACKUPS_COLL);
+    col.doc('training-' + key + '-' + uid).set(JSON.parse(JSON.stringify({
+      kind: 'training',
+      trainingModules: mods,
+      trainingCompletions: comps,
+      moduleCount: mods.length,
+      by: Auth.user.email || uid
+    }))).then(function() {
+      col.doc('training-' + key + '-' + uid).update({ at: firebase.firestore.FieldValue.serverTimestamp() }).catch(function() {});
+      var old = bizNow(); old.setDate(old.getDate() - 14);
+      col.doc('training-' + toLocalISODate(old) + 'T' + hh + '-' + uid).delete().catch(function() { /* fine if not present */ });
+    }).catch(function(err) {
+      console.warn('[Fb] trainingBackup write failed:', err);
+      Fb._lastTrainingBackup = null;
     });
   },
 
@@ -20187,6 +20222,29 @@ var App = {
     saveState();
     render();
     if (typeof toast === 'function') toast(val ? 'Note saved' : 'Note cleared', 'success');
+
+    // Copy the note into the editor's daily Slack thread so it survives even if
+    // the tracker data is lost. New/edited notes only; no thread today = skip.
+    if (!val) return;
+    var editor = (typeof emailToEditor === 'function') ? emailToEditor(email) : null;
+    if (!editor) return;
+    var thread = (typeof resolveDailyThreadForEditor === 'function') ? resolveDailyThreadForEditor(editor) : null;
+    if (!thread) {
+      logAction('skipped-notify', 'Training note copy skipped — no daily thread for ' + editor);
+      return;
+    }
+    var module = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    var safeTitle = String((module && module.title) || 'Training').replace(/[<>|]/g, '');
+    var url = String(((rec.submissionUrls || [])[i]) || '').trim();
+    var link = url ? '<' + url + '|' + safeTitle + ' #' + (i + 1) + '>' : safeTitle + ' #' + (i + 1);
+    var author = (email === (Auth && Auth.user && Auth.user.email)) ? editor : ((Auth && Auth.user && Auth.user.displayName) || 'Admin');
+    var body = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    var msg = '📝 ' + author + ' note on ' + link + ':\n>' + body.replace(/\n/g, '\n>');
+    postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
+      if (!(r && r.ok)) logAction('skipped-notify', 'Training note copy failed for ' + editor + ': ' + ((r && r.body) || 'unknown'));
+    }).catch(function(err) {
+      logAction('skipped-notify', 'Training note copy errored for ' + editor + ': ' + ((err && err.message) || 'unknown'));
+    });
   },
   // Admin-only: change the submitted date on one video slot. `dateStr` is a
   // YYYY-MM-DD from <input type=date>; empty clears the date.
