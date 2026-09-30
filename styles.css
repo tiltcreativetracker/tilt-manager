@@ -2049,7 +2049,10 @@
   .training-embed { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg3); max-width: 560px; }
   .training-embed-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
   .training-embed-frame { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; }
-  .training-embed-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .training-embed-frame { display: block; }
+  .training-embed-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .training-embed-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 52px; height: 52px; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; font-size: 20px; display: flex; align-items: center; justify-content: center; padding-left: 3px; }
+  .training-embed-frame:hover .training-embed-play { background: var(--accent); }
 
   .clip-panel-nav { display: flex; gap: 6px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg2); z-index: 2; }
   .clip-panel-pos { font-size: 11px; color: var(--text3); margin: 0 4px; }

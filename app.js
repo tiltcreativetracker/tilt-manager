@@ -515,7 +515,12 @@ var Fb = {
     // doesn't block sync forever.
     var ae = document.activeElement;
     var aeBusy = ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
-    if ((aeBusy || (typeof PtrDrag !== 'undefined' && PtrDrag.active) || Fb._uploadTimer) && (Fb._snapshotRetries || 0) < 8) {
+    // The retry cap only applies to focus/drag. A pending upload (_uploadTimer)
+    // always defers: applying now would overwrite the unsent local edit (e.g. a
+    // just-added training module) and the upload would then send the old copy.
+    // uploadNow's success path discards the deferred snapshot.
+    var busy = aeBusy || (typeof PtrDrag !== 'undefined' && PtrDrag.active);
+    if (Fb._uploadTimer || (busy && (Fb._snapshotRetries || 0) < 8)) {
       Fb._pendingSnapshotData = data;
       Fb._snapshotRetries = (Fb._snapshotRetries || 0) + 1;
       clearTimeout(Fb._snapshotRetryTimer);
@@ -13085,22 +13090,25 @@ function renderTrainingView() {
     while (out.length < n) out.push('');
     return out.slice(0, n);
   }
-  // Inline <iframe> HTML for any Drive-file URLs on the module. Folder links
-  // can't be embedded and fall through to the header link pills instead.
+  // Static Drive thumbnail per Drive-file URL on the module (click opens the
+  // file). An <iframe> reloaded on every render() and flickered. Folder links
+  // have no thumbnail and fall through to the header link pills instead.
   function moduleEmbeds(m) {
     var embeds = [];
     [{label: 'GDrive walkthrough', url: moduleGdrive(m)}, {label: 'Raw footage', url: m.footageUrl}].forEach(function(row) {
-      if (!row.url) return;
-      var src = driveEmbedUrl(row.url);
-      if (!src) return;
+      if (!row.url || !driveEmbedUrl(row.url)) return;
+      var id = (row.url.match(/\/file\/d\/([^/?#]+)/) || row.url.match(/[?&]id=([^&#]+)/))[1];
       embeds.push('<div class="training-embed"><div class="training-embed-label">' + escapeHtml(row.label) + '</div>' +
-        '<div class="training-embed-frame"><iframe src="' + escapeHtml(src) + '" allow="autoplay" allowfullscreen loading="lazy"></iframe></div></div>');
+        '<a class="training-embed-frame" href="' + escapeHtml(row.url) + '" target="_blank" rel="noopener" title="Open in Google Drive">' +
+          '<img src="https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=w1280" alt="" loading="lazy" onerror="this.style.display=\'none\'">' +
+          '<span class="training-embed-play">▶</span>' +
+        '</a></div>');
     });
     return embeds.join('');
   }
   // Map editor display name → their completion record on whichever email alias
   // holds one (EDITOR_EMAILS covers cases like Sharm/sharmaine sharing a person).
-  var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
+  var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty'];
   function completionForEditor(name, moduleId) {
     var aliases = (typeof EDITOR_EMAILS !== 'undefined' && EDITOR_EMAILS[name]) || [];
     for (var i = 0; i < aliases.length; i++) {
@@ -20122,7 +20130,7 @@ var App = {
   sendTrainingToAllEditors: function(moduleId) {
     var m = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
     if (!m) { toast('Module not found', 'error'); return; }
-    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty', 'Elsa'];
+    var TRAINING_EDS = ['Zidni', 'Sharm', 'Patty'];
     var sentCount = 0, failCount = 0, skippedCount = 0;
     var jobs = [];
     TRAINING_EDS.forEach(function(editor) {
