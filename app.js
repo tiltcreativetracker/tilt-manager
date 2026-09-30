@@ -6942,6 +6942,15 @@ function getApprovedTodayByCountry() {
 // the drop position. Two placement modes:
 //   - placement === 'end'   : push to the end of STATE.assets (bottom of column)
 //   - placement === 'before': insert just before the asset with anchorId
+// One round of rework sent back to the editor. Rounds on a video that already has a
+// PM approval date (Cat Head / Content Lead kickbacks, or a reopened approved video)
+// are also tallied in postApprovalRounds, so the report's first-pass rate can count
+// only the rework that happened before the PM approved it.
+function countRevisionRound(a) {
+  a.revisionRounds = (a.revisionRounds || 0) + 1;
+  if (a.dateApproved) a.postApprovalRounds = (a.postApprovalRounds || 0) + 1;
+}
+
 function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   var a = findAssetById(id);
   if (!a) return;
@@ -6950,7 +6959,7 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   var oldEditor = a.editor;
   var statusChanging = oldStatus !== targetStatus;
   if (statusChanging) {
-    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'dragLocked'], 'status: ' + oldStatus + ' → ' + targetStatus);
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'dragLocked', 'revisionRounds', 'postApprovalRounds'], 'status: ' + oldStatus + ' → ' + targetStatus);
   }
   // Editor guard: any status out of Draft requires an editor.
   if (statusChanging && !a.editor && targetStatus !== 'Draft') {
@@ -6960,6 +6969,8 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   }
   if (statusChanging) {
     a.status = targetStatus;
+    // Dragging a card into Needs Revisions is a round of rework, same as the dropdown.
+    if (targetStatus === 'Needs Revisions') countRevisionRound(a);
     if (targetStatus === 'Assigned' && oldStatus !== 'Assigned') a.assignedAt = todayISO();
     // Stamp dateApproved on the transition INTO Approved (only if not already set).
     // Needed for daily / weekly / monthly tally math.
@@ -12647,12 +12658,15 @@ function renderQuarterEditorReport(qYear, qNum) {
       return a.status === 'Approved' && a.dateApproved && inPh[String(a.dateApproved).slice(0, 7)] && (!eds.length || eds.indexOf(a.editor) >= 0);
     });
     var spans = campSpans.filter(function(x) { return inPh[x.month]; }).map(function(x) { return x.days; });
-    // First-pass, per video: every approved video with zero revision rounds. Rounds
-    // are the Board's auto count, or the Grading tab's manual override if one is set.
+    // First-pass, per video: every approved video with no rework before its PM
+    // approval. Rounds are the Board's auto count minus rounds logged after approval
+    // (postApprovalRounds, tracked from 1 Oct 2026), or the Grading tab's manual
+    // override if one is set.
     var tracked = approved.filter(function(a) { return String(a.dateApproved).slice(0, 10) >= REVISION_TRACKING_SINCE; });
     var firstPass = tracked.filter(function(a) {
       var g = gradeByAsset[String(a.id)];
-      return (g && g.roundsManual ? (Number(g.revisionRounds) || 0) : (Number(a.revisionRounds) || 0)) === 0;
+      var pre = (Number(a.revisionRounds) || 0) - (Number(a.postApprovalRounds) || 0);
+      return (g && g.roundsManual ? (Number(g.revisionRounds) || 0) : pre) <= 0;
     }).length;
     return {
       ph: ph,
@@ -12682,7 +12696,7 @@ function renderQuarterEditorReport(qYear, qNum) {
     kpiRow('Video Edits', 'Videos approved by the PM', kpiPhases.map(function(k) {
       return kpiCell(k.edits.toLocaleString(), k.ph.months.length > 1 ? Math.round(k.perMonth) + ' a month' : 'in the month');
     })) +
-    kpiRow('Team First-Pass Rate', 'Approved videos with no revision rounds', kpiPhases.map(function(k) {
+    kpiRow('Team First-Pass Rate', 'Approved videos with no rework before PM approval', kpiPhases.map(function(k) {
       return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%', k.fpHit + ' of ' + k.fpN + ' videos');
     })) +
     kpiRow('Team Time to Ship Quality Edit', 'Per campaign: first video assigned to last video PM-approved', kpiPhases.map(function(k) {
@@ -19765,14 +19779,12 @@ var App = {
       return;
     }
     var oldStatus = a.status;
-    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'revisionRounds'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'revisionRounds', 'postApprovalRounds'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
     a.status = newStatus;
     // Auto-count revision rounds: each fresh entry into "Needs Revisions" is one round
     // of rework sent back to the editor. Feeds the Grading tab's Rounds column. Counts
     // both PM/editor kickbacks (here) and category-head kickbacks (setAssetCategoryHeadQc).
-    if (newStatus === 'Needs Revisions' && oldStatus !== 'Needs Revisions') {
-      a.revisionRounds = (a.revisionRounds || 0) + 1;
-    }
+    if (newStatus === 'Needs Revisions' && oldStatus !== 'Needs Revisions') countRevisionRound(a);
     // Stamp assignedAt whenever the transition is INTO Assigned (from any other state).
     // This powers the "To Do Today" column on the Today board.
     if (newStatus === 'Assigned' && oldStatus !== 'Assigned') a.assignedAt = todayISO();
@@ -20474,9 +20486,7 @@ var App = {
     if (old === newVal) { render(); return; }
     a.contentLeadQc = newVal;
     // Parity with setAssetCategoryHeadQc \u2014 a rework counts as a revision round.
-    if (newVal === 'Needs Revisions' && old !== 'Needs Revisions') {
-      a.revisionRounds = (a.revisionRounds || 0) + 1;
-    }
+    if (newVal === 'Needs Revisions' && old !== 'Needs Revisions') countRevisionRound(a);
     if (newVal === 'Approved') a.clQcDateApproved = todayLocalISO();
     else if (old === 'Approved') a.clQcDateApproved = '';
     // Sends made today, not current state \u2014 never cleared on the return trip.
@@ -21331,9 +21341,7 @@ var App = {
     if (old === newVal) { render(); return; }
     a.categoryHeadQc = newVal;
     // Auto-count revision rounds on category-head kickbacks too (see setAssetStatus).
-    if (newVal === 'Needs Revisions' && old !== 'Needs Revisions') {
-      a.revisionRounds = (a.revisionRounds || 0) + 1;
-    }
+    if (newVal === 'Needs Revisions' && old !== 'Needs Revisions') countRevisionRound(a);
     if (newVal === 'Approved') {
       a.chDateApproved = todayLocalISO();
     } else {
