@@ -12309,6 +12309,11 @@ var QUARTER_REPORT_NO_TARGET_MONTHS = {
 };
 // Agreed KPIs on the quarter report are split by what the team was focused on.
 // Quarters not listed show one column for the whole quarter.
+// Months where the goal is organic posting instead of per-category volume:
+// organic videos marked Posted (Distribution → Posted stamps datePosted).
+var QUARTER_REPORT_POST_GOALS = {
+  '2026-09': { perDay: 1, channel: 'Instagram' }
+};
 var QUARTER_REPORT_PHASES = {
   '2026-Q3': [
     { label: 'Jul–Aug', focus: 'Paid ads', months: ['2026-07', '2026-08'] },
@@ -12534,6 +12539,78 @@ function renderQuarterEditorReport(qYear, qNum) {
 
   var html = '';
 
+  // Production goals, first on the report: videos per category (months with a
+  // target) and organic posts per day (QUARTER_REPORT_POST_GOALS months).
+  var byCat = {};
+  STATE.assets.forEach(function(a) {
+    if (a.status === 'Cancelled') return;
+    var i = monthIdx(a.estDelivery || a.assignedAt);
+    if (i < 0) return;
+    var cat = a.category || 'No category';
+    (byCat[cat] = byCat[cat] || zeros())[i]++;
+  });
+  var goal = CATEGORY_MONTHLY_VIDEO_GOAL;
+  var catNames = Object.keys(byCat).sort(function(a, b) { return sum(byCat[b]) - sum(byCat[a]) || a.localeCompare(b); });
+  var postGoalMonths = months.filter(function(m) { return QUARTER_REPORT_POST_GOALS[m.key]; });
+  if ((targetMonths.length && catNames.length) || postGoalMonths.length) {
+    var goalCols = months.map(function(m, i) {
+      if (!m.hasTarget || !catNames.length) return '';
+      var cats = catNames.filter(function(c) { return byCat[c][i]; }).sort(function(a, b) { return byCat[b][i] - byCat[a][i]; });
+      var scale = niceMax(Math.max(goal, cats.length ? byCat[cats[0]][i] : 0) * 1.05);
+      var hit = cats.filter(function(c) { return byCat[c][i] >= goal; }).length;
+      var rows = cats.map(function(c) {
+        var v = byCat[c][i], met = v >= goal;
+        return '<div class="qr-goal-row" title="' + escapeHtml(c + ' · ' + m.label + ': ' + v + ' of ' + goal + ' videos') + '">' +
+          '<div class="qr-goal-name">' + escapeHtml(c) + '</div>' +
+          '<div class="qr-goal-track"><div class="qr-goal-bar' + (met ? ' qr-goal-met' : '') + '" style="width:' + (v / scale * 100) + '%"></div>' +
+            '<div class="qr-goal-tick" style="left:' + (goal / scale * 100) + '%"></div></div>' +
+          '<div class="qr-goal-val">' + v + (met ? ' <span class="qr-goal-check">✓</span>' : '') + '</div>' +
+        '</div>';
+      }).join('');
+      return '<div class="qr-goal-col"><div class="qr-goal-month">' + MONTH_LONG[qNum * 3 + i] +
+        '<span class="qr-dim">' + hit + ' of ' + cats.length + ' categories reached ' + goal + '</span></div>' + rows + '</div>';
+    }).join('');
+    // Posting goal months: one calendar strip per month, a cell per day.
+    var postCols = months.map(function(m, i) {
+      var pg = QUARTER_REPORT_POST_GOALS[m.key];
+      if (!pg) return '';
+      var y = qYear, mo = qNum * 3 + i, nDays = new Date(y, mo + 1, 0).getDate();
+      var perDay = {};
+      STATE.assets.forEach(function(a) {
+        if (!a.datePosted || String(a.datePosted).slice(0, 7) !== m.key) return;
+        var c = findCampaignById(a.campaignId);
+        if (!c || c.type !== 'Organic') return;
+        var d = String(a.datePosted).slice(0, 10);
+        perDay[d] = (perDay[d] || 0) + 1;
+      });
+      var posts = 0, hitDays = 0, cells = '';
+      var lead = (new Date(y, mo, 1).getDay() + 6) % 7; // Mon-first calendar
+      for (var l = 0; l < lead; l++) cells += '<div class="qr-cal-pad"></div>';
+      for (var d = 1; d <= nDays; d++) {
+        var iso = m.key + '-' + (d < 10 ? '0' : '') + d, n = perDay[iso] || 0;
+        posts += n; if (n >= pg.perDay) hitDays++;
+        cells += '<div class="qr-cal-day' + (n >= pg.perDay ? ' qr-cal-hit' : '') + '" title="' + escapeHtml(d + ' ' + m.label + ': ' + n + ' posted') + '">' +
+          '<span class="qr-cal-num">' + d + '</span>' + (n ? '<span class="qr-cal-n">' + n + '</span>' : '') + '</div>';
+      }
+      var head = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(function(w) { return '<div class="qr-cal-wd">' + w + '</div>'; }).join('');
+      return '<div class="qr-goal-col"><div class="qr-goal-month">' + MONTH_LONG[mo] + ' · ' + escapeHtml(pg.channel) + ' posts' +
+        '<span class="qr-dim">' + hitDays + ' of ' + nDays + ' days had a post · ' + posts + ' posted</span></div>' +
+        '<div class="qr-cal">' + head + cells + '</div></div>';
+    }).join('');
+    var goalParts = [];
+    if (targetMonths.length) goalParts.push(targetMonths.map(function(m) { return m.label; }).join('–') + ': ' + goal + ' videos per category a month, from two filming sessions of 17 (about 8–9 a week), by video ETA month');
+    postGoalMonths.forEach(function(m) { var pg = QUARTER_REPORT_POST_GOALS[m.key]; goalParts.push(m.label + ': ' + pg.perDay + ' organic video posted to ' + pg.channel + ' a day'); });
+    html += '<div class="qr-section">' + card('Videos against goal', goalParts.join(' · ') + '.',
+      (!targetMonths.length ? '' : '<div class="qr-goal-legend"><span class="qr-legend-item"><span class="qr-swatch qr-goal-swatch"></span>Videos due</span>' +
+        '<span class="qr-legend-item"><span class="qr-goal-tick-key"></span>Goal (' + goal + ')</span>' +
+        '<span class="qr-legend-item"><span class="qr-goal-check">✓</span>Goal reached</span>' +
+        (postCols ? '<span class="qr-legend-item"><span class="qr-swatch qr-cal-key"></span>Day with a post</span>' : '') + '</div>') +
+      '<div class="qr-goal-cols">' + goalCols + postCols + '</div>' +
+      (postCols ? '<div class="qr-goal-skip">Posts are organic videos marked Posted in Distribution. The tracker doesn\'t record the platform.</div>' : '') +
+      numbers('<th>Category</th>' + mHead + '<th>Total</th>',
+        catNames.map(function(c) { return { cells: [escapeHtml(c)].concat(byCat[c], [sum(byCat[c])]) }; }))) + '</div>';
+  }
+
   // The plan for the quarter, as set at the end of the previous one
   html += ctxCard('goals', qName + ' goals', 'Set at the end of ' + (qNum ? 'Q' + qNum + ' ' + qYear : 'Q4 ' + (qYear - 1)),
     'Add the goals you set for ' + qName + ' so readers can compare them with the results below.', false);
@@ -12553,6 +12630,8 @@ function renderQuarterEditorReport(qYear, qNum) {
     if (!vids.length || vids.some(function(a) { return a.status !== 'Approved' || !a.dateApproved; })) return;
     var starts = vids.map(function(a) { return a.assignedAt; }).filter(Boolean).sort();
     if (!starts.length) return;
+    // Campaigns carried over from an earlier quarter aren't this quarter's work.
+    if (starts[0] < qStart || (c.monthYear && c.monthYear < months[0].key)) return;
     var end = vids.map(function(a) { return String(a.dateApproved).slice(0, 10); }).sort().pop();
     var d = daysBetween(starts[0], end);
     if (isFinite(d) && d >= 0) campSpans.push({ month: end.slice(0, 7), days: d });
@@ -12603,7 +12682,7 @@ function renderQuarterEditorReport(qYear, qNum) {
     }));
   html += '<div class="qr-section">' + card('Agreed KPIs', 'The three content KPIs agreed with management, split by what the team was focused on',
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate comes from the Grading tab, by grade date. Time to ship only counts campaigns where every video is PM-approved, in the month the last one was approved.</div>') + '</div>';
+    '<div class="qr-goal-skip">First-pass rate comes from the Grading tab, by grade date. Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved.</div>') + '</div>';
 
   // Headline tiles
   html += '<div class="qr-section"><div class="qr-tiles">' +
@@ -12638,52 +12717,6 @@ function renderQuarterEditorReport(qYear, qNum) {
       numbers('<th>Type</th>' + mHead + '<th>Total</th>',
         ['Paid Ads', 'Organic'].map(function(t) { return { cells: [t].concat(byType[t], [sum(byType[t])]) }; }))) +
   '</div></div>';
-
-  // Videos per category against the monthly production goal (target months only)
-  var byCat = {};
-  STATE.assets.forEach(function(a) {
-    if (a.status === 'Cancelled') return;
-    var i = monthIdx(a.estDelivery || a.assignedAt);
-    if (i < 0) return;
-    var cat = a.category || 'No category';
-    (byCat[cat] = byCat[cat] || zeros())[i]++;
-  });
-  var goal = CATEGORY_MONTHLY_VIDEO_GOAL;
-  var catNames = Object.keys(byCat).sort(function(a, b) { return sum(byCat[b]) - sum(byCat[a]) || a.localeCompare(b); });
-  if (targetMonths.length && catNames.length) {
-    var goalCols = months.map(function(m, i) {
-      if (!m.hasTarget) return '';
-      var cats = catNames.filter(function(c) { return byCat[c][i]; }).sort(function(a, b) { return byCat[b][i] - byCat[a][i]; });
-      var scale = niceMax(Math.max(goal, cats.length ? byCat[cats[0]][i] : 0) * 1.05);
-      var hit = cats.filter(function(c) { return byCat[c][i] >= goal; }).length;
-      var rows = cats.map(function(c) {
-        var v = byCat[c][i], met = v >= goal;
-        return '<div class="qr-goal-row" title="' + escapeHtml(c + ' · ' + m.label + ': ' + v + ' of ' + goal + ' videos') + '">' +
-          '<div class="qr-goal-name">' + escapeHtml(c) + '</div>' +
-          '<div class="qr-goal-track"><div class="qr-goal-bar' + (met ? ' qr-goal-met' : '') + '" style="width:' + (v / scale * 100) + '%"></div>' +
-            '<div class="qr-goal-tick" style="left:' + (goal / scale * 100) + '%"></div></div>' +
-          '<div class="qr-goal-val">' + v + (met ? ' <span class="qr-goal-check">✓</span>' : '') + '</div>' +
-        '</div>';
-      }).join('');
-      return '<div class="qr-goal-col"><div class="qr-goal-month">' + MONTH_LONG[qNum * 3 + i] +
-        '<span class="qr-dim">' + hit + ' of ' + cats.length + ' categories reached ' + goal + '</span></div>' + rows + '</div>';
-    }).join('');
-    var skipped = [];
-    months.forEach(function(m, i) {
-      if (m.hasTarget) return;
-      var r = QUARTER_REPORT_NO_TARGET_MONTHS[m.key];
-      skipped.push(MONTH_LONG[qNum * 3 + i] + ': ' + r.charAt(0).toLowerCase() + r.slice(1) + '.');
-    });
-    html += '<div class="qr-section">' + card('Videos per category against goal',
-      'Goal: ' + goal + ' videos per category each month, from two filming sessions of 17 (about 8–9 a week). Counted by video ETA month.',
-      '<div class="qr-goal-legend"><span class="qr-legend-item"><span class="qr-swatch qr-goal-swatch"></span>Videos due</span>' +
-        '<span class="qr-legend-item"><span class="qr-goal-tick-key"></span>Goal (' + goal + ')</span>' +
-        '<span class="qr-legend-item"><span class="qr-goal-check">✓</span>Goal reached</span></div>' +
-      '<div class="qr-goal-cols">' + goalCols + '</div>' +
-      (skipped.length ? '<div class="qr-goal-skip">' + escapeHtml(skipped.join(' ')) + '</div>' : '') +
-      numbers('<th>Category</th>' + mHead + '<th>Total</th>',
-        catNames.map(function(c) { return { cells: [escapeHtml(c)].concat(byCat[c], [sum(byCat[c])]) }; }))) + '</div>';
-  }
 
   // Approved per editor
   html += '<div class="qr-section">' + card('Approved videos by editor',
