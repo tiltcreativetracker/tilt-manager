@@ -2441,6 +2441,10 @@ var STATE = {
   // UI preference: when true, sidebar collapses to a compact strip showing only flags +
   // counts (country rows) or flag + rank + category pill (sub-campaign rows). Persisted.
   sidebarCompact: false,
+  // Training tab sidebar collapsed to a narrow numbered rail. Per-viewer, localStorage.
+  trainingSidebarCollapsed: (function() {
+    try { return localStorage.getItem('tilt-training-sidebar-collapsed') === '1'; } catch (_) { return false; }
+  })(),
   // Optional month filter for the sidebar. 'all' shows everything (default); an ISO
   // month string like '2026-04' filters campaigns to those with at least one video
   // whose estDelivery falls in that month; 'none' shows campaigns whose videos have
@@ -13111,9 +13115,10 @@ function renderTrainingView() {
 
   // Editors and admins/CLs see the same filter: hide a module only when it has
   // no brief and no links — an empty module is useless to both.
-  var visibleModules = modules.filter(function(m) {
-    return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl || m.brief);
-  });
+  // Admins/CLs see every module, so one just added with only a title doesn't
+  // vanish from the sidebar; it's flagged "empty" until it gets content.
+  function moduleHasContent(m) { return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl || m.brief); }
+  var visibleModules = isAdminOrCL ? modules.slice() : modules.filter(moduleHasContent);
 
   // Resolve active module; fall back to first visible so the pane never
   // renders blank when modules exist.
@@ -13147,9 +13152,10 @@ function renderTrainingView() {
     if (subs.some(function(u){return (u || '').trim();})) return 'progress';
     return 'idle';
   }
+  var trCollapsed = !!STATE.trainingSidebarCollapsed;
   var sidebarRows = visibleModules.length === 0
-    ? '<div style="padding:20px 16px;font-size:12px;color:var(--text3);text-align:center;">No modules yet' + (canEdit ? '. Click + to add.' : '.') + '</div>'
-    : visibleModules.map(function(m) {
+    ? trCollapsed ? '' : '<div style="padding:20px 16px;font-size:12px;color:var(--text3);text-align:center;">No modules yet' + (canEdit ? '. Click + to add.' : '.') + '</div>'
+    : visibleModules.map(function(m, i) {
         var isActive = active && String(m.id) === String(active.id);
         var badge;
         if (isAdminOrCL) {
@@ -13164,18 +13170,33 @@ function renderTrainingView() {
               ? '<span style="color:#f59e0b;font-size:14px;">•</span>'
               : '<span style="color:var(--text3);font-size:14px;">○</span>';
         }
+        if (trCollapsed) {
+          return '<div class="subcamp-item tr-rail-item ' + (isActive ? 'active' : '') + '" ' +
+            'onclick="App.selectTrainingModule(\'' + m.id + '\')" ' +
+            'title="' + escapeHtml(m.title || '') + '">' +
+              '<span class="tr-rail-num">' + (i + 1) + '</span>' + badge +
+          '</div>';
+        }
         return '<div class="subcamp-item ' + (isActive ? 'active' : '') + '" ' +
           'style="padding-left:16px;margin:0 6px 2px;" ' +
           'onclick="App.selectTrainingModule(\'' + m.id + '\')" ' +
           'title="' + escapeHtml(m.title || '') + '">' +
             '<div class="subcamp-name">' + escapeHtml(m.title || '(untitled)') + '</div>' +
+            (moduleHasContent(m) ? '' : '<span class="tr-empty-tag" title="Hidden from editors until it has a brief or link">empty</span>') +
             badge +
         '</div>';
       }).join('');
-  var sidebar = '<div class="sidebar">' +
+  var trToggle = '<button class="sidebar-toggle" onclick="App.toggleTrainingSidebar()" title="' +
+    (trCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '">' + (trCollapsed ? '\u00BB' : '\u00AB') + '</button>';
+  var sidebar = '<div class="sidebar' + (trCollapsed ? ' tr-sidebar-collapsed' : '') + '">' +
     '<div class="sidebar-header">' +
-      '<span class="sidebar-title">TRAINING</span>' +
-      (canEdit ? '<button class="sidebar-toggle" onclick="App.trainingBeginAdd()" title="Add training module">+</button>' : '') +
+      (trCollapsed
+        ? trToggle
+        : '<span class="sidebar-title">TRAINING</span>' +
+          '<span style="display:flex;gap:4px;">' +
+            (canEdit ? '<button class="sidebar-toggle" onclick="App.trainingBeginAdd()" title="Add training module">+</button>' : '') +
+            trToggle +
+          '</span>') +
     '</div>' +
     '<div class="sidebar-scroll">' + sidebarRows + '</div>' +
   '</div>';
@@ -13311,7 +13332,7 @@ function renderTrainingView() {
     return '<div class="training-link-cell">' +
       '<span class="link-cell-inline training-link-view">' + link +
         '<button type="button" class="url-edit-pencil" title="Edit link" ' + REVEAL + '>✎</button>' +
-        '<button type="button" class="url-edit-pencil" title="Remove video" onclick="App.trainingSetSubmission(\'' + escapeAttr(m.id) + '\', ' + v.index + ', \'\'' + tgt + ')">×</button>' +
+        '<button type="button" class="url-edit-pencil tr-del-sub" title="Delete submission" onclick="App.trainingDeleteSubmission(\'' + escapeAttr(m.id) + '\', ' + v.index + tgt + ')">🗑</button>' +
       '</span>' +
       urlInput(v.index, v.url, tgt, false) +
     '</div>';
@@ -13492,8 +13513,10 @@ function showEditTrainingModuleModal(moduleId) {
       logAction('updated', 'Training module "' + title + '" edited');
       if (typeof toast === 'function') toast('Module updated', 'success');
     } else {
+      var newId = 'tm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      STATE.activeTrainingModuleId = newId;
       STATE.trainingModules.push({
-        id: 'tm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        id: newId,
         title: title,
         brief: brief,
         notionUrl: notionUrl,
@@ -18799,6 +18822,11 @@ var App = {
     TypeDragState.srcType = null;
   },
   // Flip the compact/full sidebar mode. Persists via saveState() inside render().
+  toggleTrainingSidebar: function() {
+    STATE.trainingSidebarCollapsed = !STATE.trainingSidebarCollapsed;
+    try { localStorage.setItem('tilt-training-sidebar-collapsed', STATE.trainingSidebarCollapsed ? '1' : '0'); } catch (_) {}
+    render();
+  },
   toggleSidebarCompact: function() { STATE.sidebarCompact = !STATE.sidebarCompact; render(); },
   setSidebarMonthFilter: function(value) {
     STATE.sidebarMonthFilter = value || 'all';
@@ -19976,6 +20004,30 @@ var App = {
     }).catch(function(err) {
       logAction('skipped-notify', 'Training submission ping errored for ' + editor + ': ' + ((err && err.message) || 'unknown'));
     });
+  },
+  // Delete one submitted video (confirmed). Splices the slot out of both
+  // parallel arrays so later videos shift up rather than leaving a gap.
+  trainingDeleteSubmission: function(moduleId, index, targetEmail) {
+    var email = trainingTargetEmail(targetEmail);
+    if (!email) return;
+    var rec = ((STATE.trainingCompletions || {})[email] || {})[moduleId];
+    if (!rec) return;
+    var urls = Array.isArray(rec.submissionUrls) ? rec.submissionUrls.slice() : (rec.submissionUrl ? [rec.submissionUrl] : []);
+    var i = parseInt(index, 10) || 0;
+    if (i < 0 || i >= urls.length || !String(urls[i] || '').trim()) return;
+    if (!confirm('Delete this submission? This can\'t be undone.')) return;
+    var stamps = Array.isArray(rec.submissionAt) ? rec.submissionAt.slice() : [];
+    urls.splice(i, 1);
+    if (i < stamps.length) stamps.splice(i, 1);
+    stamps.length = Math.min(stamps.length, urls.length);
+    rec.submissionUrls = urls;
+    rec.submissionAt = stamps;
+    delete rec.submissionUrl;
+    var module = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
+    logAction('deleted', 'Training "' + ((module && module.title) || moduleId) + '" submission #' + (i + 1) + ' deleted for ' + email);
+    saveState();
+    render();
+    if (typeof toast === 'function') toast('Submission deleted', 'success');
   },
   // Admin-only: change the submitted date on one video slot. `dateStr` is a
   // YYYY-MM-DD from <input type=date>; empty clears the date.
