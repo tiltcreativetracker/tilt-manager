@@ -402,6 +402,8 @@ var Fb = {
   // Config tab. Docs are keyed by the London-civil date (yyyy-mm-dd). One write per
   // browser session per day.
   GRADES_BACKUPS_COLL: 'state/app/gradesBackups',
+  // Daily snapshot of STATE.weeklyLog + STATE.eod ({yyyy-mm-dd}); see ensureTodayLogBackup.
+  LOG_BACKUPS_COLL: 'state/app/logBackups',
   _todayGradesBackup: null, // yyyy-mm-dd string; blocks the write from firing again today
   _suppressUpload: false,
   _uploadTimer: null,
@@ -878,7 +880,7 @@ var Fb = {
       STATE.scorecardMeta = mergeScorecardMeta(_localScorecardMeta, data.scorecardMeta);
 
       // weeklyLog: { 'YYYY-MM-DD': [entry, ...] } where each entry has a stable id.
-      // Merge per date, then per id. On id conflict prefer the newer addedAt (edits
+      // Merge per date, then per id. On id conflict prefer the newer updatedAt/addedAt (edits
       // are rare — deletes are done via App.deleteWeeklyLogEntry which drops the
       // entry from both sides on the next save round-trip).
       function mergeWeeklyLog(local, incoming) {
@@ -898,7 +900,7 @@ var Fb = {
             if (!e || !e.id) return;
             var ex = byId[e.id];
             if (!ex) { byId[e.id] = e; order.push(e.id); return; }
-            if ((e.addedAt || 0) > (ex.addedAt || 0)) byId[e.id] = e;
+            if ((e.updatedAt || e.addedAt || 0) > (ex.updatedAt || ex.addedAt || 0)) byId[e.id] = e;
           });
           if (order.length) out[d] = order.map(function(id) { return byId[id]; });
         });
@@ -1570,6 +1572,7 @@ var Fb = {
       HubSync.schedulePush();
       GSheets.scheduleSync();
       Fb.ensureTodayGradesBackup();
+      Fb.ensureTodayLogBackup();
     }).catch(function(err) {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
@@ -1629,6 +1632,38 @@ var Fb = {
     }).catch(function(err) {
       console.warn('[Fb] gradesBackup write failed:', err);
       Fb._todayGradesBackup = null; // let the next successful save try again
+    });
+  },
+
+  // Snapshot STATE.weeklyLog + STATE.eod to state/app/logBackups/{yyyy-mm-dd} on
+  // the first successful save each day, mirroring ensureTodayGradesBackup. Waits
+  // for the EOD listener's first server snapshot so a not-yet-loaded (empty)
+  // STATE.eod is never recorded as the day's EOD state. Skipped when both are
+  // empty. Rotation drops the 90-days-ago doc so a full quarter stays recoverable.
+  ensureTodayLogBackup: function() {
+    if (!Auth.user || !Fb._eodLoaded) return;
+    var wlog = (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {};
+    var eod = (STATE.eod && typeof STATE.eod === 'object') ? STATE.eod : {};
+    var wlogCount = Object.keys(wlog).reduce(function(n, d) { return n + (Array.isArray(wlog[d]) ? wlog[d].length : 0); }, 0);
+    var eodCount = Object.keys(eod).reduce(function(n, e) { return n + Object.keys(eod[e] || {}).length; }, 0);
+    if (wlogCount === 0 && eodCount === 0) return;
+    var today = todayISO();
+    if (Fb._todayLogBackup === today) return;
+    Fb._todayLogBackup = today;
+    var col = fbDb.collection(Fb.LOG_BACKUPS_COLL);
+    col.doc(today).set(JSON.parse(JSON.stringify({
+      weeklyLog: wlog,
+      eod: eod,
+      weeklyLogCount: wlogCount,
+      eodCount: eodCount,
+      by: (Auth.user && (Auth.user.email || Auth.user.uid)) || null
+    }))).then(function() {
+      col.doc(today).update({ at: firebase.firestore.FieldValue.serverTimestamp() }).catch(function() {});
+      var d90 = bizNow(); d90.setDate(d90.getDate() - 90);
+      col.doc(toLocalISODate(d90)).delete().catch(function() { /* fine if not present */ });
+    }).catch(function(err) {
+      console.warn('[Fb] logBackup write failed:', err);
+      Fb._todayLogBackup = null; // let the next successful save try again
     });
   },
 
@@ -1768,6 +1803,7 @@ var Fb = {
         out[rec.editor][rec.date] = rec;
       });
       STATE.eod = out;
+      if (!snapshot.metadata.fromCache) Fb._eodLoaded = true;
       if (typeof render === 'function' && Auth._booted &&
           (STATE.tab === 'editorHome' || STATE.tab === 'log')) render();
     }, function(err) {
@@ -7134,36 +7170,54 @@ function assetExistedOnDay(a, dateISO) {
 }
 
 // Turn an editor's submitted EOD for one day into read-only Weekly Log entries
-// (source: 'eod'). Derived at render time rather than copied into weeklyLog, so
-// the EOD record stays the single source of truth.
-function getEODWeeklyLogEntries(dateISO, editor) {
+// (source: 'eod'). Ids are stable per (editor, date, item) so a re-save after the
+// Slack post lands (adding slackReplyUrl) replaces the entries instead of
+// duplicating them; `updatedAt` makes that newer copy win in mergeWeeklyLog.
+function buildEODWeeklyLogEntries(dateISO, editor) {
   var rec = editor && STATE.eod && STATE.eod[editor] && STATE.eod[editor][dateISO];
   if (!rec || !rec.submittedAt) return [];
-  var at = new Date(rec.submittedAt).getTime() || 0;
-  var base = { source: 'eod', addedAt: at, addedByName: editor, slackReplyUrl: rec.slackReplyUrl || null };
+  var at = new Date(rec.submittedAt).getTime() || Date.now();
+  var prefix = 'eod_' + String(editor).replace(/[^A-Za-z0-9]/g, '') + '_' + dateISO + '_';
+  var base = { source: 'eod', editor: editor, addedAt: at, updatedAt: Date.now(),
+    addedByUid: rec.submittedByUid || null, addedByName: editor, slackReplyUrl: rec.slackReplyUrl || null };
   var out = [];
   (Array.isArray(rec.assets) ? rec.assets : []).forEach(function(a, i) {
-    var bits = [a.campaignName, a.status].filter(Boolean).join(' · ');
-    out.push(Object.assign({}, base, { id: 'eod_a_' + i, category: 'Editing',
+    var bits = [a.campaignName, a.category].filter(Boolean).join(' · ');
+    out.push(Object.assign({}, base, { id: prefix + 'a' + i, category: 'Editing',
       text: (a.name || 'Untitled') + (bits ? ' — ' + bits : '') }));
   });
   (Array.isArray(rec.training) ? rec.training : []).forEach(function(t, i) {
-    out.push(Object.assign({}, base, { id: 'eod_t_' + i, category: 'Training',
+    out.push(Object.assign({}, base, { id: prefix + 't' + i, category: 'Training',
       text: (t.title || 'Untitled module') + (t.state ? ' — ' + t.state : '') }));
   });
   (Array.isArray(rec.other) ? rec.other : []).forEach(function(o, i) {
-    out.push(Object.assign({}, base, { id: 'eod_o_' + i, category: 'Other', text: o.text || '' }));
+    out.push(Object.assign({}, base, { id: prefix + 'o' + i, category: 'Other', text: o.text || '' }));
   });
   return out;
 }
 
-// Return the sorted list of Weekly Log activity entries for the given date,
-// plus the selected editor's submitted EOD items when `editor` is passed.
-// Newest first (by addedAt) so the most recent activity is easiest to skim.
-function getWeeklyLogEntries(dateISO, editor) {
+// Copy a submitted EOD into STATE.weeklyLog (the synced main doc), replacing any
+// earlier copy of the same editor/day. This is what makes EODs show up as team
+// Weekly Log notes for everyone, independent of the state/app/eod collection.
+function writeEODToWeeklyLog(editor, dateISO) {
+  var entries = buildEODWeeklyLogEntries(dateISO, editor);
+  if (!entries.length) return;
+  if (!STATE.weeklyLog || typeof STATE.weeklyLog !== 'object') STATE.weeklyLog = {};
+  var prefix = 'eod_' + String(editor).replace(/[^A-Za-z0-9]/g, '') + '_' + dateISO + '_';
+  var kept = (Array.isArray(STATE.weeklyLog[dateISO]) ? STATE.weeklyLog[dateISO] : []).filter(function(e) {
+    return !(e && e.id && e.id.indexOf(prefix) === 0);
+  });
+  STATE.weeklyLog[dateISO] = kept.concat(entries);
+  saveState();
+}
+
+// Return the sorted list of Weekly Log activity entries for the given date —
+// manual team notes plus every editor's submitted EOD items (team-wide, not
+// filtered by the editor picker). Newest first (by addedAt) so the most recent
+// activity is easiest to skim.
+function getWeeklyLogEntries(dateISO) {
   var m = (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {};
   var list = Array.isArray(m[dateISO]) ? m[dateISO].slice() : [];
-  list = list.concat(getEODWeeklyLogEntries(dateISO, editor));
   list.sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
   return list;
 }
@@ -7190,7 +7244,7 @@ function weeklyLogCategoryClass(cat) {
 // Render the activities panel for one day (input form + entries list). Used
 // inside each day-card on the Weekly Log tab.
 function renderWeeklyLogActivitiesPanel(dateISO, editor) {
-  var entries = getWeeklyLogEntries(dateISO, editor);
+  var entries = getWeeklyLogEntries(dateISO);
   var inputId = 'wlog-input-' + dateISO;
   var catId = 'wlog-cat-' + dateISO;
   var catOpts = WEEKLY_LOG_CATEGORIES.map(function(c) {
@@ -12829,10 +12883,10 @@ function renderTrainingView() {
     return {};
   }
 
-  // Editors and admins/CLs see the same "has at least one link" filter — an
-  // empty module is useless to both. Admins add links via the edit modal.
+  // Editors and admins/CLs see the same filter: hide a module only when it has
+  // no brief and no links — an empty module is useless to both.
   var visibleModules = modules.filter(function(m) {
-    return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl);
+    return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl || m.brief);
   });
 
   // Resolve active module; fall back to first visible so the pane never
@@ -12959,12 +13013,13 @@ function renderTrainingView() {
     ? '<div class="camp-brief" style="white-space:pre-wrap;">' + escapeHtml(m.brief) + '</div>'
     : '';
 
-  // Video rows in the main table — one row per submitted training video
-  // (editor, video link, submitted date), grouped by editor. The editor's
-  // status + action cells span their group via rowspan. Admin/CL see every
-  // editor (an editor with no videos gets one placeholder row); editors see
-  // their own videos plus a blank "add video" entry row.
-  var DASH = '<span style="color:var(--text3);">—</span>';
+  // Video rows in the main table — laid out like a campaign's video table: one
+  // flat row per video slot (editor, link, submitted date, completed date,
+  // status, actions). Each editor gets at least `required` rows; unfilled slots
+  // show an "+ Add link" button. Admin/CL see every editor; editors see only
+  // their own rows. Status/actions are per-editor, so they sit on the editor's
+  // first row only.
+  var DASH = '<span class="no-link">—</span>';
   function readStamps(c) {
     return Array.isArray(c && c.submissionAt) ? c.submissionAt : [];
   }
@@ -12980,18 +13035,28 @@ function renderTrainingView() {
     });
     return out;
   }
-  function statusCell(c, n) {
-    var label, color;
-    if (c.completedAt) { label = '✓ Completed'; color = '#22c55e'; }
-    else if (c.startedAt || n > 0) { label = 'In progress'; color = '#f59e0b'; }
-    else { label = 'Not started'; color = 'var(--text3)'; }
-    return '<div style="color:' + color + ';font-weight:600;">' + label + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + n + '/' + required + ' video' + (required === 1 ? '' : 's') + '</div>';
+  // Indices of the next `n` empty slots — gaps inside submissionUrls first,
+  // then new slots appended past the end.
+  function emptySlotIndices(c, n) {
+    var urls = Array.isArray(c && c.submissionUrls) ? c.submissionUrls : (c && c.submissionUrl ? [c.submissionUrl] : []);
+    var out = [];
+    for (var s = 0; s < urls.length && out.length < n; s++) {
+      if (!String(urls[s] || '').trim()) out.push(s);
+    }
+    var next = urls.length;
+    while (out.length < n) out.push(next++);
+    return out;
   }
-  function videoLink(v) {
-    var host = hostnameFromUrl(v.url) || 'link';
-    return '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;" title="' + escapeHtml(v.url) + '">' +
-      'Video #' + (v.index + 1) + ' <span style="color:var(--text3);font-size:11px;">' + escapeHtml(host) + ' ↗</span></a>';
+  function statusBadge(c, n) {
+    if (c.completedAt) return '<span class="status-badge st-Approved">Completed</span>';
+    if (c.startedAt || n > 0) return '<span class="status-badge st-In_Progress">In Progress</span>';
+    return '<span class="status-badge st-Draft">Not Started</span>';
+  }
+  function linkLabel(url) {
+    var host = hostnameFromUrl(url) || '';
+    if (/(^|\.)(frame\.io|f\.io)$/i.test(host)) return 'Frame.io';
+    if (/google\.com$/i.test(host)) return 'Drive';
+    return 'Link';
   }
   // Submitted dates render as the UK calendar day (BIZ_TZ), matching the rest
   // of the tracker — a raw UTC slice shows the previous day after midnight BST.
@@ -12999,69 +13064,63 @@ function renderTrainingView() {
     var d = new Date(iso);
     return isNaN(d.getTime()) ? String(iso).slice(0, 10) : d.toLocaleDateString('en-CA', { timeZone: BIZ_TZ });
   }
-  function dateCell(v) { return v.at ? escapeHtml(ukDay(v.at)) : DASH; }
-  // Emits the <tr>s for one editor: `cells` is an array of [videoHtml, dateHtml]
-  // (at least one entry), `lead` / `tail` are the rowspanned editor+status and
-  // action cells.
-  function groupRows(lead, cells, tail) {
-    var span = cells.length;
-    var rs = span > 1 ? ' rowspan="' + span + '"' : '';
-    var top = ' style="vertical-align:top;"';
-    return cells.map(function(cell, i) {
-      return '<tr>' +
-        (i === 0 ? '<td' + rs + top + '>' + lead[0] + '</td><td' + rs + top + '>' + lead[1] + '</td>' : '') +
-        '<td>' + cell[0] + '</td><td>' + cell[1] + '</td>' +
-        (i === 0 ? '<td' + rs + top + '>' + tail + '</td>' : '') +
-      '</tr>';
-    }).join('');
-  }
+  function dateText(iso) { return iso ? '<span class="date-cell">' + escapeHtml(formatDate(ukDay(iso))) + '</span>' : DASH; }
 
-  var tableRows;
-  var totalVideos = 0;
   // Admins can edit every editor's row (links, dates, status); editors can
   // edit their own. `tgt` is the JS arg suffix that routes a handler call at
   // another editor's record — '' means "the signed-in user".
-  function tgtArg(email) { return email ? ', \'' + escapeHtml(email) + '\'' : ''; }
-  function editableVideo(v, tgt) {
-    return '<div style="display:flex;align-items:center;gap:6px;">' +
-      videoLink(v) +
-      '<button type="button" class="url-edit-pencil" title="Edit link" ' +
-        'onclick="(function(row){var i=row.querySelector(\'input\');if(i){i.style.display=\'\';i.focus();i.select();row.querySelector(\'a\').style.display=\'none\';}})(this.parentNode)">✎</button>' +
-      '<button type="button" class="url-edit-pencil" title="Remove video" ' +
-        'onclick="App.trainingSetSubmission(\'' + m.id + '\', ' + v.index + ', \'\'' + tgt + ')">×</button>' +
-      '<input type="url" class="form-input" style="display:none;min-width:180px;max-width:320px;padding:4px 8px;font-size:12px;" ' +
-        'placeholder="Frame.io / Drive link" value="' + escapeHtml(v.url) + '" ' +
-        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeAttr(v.url) + '\';this.blur();}" ' +
-        'onblur="App.trainingSetSubmission(\'' + m.id + '\', ' + v.index + ', this.value' + tgt + ')">' +
+  function tgtArg(email) { return email ? ', \'' + escapeAttr(email) + '\'' : ''; }
+  // Shared inline URL input: Enter/blur saves, Escape reverts. Hidden until the
+  // pencil / "+ Add link" button reveals it.
+  function urlInput(index, value, tgt, autoShow) {
+    return '<input type="url" class="form-input training-url-input" style="' + (autoShow ? '' : 'display:none;') + '" ' +
+      'placeholder="Paste Frame.io / Drive link" value="' + escapeHtml(value) + '" ' +
+      'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeAttr(value) + '\';this.blur();}" ' +
+      'onblur="App.trainingSetSubmission(\'' + escapeAttr(m.id) + '\', ' + index + ', this.value' + tgt + ')">';
+  }
+  var REVEAL = 'onclick="(function(c){var i=c.querySelector(\'input\');c.querySelector(\'.training-link-view\').style.display=\'none\';i.style.display=\'\';i.focus();i.select();})(this.closest(\'.training-link-cell\'))"';
+  function videoCell(v, editable, tgt) {
+    var link = '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" title="' + escapeHtml(v.url) + '">' + linkLabel(v.url) + ' ↗</a>';
+    if (!editable) return link;
+    return '<div class="training-link-cell">' +
+      '<span class="link-cell-inline training-link-view">' + link +
+        '<button type="button" class="url-edit-pencil" title="Edit link" ' + REVEAL + '>✎</button>' +
+        '<button type="button" class="url-edit-pencil" title="Remove video" onclick="App.trainingSetSubmission(\'' + escapeAttr(m.id) + '\', ' + v.index + ', \'\'' + tgt + ')">×</button>' +
+      '</span>' +
+      urlInput(v.index, v.url, tgt, false) +
     '</div>';
   }
-  function editableDate(v, tgt) {
-    return '<input type="date" class="form-input" style="padding:3px 6px;font-size:12px;max-width:140px;" ' +
-      'value="' + escapeHtml(v.at ? ukDay(v.at) : '') + '" ' +
-      'onchange="App.trainingSetSubmissionDate(\'' + m.id + '\', ' + v.index + ', this.value' + tgt + ')">';
+  function emptyVideoCell(index, editable, tgt, autoShow) {
+    if (!editable) return DASH;
+    return '<div class="training-link-cell">' +
+      '<span class="training-link-view"' + (autoShow ? ' style="display:none;"' : '') + '><button type="button" class="training-add-link" ' + REVEAL + '>+ Add link</button></span>' +
+      urlInput(index, '', tgt, autoShow) +
+    '</div>';
   }
-  // Blank entry row — fills the first empty slot, or appends a new one once
-  // every slot is taken, so there's always room to log another video.
-  function addVideoCell(c, tgt) {
-    var slots = Array.isArray(c.submissionUrls) ? c.submissionUrls : (c.submissionUrl ? [c.submissionUrl] : []);
-    var nextIdx = slots.length;
-    for (var s = 0; s < slots.length; s++) {
-      if (!String(slots[s] || '').trim()) { nextIdx = s; break; }
+  // Admin-only click-to-edit date; everyone else sees plain text.
+  function submittedCell(v, tgt) {
+    if (!adminEdits) return dateText(v.at);
+    return '<div class="training-link-cell">' +
+      '<span class="editable-cell training-link-view" title="Click to edit date" ' + REVEAL + '>' + dateText(v.at) + '</span>' +
+      '<input type="date" class="inline-edit-input" style="display:none;" value="' + escapeHtml(v.at ? ukDay(v.at) : '') + '" ' +
+        'onchange="App.trainingSetSubmissionDate(\'' + escapeAttr(m.id) + '\', ' + v.index + ', this.value' + tgt + ')" onblur="render()">' +
+    '</div>';
+  }
+  function actionButtons(c, n, editable, tgt, ed) {
+    var btns = '';
+    if (editable) {
+      btns += c.completedAt
+        ? '<button class="action-btn" onclick="App.trainingUncomplete(\'' + escapeAttr(m.id) + '\'' + tgt + ')" title="Mark as not complete">Undo</button>'
+        : (c.startedAt || n)
+          ? '<button class="action-btn training-complete-btn" onclick="App.trainingComplete(\'' + escapeAttr(m.id) + '\'' + tgt + ')">✓ Complete</button>'
+          : '<button class="action-btn training-start-btn" onclick="App.trainingStart(\'' + escapeAttr(m.id) + '\'' + tgt + ')">▶ Start</button>';
+      // Only once every required slot is filled — before that a blank "+ Add link" row is already showing.
+      if (n >= required) btns += '<button class="action-btn" onclick="App.trainingAddVideoSlot(\'' + escapeAttr(m.id) + '\', \'' + escapeAttr(ed) + '\')" title="Add another video">+ Video</button>';
     }
-    return [
-      '<input type="url" class="form-input" style="min-width:220px;max-width:340px;padding:4px 8px;font-size:12px;" ' +
-        'placeholder="+ Add video — paste Frame.io / Drive link" ' +
-        'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'\';this.blur();}" ' +
-        'onblur="if(this.value.trim())App.trainingSetSubmission(\'' + m.id + '\', ' + nextIdx + ', this.value' + tgt + ')">',
-      DASH
-    ];
-  }
-  function actionPill(c, tgt) {
-    return c.completedAt
-      ? '<button class="training-action-pill" onclick="App.trainingUncomplete(\'' + m.id + '\'' + tgt + ')">Undo</button>'
-      : (c.startedAt || videoEntries(c).length)
-        ? '<button class="training-action-pill training-action-complete" onclick="App.trainingComplete(\'' + m.id + '\'' + tgt + ')">✓ Mark complete</button>'
-        : '<button class="training-action-pill training-action-start" onclick="App.trainingStart(\'' + m.id + '\'' + tgt + ')">▶ Start</button>';
+    if (isAdminOrCL) {
+      btns += '<button class="action-btn" onclick="App.sendTrainingToEditor(\'' + escapeAttr(m.id) + '\',\'' + escapeAttr(ed) + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ Slack</button>';
+    }
+    return '<div class="row-actions" style="justify-content:flex-start;">' + btns + '</div>';
   }
   // Which email holds this editor's record for the module — the alias with
   // data if any, otherwise their primary alias — so admin edits land on the
@@ -13074,42 +13133,60 @@ function renderTrainingView() {
     }
     return aliases.length ? aliases[0] + '@tilt.app' : '';
   }
+  // Display name for the signed-in editor (alias-aware), for the avatar cell.
+  function editorNameForEmail(email) {
+    var local = String(email || '').split('@')[0].toLowerCase();
+    var names = (typeof EDITOR_EMAILS !== 'undefined') ? Object.keys(EDITOR_EMAILS) : [];
+    for (var i = 0; i < names.length; i++) {
+      if ((EDITOR_EMAILS[names[i]] || []).some(function(a) { return String(a).toLowerCase() === local; })) return names[i];
+    }
+    return local || 'me';
+  }
   var adminEdits = (role === 'admin');
+  var rowNo = 0;
+  var totalVideos = 0;
+  var extraSlot = STATE._trainingExtraSlot || null; // { moduleId, editor } — session-only
+  function editorRows(ed, c, editable, tgt) {
+    var vids = videoEntries(c);
+    totalVideos += vids.length;
+    var wantExtra = !!(editable && extraSlot && extraSlot.moduleId === m.id && extraSlot.editor === ed);
+    var emptyCount = editable ? Math.max(0, required - vids.length) + (wantExtra ? 1 : 0) : 0;
+    var slots = vids.map(function(v) { return { v: v }; });
+    emptySlotIndices(c, emptyCount).forEach(function(idx, k) {
+      slots.push({ empty: idx, autoShow: wantExtra && k === emptyCount - 1 });
+    });
+    if (!slots.length) slots.push({ none: true });
+    var editorCell = '<div class="editor-cell"><div class="editor-avatar av-' + escapeHtml(ed) + '">' + escapeHtml(editorInitials(ed)) + '</div><span class="editor-name">' + escapeHtml(ed) + '</span></div>';
+    return slots.map(function(s, i) {
+      rowNo++;
+      var first = i === 0;
+      var video = s.v ? videoCell(s.v, editable, tgt)
+        : s.none ? '<span class="no-link">No video yet</span>'
+        : emptyVideoCell(s.empty, editable, tgt, s.autoShow);
+      return '<tr' + (first && rowNo > 1 ? ' class="training-editor-first"' : '') + '>' +
+        '<td><span class="pn">' + rowNo + '</span></td>' +
+        '<td>' + editorCell + '</td>' +
+        '<td class="link-cell">' + video + '</td>' +
+        '<td>' + (s.v ? submittedCell(s.v, tgt) : DASH) + '</td>' +
+        '<td>' + (first ? dateText(c.completedAt) : '') + '</td>' +
+        '<td>' + (first ? statusBadge(c, vids.length) : '') + '</td>' +
+        '<td>' + (first ? actionButtons(c, vids.length, editable, tgt, ed) : '') + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+  var tableRows;
   if (isAdminOrCL) {
     tableRows = TRAINING_EDS.map(function(ed) {
       var c = completionForEditor(ed, m.id);
-      var vids = videoEntries(c);
-      totalVideos += vids.length;
-      var tgt = adminEdits ? tgtArg(recordEmailForEditor(ed)) : '';
-      var cells;
-      if (adminEdits) {
-        cells = vids.map(function(v) { return [editableVideo(v, tgt), editableDate(v, tgt)]; });
-        cells.push(addVideoCell(c, tgt));
-      } else {
-        cells = vids.length
-          ? vids.map(function(v) { return [videoLink(v), dateCell(v)]; })
-          : [['<span style="color:var(--text3);">No videos yet</span>', DASH]];
-      }
-      var lead = ['<span style="font-weight:600;">' + escapeHtml(ed) + '</span>', statusCell(c, vids.length)];
-      var tail =
-        '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">' +
-          (adminEdits ? actionPill(c, tgt) : '') +
-          '<button class="training-action-pill" onclick="App.sendTrainingToEditor(\'' + m.id + '\',\'' + ed + '\')" title="Post to ' + escapeHtml(ed) + '\'s daily Slack thread">→ Slack</button>' +
-        '</div>';
-      return groupRows(lead, cells, tail);
+      return editorRows(ed, c, adminEdits, adminEdits ? tgtArg(recordEmailForEditor(ed)) : '');
     }).join('');
   } else {
     var myC = ((completions[currentEmail] || {})[m.id]) || {};
-    var myVids = videoEntries(myC);
-    totalVideos = myVids.length;
-    var cells = myVids.map(function(v) { return [editableVideo(v, ''), dateCell(v)]; });
-    cells.push(addVideoCell(myC, ''));
-    var myLead = ['<span style="font-weight:600;">You (' + escapeHtml((currentEmail.split('@')[0] || 'me')) + ')</span>', statusCell(myC, myVids.length)];
-    tableRows = groupRows(myLead, cells, actionPill(myC, ''));
+    tableRows = editorRows(editorNameForEmail(currentEmail), myC, true, '');
   }
   var table =
-    '<div class="table-wrap"><table><thead><tr>' +
-      '<th>Editor</th><th>Status</th><th>Video</th><th>Submitted</th><th style="width:140px">Actions</th>' +
+    '<div class="table-wrap"><table class="training-table"><thead><tr>' +
+      '<th style="width:50px">NO.</th><th>Editor</th><th>Video</th><th>Submitted</th><th>Completed</th><th>Status</th><th>Actions</th>' +
     '</tr></thead><tbody>' + tableRows + '</tbody></table></div>';
 
   var embeds = moduleEmbeds(m);
@@ -19543,6 +19620,13 @@ var App = {
     render();
   },
 
+  // "+ Video" on a Training row: show one extra blank link row for that editor
+  // (session-only; cleared by the next trainingSetSubmission).
+  trainingAddVideoSlot: function(moduleId, editor) {
+    STATE._trainingExtraSlot = { moduleId: moduleId, editor: editor };
+    render();
+  },
+
   // Save (or clear) one of the current user's submission slots on a training
   // module. Mirrors setAssetFinalVideo: trim, validate as URL, store, log, toast.
   // A valid non-empty URL also auto-starts the module (sets startedAt if unset)
@@ -19555,6 +19639,7 @@ var App = {
   trainingSetSubmission: function(moduleId, indexOrUrl, maybeUrl, targetEmail) {
     var email = trainingTargetEmail(targetEmail);
     if (!email) return;
+    STATE._trainingExtraSlot = null;
     var index, newUrl;
     if (arguments.length >= 3) { index = parseInt(indexOrUrl, 10) || 0; newUrl = maybeUrl; }
     else { index = 0; newUrl = indexOrUrl; }
@@ -20031,6 +20116,7 @@ var App = {
       slackReplyUrl: null
     };
     Fb.saveEOD(editor, today);
+    writeEODToWeeklyLog(editor, today);
     render();
     toast('EOD submitted', 'success');
 
@@ -20058,6 +20144,7 @@ var App = {
           toast('EOD saved — Slack post failed', 'info');
         }
         Fb.saveEOD(editor, today);
+        writeEODToWeeklyLog(editor, today);
         render();
       });
     }).catch(function(err) {

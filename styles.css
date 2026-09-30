@@ -2019,6 +2019,17 @@
   .training-action-pill.training-action-complete:hover { background: #16a34a; border-color: #16a34a; }
   /* Inline Drive previews stack under the module description. Fixed aspect ratio
      so the layout stays predictable regardless of the source video's shape. */
+  /* Training table — campaign-style rows (see renderTrainingView). */
+  .training-table tr.training-editor-first td { border-top: 1px solid var(--border2); }
+  .training-table td { white-space: nowrap; }
+  .training-table .row-actions { flex-wrap: nowrap; }
+  .training-add-link { background: transparent; border: 1px dashed var(--border2); border-radius: 4px; color: var(--text3); cursor: pointer; font-size: 11px; font-family: inherit; padding: 3px 8px; transition: all 0.12s; }
+  .training-add-link:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+  .training-url-input { min-width: 220px; max-width: 320px; padding: 4px 8px; font-size: 12px; }
+  .action-btn.training-complete-btn { color: var(--green-text); border-color: var(--green-text); }
+  .action-btn.training-complete-btn:hover { background: var(--green-bg); }
+  .action-btn.training-start-btn { color: var(--accent2); border-color: var(--accent2); }
+  .action-btn.training-start-btn:hover { background: var(--accent-dim); }
   .training-embeds { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
   .training-embed { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg3); max-width: 560px; }
   .training-embed-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }

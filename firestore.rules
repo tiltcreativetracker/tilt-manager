@@ -1,0 +1,161 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ----- Helpers -----
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTiltUser() {
+      return isSignedIn()
+          && request.auth.token.email != null
+          && request.auth.token.email_verified == true
+          && request.auth.token.email.matches('.*@tilt[.]app$');
+    }
+
+    function myRole() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'editor';
+    }
+
+    function isEditor() { return isTiltUser(); }
+    function isPm()     { return isTiltUser() && myRole() in ['pm', 'admin']; }
+    function isAdmin()  { return isTiltUser() && myRole() == 'admin'; }
+
+    // ----- users/{uid} -----
+    match /users/{uid} {
+      allow read: if isTiltUser();
+
+      allow create: if isTiltUser()
+                    && request.auth.uid == uid
+                    && request.resource.data.role in ['editor', 'admin'];
+
+      allow update: if isTiltUser()
+                    && request.auth.uid == uid
+                    && request.resource.data.role == resource.data.role;
+
+      allow update: if isAdmin();
+
+      allow delete: if false;
+    }
+
+    // ----- state/app -----
+    match /state/app {
+      allow read:  if isTiltUser();
+      allow write: if isTiltUser();
+    }
+
+		// ----- state/app/assets/{assetId} -----
+		match /state/app/assets/{assetId} {
+  		allow read:   if isTiltUser();
+  		allow write:  if isTiltUser();
+		}
+
+    // ----- state/app/broll/{clipId} -----
+    // Clip Library index. Cloud Functions (admin SDK) do the Drive sync writes
+    // and bypass rules; clients only per-doc tag updates via merge writes.
+    match /state/app/broll/{clipId} {
+      allow read:  if isTiltUser();
+      allow write: if isTiltUser();
+    }
+
+    // ----- state/app/gradesBackups/{yyyy-mm-dd} -----
+    // Daily snapshot of STATE.grades, written client-side once per day per browser
+    // by ensureTodayGradesBackup. Rotation deletes the 30-days-ago doc by id.
+    match /state/app/gradesBackups/{id} {
+      allow read:   if isTiltUser();
+      allow write:  if isTiltUser();
+    }
+
+    // ----- state/app/eod/{date__editor} -----
+    // Editor EOD records, one whole doc per editor per day (Fb.saveEOD / Fb.subscribeEOD).
+    match /state/app/eod/{id} {
+      allow read:  if isTiltUser();
+      allow write: if isTiltUser();
+    }
+
+    // ----- state/app/logBackups/{yyyy-mm-dd} -----
+    // Daily snapshot of STATE.weeklyLog + STATE.eod, written client-side by
+    // Fb.ensureTodayLogBackup. Rotation deletes the 90-days-ago doc by id.
+    match /state/app/logBackups/{id} {
+      allow read:   if isTiltUser();
+      allow write:  if isTiltUser();
+    }
+
+		// ----- presence/{uid} -----
+		match /presence/{uid} {
+  		allow read:   if isTiltUser();
+  		allow write:  if isTiltUser();
+  		allow delete: if isTiltUser();
+		}
+
+// ----- activityLog/{id} -----
+
+    // ----- activityLog/{id} -----
+    match /activityLog/{id} {
+      allow read: if isTiltUser();
+      allow create: if isTiltUser()
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ----- assets/{id} -----
+    match /assets/{id} {
+      allow read:   if isTiltUser();
+      allow create: if isEditor();
+      allow update: if isEditor();
+      allow delete: if isAdmin();
+
+      match /versionHistory/{vid} {
+        allow read:   if isTiltUser();
+        allow create: if isEditor();
+        allow update, delete: if false;
+      }
+    }
+
+    // ----- campaigns/{id} -----
+    match /campaigns/{id} {
+      allow read:   if isTiltUser();
+      allow create: if isEditor();
+      allow update: if isEditor();
+      allow delete: if isAdmin();
+    }
+
+    // ----- config/app -----
+    match /config/app {
+      allow read:  if isTiltUser();
+      allow write: if isAdmin();
+    }
+
+    // ----- config/broll -----
+    // Folder list for the Clip Library sync. Reads open to any tilt user so the
+    // Config UI can render the list; writes go through Cloud Functions only
+    // (addBrollFolders / removeBrollFolder callables).
+    match /config/broll {
+      allow read:  if isTiltUser();
+      allow write: if false;
+    }
+
+    // ----- meta/dailyTally -----
+    // Shared race-prevention flag for the daily tally auto-fire.
+    match /meta/dailyTally {
+      allow read:  if isTiltUser();
+      allow write: if isTiltUser();
+    }
+    // ----- sendSlots/{slot} -----
+    // Per-send-kind dedupe slots (editor batches, PM batches, CHQ batches,
+    // QC reports). Atomically claimed via transactions before each notification
+    // POST so multiple open browsers can't double-send.
+    match /sendSlots/{slot} {
+      allow read:  if isTiltUser();
+      allow write: if isTiltUser();
+    }
+    // ----- Default deny -----
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
