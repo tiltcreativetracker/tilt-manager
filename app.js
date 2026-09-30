@@ -12345,6 +12345,11 @@ var QUARTER_REPORT_POST_GOALS = {
 var REVISION_TRACKING_SINCE = '2026-07-20';
 // PM approval turnaround target, in days (last submitted → PM approved).
 var APPROVAL_TURNAROUND_TARGET_DAYS = 1;
+// Campaigns left out of the report's Time to Ship (and its reasons list), by
+// campaign id → name shown in the footnote. Set by the PM.
+var QUARTER_REPORT_EXCLUDED_CAMPAIGNS = {
+  'cmralkxj2b9pu5t': 'Womenswear 2'
+};
 var QUARTER_REPORT_PHASES = {
   '2026-Q3': [
     { label: 'Jul–Aug', focus: 'Paid ads', months: ['2026-07', '2026-08'] },
@@ -12658,6 +12663,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var campSpans = [];
   function fmtDay(iso) { var dt = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); return dt.getUTCDate() + ' ' + MONTH_SHORT[dt.getUTCMonth()]; }
   STATE.campaigns.forEach(function(c) {
+    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)]) return;
     var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
     if (!vids.length || vids.some(function(a) { return a.status !== 'Approved' || !a.dateApproved; })) return;
     var starts = vids.map(function(a) { return a.assignedAt; }).filter(Boolean).sort();
@@ -12673,11 +12679,25 @@ function renderQuarterEditorReport(qYear, qNum) {
     var lastAssigned = starts[starts.length - 1];
     var late = vids.filter(function(a) { return daysBetween(typical, a.dateApproved) >= 5; });
     var reason;
-    if (late.length && late.every(function(a) { return a.assignedAt && daysBetween(a.assignedAt, a.dateApproved) <= 1; })) {
+    // With submission dates (For Review stamps), say where the last videos' time went:
+    // rework between first and last submission, or waiting for PM approval.
+    var lastOnes = vids.filter(function(a) { return String(a.dateApproved).slice(0, 10) === end; });
+    var subbed = lastOnes.filter(function(a) { return a.firstSubmittedAt && a.submittedAt; });
+    var lead = subbed.length ? subbed.slice().sort(function(x, y) { return String(x.firstSubmittedAt).localeCompare(String(y.firstSubmittedAt)); })[0] : null;
+    var rework = lead ? daysBetween(lead.firstSubmittedAt, lead.submittedAt) : 0;
+    var wait = lead ? daysBetween(lead.submittedAt, end) : 0;
+    var nLast = lastOnes.length, vw = nLast === 1 ? 'video was' : 'videos were';
+    if (lead && rework >= 5 && rework >= wait) {
+      var rr = lastOnes.reduce(function(t, a) { return t + (Number(a.revisionRounds) || 0); }, 0);
+      reason = nLast + ' ' + vw + ' first sent for review on ' + fmtDay(lead.firstSubmittedAt) + ' but not resubmitted until ' + fmtDay(lead.submittedAt) +
+        (rr ? ' (' + rr + ' revision rounds)' : '') + ', then approved ' + (wait <= 0 ? 'the same day' : 'within ' + wait + (wait === 1 ? ' day' : ' days'));
+    } else if (lead && wait >= 5) {
+      reason = nLast + ' ' + vw + ' sent for review on ' + fmtDay(lead.submittedAt) + ' and waited ' + wait + ' days for PM approval';
+    } else if (late.length && late.every(function(a) { return a.assignedAt && daysBetween(a.assignedAt, a.dateApproved) <= 1; })) {
       reason = late.length + ' video' + (late.length === 1 ? ' was' : 's were') + ' added on ' + fmtDay(late[0].assignedAt) + ' and approved within a day: a late addition, not slow editing';
     } else if (late.length) {
       var lr = late.map(function(a) { return Number(a.revisionRounds) || 0; });
-      reason = late.length + ' of ' + vids.length + ' videos were approved ' + daysBetween(typical, end) + ' days after the rest' +
+      reason = late.length + ' of ' + vids.length + ' videos ' + (late.length === 1 ? 'was' : 'were') + ' approved ' + daysBetween(typical, end) + ' days after the rest' +
         (Math.max.apply(null, lr) ? ' (' + lr.reduce(function(t, x) { return t + x; }, 0) + ' revision rounds between them)' : '');
     } else if (daysBetween(lastAssigned, typical) >= 7) {
       reason = 'every video was assigned by ' + fmtDay(lastAssigned) + ', but most were approved together on ' + fmtDay(typical) + ', ' + daysBetween(lastAssigned, typical) + ' days later';
@@ -12780,7 +12800,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   }
   html += '<div class="qr-section">' + card('Editing Team Agreed KPIs', 'The three content KPIs agreed with management, split by what the team was focused on',
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved.</div>') + '</div>';
+    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved.' + (function() { var ex = Object.keys(QUARTER_REPORT_EXCLUDED_CAMPAIGNS).map(function(k) { return QUARTER_REPORT_EXCLUDED_CAMPAIGNS[k]; }); return ex.length ? ' Left out of time to ship: ' + escapeHtml(ex.join(', ')) + '.' : ''; })() + '</div>') + '</div>';
 
   // Headline tiles
   html += '<div class="qr-section"><div class="qr-tiles">' +
