@@ -13387,10 +13387,11 @@ function renderTrainingView() {
   function videoEntries(c) {
     var urls = Array.isArray(c && c.submissionUrls) ? c.submissionUrls : (c && c.submissionUrl ? [c.submissionUrl] : []);
     var stamps = readStamps(c);
+    var notesArr = Array.isArray(c && c.submissionNotes) ? c.submissionNotes : [];
     var out = [];
     urls.forEach(function(u, i) {
       var t = String(u || '').trim();
-      if (t) out.push({ url: t, index: i, at: stamps[i] || '' });
+      if (t) out.push({ url: t, index: i, at: stamps[i] || '', note: notesArr[i] || '' });
     });
     return out;
   }
@@ -13437,7 +13438,7 @@ function renderTrainingView() {
       'onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=\'' + escapeAttr(value) + '\';this.blur();}" ' +
       'onblur="App.trainingSetSubmission(\'' + escapeAttr(m.id) + '\', ' + index + ', this.value' + tgt + ')">';
   }
-  var REVEAL = 'onclick="(function(c){var i=c.querySelector(\'input\');c.querySelector(\'.training-link-view\').style.display=\'none\';i.style.display=\'\';i.focus();i.select();})(this.closest(\'.training-link-cell\'))"';
+  var REVEAL = 'onclick="(function(c){var i=c.querySelector(\'input,textarea\');c.querySelector(\'.training-link-view\').style.display=\'none\';i.style.display=\'\';i.focus();i.select();})(this.closest(\'.training-link-cell\'))"';
   function videoCell(v, editable, tgt) {
     var link = '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" title="' + escapeHtml(v.url) + '">' + linkLabel(v.url) + ' ↗</a>';
     if (!editable) return link;
@@ -13463,6 +13464,19 @@ function renderTrainingView() {
       '<span class="editable-cell training-link-view" title="Click to edit date" ' + REVEAL + '>' + dateText(v.at) + '</span>' +
       '<input type="date" class="inline-edit-input" style="display:none;" value="' + escapeHtml(v.at ? ukDay(v.at) : '') + '" ' +
         'onchange="App.trainingSetSubmissionDate(\'' + escapeAttr(m.id) + '\', ' + v.index + ', this.value' + tgt + ')" onblur="render()">' +
+    '</div>';
+  }
+  // Per-video note: click to edit (editor on own rows, admin on all), Enter or
+  // blur saves, Shift+Enter for a new line, Escape reverts.
+  function noteCell(v, editable, tgt) {
+    var text = v.note ? '<span class="training-note-text">' + escapeHtml(v.note) + '</span>' : '';
+    if (!editable) return text || DASH;
+    return '<div class="training-link-cell">' +
+      '<span class="editable-cell training-link-view" title="Click to edit note" ' + REVEAL + '>' +
+        (text || '<span class="training-add-link">+ Note</span>') + '</span>' +
+      '<textarea class="form-input training-note-input" style="display:none;" rows="2" placeholder="Add a note" ' +
+        'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();this.blur();}else if(event.key===\'Escape\'){event.preventDefault();this.value=this.defaultValue;this.blur();}" ' +
+        'onblur="App.trainingSetSubmissionNote(\'' + escapeAttr(m.id) + '\', ' + v.index + ', this.value' + tgt + ')">' + escapeHtml(v.note || '') + '</textarea>' +
     '</div>';
   }
   function actionButtons(c, n, editable, tgt, ed) {
@@ -13527,6 +13541,7 @@ function renderTrainingView() {
         '<td>' + editorCell + '</td>' +
         '<td class="link-cell">' + video + '</td>' +
         '<td>' + (s.v ? submittedCell(s.v, tgt) : DASH) + '</td>' +
+        '<td class="training-note-cell">' + (s.v ? noteCell(s.v, editable, tgt) : DASH) + '</td>' +
         '<td>' + (first ? dateText(c.completedAt) : '') + '</td>' +
         '<td>' + (first ? statusBadge(c, vids.length) : '') + '</td>' +
         '<td>' + (first ? actionButtons(c, vids.length, editable, tgt, ed) : '') + '</td>' +
@@ -13545,7 +13560,7 @@ function renderTrainingView() {
   }
   var table =
     '<div class="table-wrap"><table class="training-table"><thead><tr>' +
-      '<th style="width:50px">NO.</th><th>Editor</th><th>Video</th><th>Submitted</th><th>Completed</th><th>Status</th><th>Actions</th>' +
+      '<th style="width:50px">NO.</th><th>Editor</th><th>Video</th><th>Submitted</th><th>Notes</th><th>Completed</th><th>Status</th><th>Actions</th>' +
     '</tr></thead><tbody>' + tableRows + '</tbody></table></div>';
 
   var embeds = moduleEmbeds(m);
@@ -19976,7 +19991,8 @@ var App = {
       startedAt: (new Date()).toISOString(),
       completedAt: '',
       submissionUrls: carry,
-      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : []
+      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : [],
+      submissionNotes: Array.isArray(existing.submissionNotes) ? existing.submissionNotes.slice() : []
     };
     saveState();
     render();
@@ -19994,7 +20010,8 @@ var App = {
       startedAt: existing.startedAt || (new Date()).toISOString(),
       completedAt: (new Date()).toISOString(),
       submissionUrls: carry,
-      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : []
+      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : [],
+      submissionNotes: Array.isArray(existing.submissionNotes) ? existing.submissionNotes.slice() : []
     };
     saveState();
     render();
@@ -20012,7 +20029,8 @@ var App = {
       startedAt: existing.startedAt || '',
       completedAt: '',
       submissionUrls: carry,
-      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : []
+      submissionAt: Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : [],
+      submissionNotes: Array.isArray(existing.submissionNotes) ? existing.submissionNotes.slice() : []
     };
     saveState();
     render();
@@ -20064,24 +20082,27 @@ var App = {
     var stamps = Array.isArray(existing.submissionAt) ? existing.submissionAt.slice() : [];
     while (current.length <= index) current.push('');
     while (stamps.length < current.length) stamps.push('');
+    var notes = Array.isArray(existing.submissionNotes) ? existing.submissionNotes.slice() : [];
     var prior = (current[index] || '').trim();
     if (prior === trimmed) { render(); return; }
     var wasSet = !!prior;
     current[index] = trimmed;
     // New video → stamp now. Edited link → keep the original submitted date
     // (admins may have corrected it). Cleared → drop it.
-    if (!trimmed) stamps[index] = '';
+    if (!trimmed) { stamps[index] = ''; if (index < notes.length) notes[index] = ''; }
     else if (!wasSet || !stamps[index]) stamps[index] = (new Date()).toISOString();
     // Trim trailing empties so we don't grow forever if `required` drops.
     while (current.length > 0 && !(current[current.length - 1] || '').trim() && current.length > required) {
       current.pop();
     }
     stamps.length = current.length;
+    if (notes.length > current.length) notes.length = current.length;
     STATE.trainingCompletions[email][moduleId] = {
       startedAt: existing.startedAt || (trimmed ? (new Date()).toISOString() : ''),
       completedAt: existing.completedAt || '',
       submissionUrls: current,
-      submissionAt: stamps
+      submissionAt: stamps,
+      submissionNotes: notes
     };
     logAction('updated', 'Training "' + moduleTitle + '" submission #' + (index + 1) + ' ' +
       (trimmed ? (wasSet ? 'updated' : 'submitted') : 'cleared') + ' by ' + email);
@@ -20136,14 +20157,36 @@ var App = {
     urls.splice(i, 1);
     if (i < stamps.length) stamps.splice(i, 1);
     stamps.length = Math.min(stamps.length, urls.length);
+    var notes = Array.isArray(rec.submissionNotes) ? rec.submissionNotes.slice() : [];
+    if (i < notes.length) notes.splice(i, 1);
     rec.submissionUrls = urls;
     rec.submissionAt = stamps;
+    rec.submissionNotes = notes;
     delete rec.submissionUrl;
     var module = (STATE.trainingModules || []).filter(function(x) { return x.id === moduleId; })[0];
     logAction('deleted', 'Training "' + ((module && module.title) || moduleId) + '" submission #' + (i + 1) + ' deleted for ' + email);
     saveState();
     render();
     if (typeof toast === 'function') toast('Submission deleted', 'success');
+  },
+  // Save the note on one submitted video. Editors write their own; admins can
+  // write on anyone's (feedback). Empty clears it.
+  trainingSetSubmissionNote: function(moduleId, index, text, targetEmail) {
+    var email = trainingTargetEmail(targetEmail);
+    if (!email) return;
+    var rec = ((STATE.trainingCompletions || {})[email] || {})[moduleId];
+    if (!rec) return;
+    var i = parseInt(index, 10) || 0;
+    var notes = Array.isArray(rec.submissionNotes) ? rec.submissionNotes.slice() : [];
+    while (notes.length <= i) notes.push('');
+    var val = String(text || '').trim().slice(0, 2000);
+    if ((notes[i] || '') === val) { render(); return; }
+    notes[i] = val;
+    rec.submissionNotes = notes;
+    logAction('updated', 'Training submission #' + (i + 1) + ' note ' + (val ? 'saved' : 'cleared') + ' for ' + email);
+    saveState();
+    render();
+    if (typeof toast === 'function') toast(val ? 'Note saved' : 'Note cleared', 'success');
   },
   // Admin-only: change the submitted date on one video slot. `dateStr` is a
   // YYYY-MM-DD from <input type=date>; empty clears the date.
