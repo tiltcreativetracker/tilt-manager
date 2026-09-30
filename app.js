@@ -5630,6 +5630,9 @@ function showAssetModal(existing) {
       if (a.status === 'Assigned' && (oldStatus !== 'Assigned' || oldEditor !== a.editor)) {
         a.assignedAt = todayISO();
       }
+      // Same review bookkeeping as the Board and status dropdown.
+      if (a.status === 'Needs Revisions' && oldStatus !== 'Needs Revisions') countRevisionRound(a);
+      if (a.status === 'For Review' && oldStatus !== 'For Review') stampSubmitted(a);
       logAction('updated', 'Asset "' + name + '" updated');
       toast('Asset updated', 'success');
       emitAssetChangeNotifications(a, { oldEditor: oldEditor, oldStatus: oldStatus });
@@ -6450,6 +6453,7 @@ function renderCampaignsView() {
         (isOrganic
           ? '<td><span class="date-cell">' + (a.assignedAt ? escapeHtml(formatDate(a.assignedAt)) : '—') + '</span></td>'
           : '<td>' + renderEditableCell(a, 'estDelivery') + '</td>') +
+        '<td><span class="date-cell" title="Auto-stamped when the video last went to For Review">' + (a.submittedAt ? escapeHtml(formatDate(a.submittedAt)) : '—') + '</span></td>' +
         '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
         '<td>' + renderEditableCell(a, 'qc') + '</td>' +
         '<td>' + renderStatusSelect(a) + '</td>' +
@@ -6672,7 +6676,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>' + (isOrganic ? 'Date Assigned' : 'Estimated Delivery') + '</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th><th>Distribution</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + (isOrganic ? '<th>Date Posted</th>' : '') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>' + (isOrganic ? 'Date Assigned' : 'Estimated Delivery') + '</th><th>Date Submitted</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th><th>Distribution</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + (isOrganic ? '<th>Date Posted</th>' : '') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -6951,6 +6955,16 @@ function countRevisionRound(a) {
   if (a.dateApproved) a.postApprovalRounds = (a.postApprovalRounds || 0) + 1;
 }
 
+// Stamp the PM-review submission dates when a video goes to For Review:
+// firstSubmittedAt once (editing time = assigned → first submitted) and
+// submittedAt on every submission (approval turnaround = last submitted → approved).
+// Tracked from 1 Oct 2026; older videos have neither.
+function stampSubmitted(a) {
+  var today = todayLocalISO();
+  a.submittedAt = today;
+  if (!a.firstSubmittedAt) a.firstSubmittedAt = today;
+}
+
 function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   var a = findAssetById(id);
   if (!a) return;
@@ -6959,7 +6973,7 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
   var oldEditor = a.editor;
   var statusChanging = oldStatus !== targetStatus;
   if (statusChanging) {
-    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'dragLocked', 'revisionRounds', 'postApprovalRounds'], 'status: ' + oldStatus + ' → ' + targetStatus);
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'dragLocked', 'revisionRounds', 'postApprovalRounds', 'submittedAt', 'firstSubmittedAt'], 'status: ' + oldStatus + ' → ' + targetStatus);
   }
   // Editor guard: any status out of Draft requires an editor.
   if (statusChanging && !a.editor && targetStatus !== 'Draft') {
@@ -6971,6 +6985,7 @@ function applyStatusChangeThenReorder(id, targetStatus, placement, anchorId) {
     a.status = targetStatus;
     // Dragging a card into Needs Revisions is a round of rework, same as the dropdown.
     if (targetStatus === 'Needs Revisions') countRevisionRound(a);
+    if (targetStatus === 'For Review') stampSubmitted(a);
     if (targetStatus === 'Assigned' && oldStatus !== 'Assigned') a.assignedAt = todayISO();
     // Stamp dateApproved on the transition INTO Approved (only if not already set).
     // Needed for daily / weekly / monthly tally math.
@@ -12328,6 +12343,8 @@ var QUARTER_REPORT_POST_GOALS = {
 // Revision rounds have only been auto-counted since the Grading tab shipped, so
 // the first-pass rate only uses videos approved on or after this date.
 var REVISION_TRACKING_SINCE = '2026-07-20';
+// PM approval turnaround target, in days (last submitted → PM approved).
+var APPROVAL_TURNAROUND_TARGET_DAYS = 1;
 var QUARTER_REPORT_PHASES = {
   '2026-Q3': [
     { label: 'Jul–Aug', focus: 'Paid ads', months: ['2026-07', '2026-08'] },
@@ -12639,6 +12656,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   // to its last video being PM-approved. Only finished campaigns count (every
   // non-cancelled video PM-approved); each lands in the month it finished.
   var campSpans = [];
+  function fmtDay(iso) { var dt = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); return dt.getUTCDate() + ' ' + MONTH_SHORT[dt.getUTCMonth()]; }
   STATE.campaigns.forEach(function(c) {
     var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
     if (!vids.length || vids.some(function(a) { return a.status !== 'Approved' || !a.dateApproved; })) return;
@@ -12648,7 +12666,26 @@ function renderQuarterEditorReport(qYear, qNum) {
     if (starts[0] < qStart || (c.monthYear && c.monthYear < months[0].key)) return;
     var end = vids.map(function(a) { return String(a.dateApproved).slice(0, 10); }).sort().pop();
     var d = daysBetween(starts[0], end);
-    if (isFinite(d) && d >= 0) campSpans.push({ month: end.slice(0, 7), days: d });
+    if (!(isFinite(d) && d >= 0)) return;
+    // Why it took this long, for the "what made it longer" list.
+    var appr = vids.map(function(a) { return String(a.dateApproved).slice(0, 10); }).sort();
+    var typical = appr[Math.floor(appr.length / 2)];
+    var lastAssigned = starts[starts.length - 1];
+    var late = vids.filter(function(a) { return daysBetween(typical, a.dateApproved) >= 5; });
+    var reason;
+    if (late.length && late.every(function(a) { return a.assignedAt && daysBetween(a.assignedAt, a.dateApproved) <= 1; })) {
+      reason = late.length + ' video' + (late.length === 1 ? ' was' : 's were') + ' added on ' + fmtDay(late[0].assignedAt) + ' and approved within a day: a late addition, not slow editing';
+    } else if (late.length) {
+      var lr = late.map(function(a) { return Number(a.revisionRounds) || 0; });
+      reason = late.length + ' of ' + vids.length + ' videos were approved ' + daysBetween(typical, end) + ' days after the rest' +
+        (Math.max.apply(null, lr) ? ' (' + lr.reduce(function(t, x) { return t + x; }, 0) + ' revision rounds between them)' : '');
+    } else if (daysBetween(lastAssigned, typical) >= 7) {
+      reason = 'every video was assigned by ' + fmtDay(lastAssigned) + ', but most were approved together on ' + fmtDay(typical) + ', ' + daysBetween(lastAssigned, typical) + ' days later';
+    } else {
+      var tr = vids.reduce(function(t, a) { return t + (Number(a.revisionRounds) || 0); }, 0);
+      reason = tr ? tr + ' revision rounds across ' + vids.length + ' videos' : 'videos were assigned over ' + daysBetween(starts[0], lastAssigned) + ' days';
+    }
+    campSpans.push({ month: end.slice(0, 7), days: d, name: c.name, reason: reason });
   });
   var gradeByAsset = {};
   (Array.isArray(STATE.grades) ? STATE.grades : []).forEach(function(g) { if (g && g.assetId != null) gradeByAsset[String(g.assetId)] = g; });
@@ -12657,7 +12694,9 @@ function renderQuarterEditorReport(qYear, qNum) {
     var approved = STATE.assets.filter(function(a) {
       return a.status === 'Approved' && a.dateApproved && inPh[String(a.dateApproved).slice(0, 7)] && (!eds.length || eds.indexOf(a.editor) >= 0);
     });
-    var spans = campSpans.filter(function(x) { return inPh[x.month]; }).map(function(x) { return x.days; });
+    var phCamps = campSpans.filter(function(x) { return inPh[x.month]; });
+    var spans = phCamps.map(function(x) { return x.days; });
+    var sorted = spans.slice().sort(function(a, b) { return a - b; });
     // First-pass, per video: every approved video with no rework before its PM
     // approval. Rounds are the Board's auto count minus rounds logged after approval
     // (postApprovalRounds, tracked from 1 Oct 2026), or the Grading tab's manual
@@ -12668,14 +12707,26 @@ function renderQuarterEditorReport(qYear, qNum) {
       var pre = (Number(a.revisionRounds) || 0) - (Number(a.postApprovalRounds) || 0);
       return (g && g.roundsManual ? (Number(g.revisionRounds) || 0) : pre) <= 0;
     }).length;
+    // Submission-based timings (per video), from the For Review stamps.
+    function avgDays(list, from, to) {
+      var ds = list.map(function(a) { return (a[from] && a[to]) ? daysBetween(a[from], a[to]) : NaN; })
+        .filter(function(d) { return isFinite(d) && d >= 0; });
+      return { n: ds.length, avg: ds.length ? ds.reduce(function(t, d) { return t + d; }, 0) / ds.length : null };
+    }
+    var toSubmit = avgDays(approved, 'assignedAt', 'firstSubmittedAt');
+    var turnaround = avgDays(approved, 'submittedAt', 'dateApproved');
     return {
       ph: ph,
+      toSubmit: toSubmit, turnaround: turnaround,
       edits: approved.length,
       perMonth: approved.length / ph.months.length,
       fpRate: tracked.length ? firstPass / tracked.length * 100 : null,
       fpN: tracked.length, fpHit: firstPass,
       ship: spans.length ? spans.reduce(function(s, d) { return s + d; }, 0) / spans.length : null,
-      shipN: spans.length
+      shipN: spans.length,
+      shipMedian: sorted.length ? (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2) : null,
+      // Campaigns well above the typical one, longest first, with the reason.
+      slow: phCamps.filter(function(x) { return x.days > 7; }).sort(function(a, b) { return b.days - a.days; }).slice(0, 4)
     };
   });
   var fpStart = new Date(REVISION_TRACKING_SINCE + 'T00:00:00Z');
@@ -12700,8 +12751,33 @@ function renderQuarterEditorReport(qYear, qNum) {
       return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%', k.fpHit + ' of ' + k.fpN + ' videos');
     })) +
     kpiRow('Team Time to Ship Quality Edit', 'Per campaign: first video assigned to last video PM-approved', kpiPhases.map(function(k) {
-      return k.ship == null ? kpiCell('—', 'no finished campaigns') : kpiCell(fmt1(k.ship) + ' <span class="qr-kpi-unit">days</span>', 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's'));
+      return k.ship == null ? kpiCell('—', 'no finished campaigns') : kpiCell(fmt1(k.ship) + ' <span class="qr-kpi-unit">' + (fmt1(k.ship) === '1' ? 'day' : 'days') + '</span>', 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's') + (k.shipMedian != null ? ' · typical ' + fmt1(k.shipMedian) + (fmt1(k.shipMedian) === '1' ? ' day' : ' days') : ''));
     }));
+  var noSubmitData = '<span class="qr-dim">Tracked from 1 Oct 2026</span>';
+  kpiBody += '<div class="qr-kpi-sep">How time to ship splits</div>' +
+    kpiRow('Days to first submission', 'Per video: assigned to first sent for PM review', kpiPhases.map(function(k) {
+      return k.toSubmit.avg == null ? kpiCell('—', noSubmitData) : kpiCell(fmt1(k.toSubmit.avg) + ' <span class="qr-kpi-unit">' + (fmt1(k.toSubmit.avg) === '1' ? 'day' : 'days') + '</span>', 'average of ' + k.toSubmit.n + ' videos');
+    })) +
+    kpiRow('Approval turnaround', 'Per video: last sent for review to PM-approved · target ' + APPROVAL_TURNAROUND_TARGET_DAYS + ' day', kpiPhases.map(function(k) {
+      if (k.turnaround.avg == null) return kpiCell('—', noSubmitData);
+      var met = k.turnaround.avg <= APPROVAL_TURNAROUND_TARGET_DAYS;
+      return kpiCell(fmt1(k.turnaround.avg) + ' <span class="qr-kpi-unit">' + (fmt1(k.turnaround.avg) === '1' ? 'day' : 'days') + '</span>' + (met ? ' <span class="qr-goal-check">✓</span>' : ''), 'average of ' + k.turnaround.n + ' videos');
+    }));
+  var slowAny = kpiPhases.some(function(k) { return k.slow.length; });
+  if (slowAny) {
+    kpiBody += '<div class="qr-kpi-sep">What made time to ship longer</div><div class="qr-slow">' +
+      kpiPhases.map(function(k) {
+        if (!k.slow.length) return '';
+        var rest = k.shipN - k.slow.length;
+        var restAvg = rest ? (k.ship * k.shipN - k.slow.reduce(function(t, x) { return t + x.days; }, 0)) / rest : null;
+        return '<div class="qr-slow-col"><div class="qr-slow-head">' + escapeHtml(k.ph.label) +
+          (restAvg != null ? '<span class="qr-dim">without these: ' + fmt1(restAvg) + ' days</span>' : '') + '</div>' +
+          k.slow.map(function(x) {
+            return '<div class="qr-slow-item"><span class="qr-slow-days">' + x.days + 'd</span><div><div class="qr-slow-name">' + escapeHtml(x.name) + '</div>' +
+              '<div class="qr-slow-why">' + escapeHtml(x.reason.charAt(0).toUpperCase() + x.reason.slice(1)) + '.</div></div></div>';
+          }).join('') + '</div>';
+      }).join('') + '</div>';
+  }
   html += '<div class="qr-section">' + card('Editing Team Agreed KPIs', 'The three content KPIs agreed with management, split by what the team was focused on',
     kpiBody +
     '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved.</div>') + '</div>';
@@ -19779,12 +19855,13 @@ var App = {
       return;
     }
     var oldStatus = a.status;
-    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'revisionRounds', 'postApprovalRounds'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
+    recordUndo(a, ['status', 'assignedAt', 'dateApproved', 'revisionRounds', 'postApprovalRounds', 'submittedAt', 'firstSubmittedAt'], 'status: ' + oldStatus + ' \u2192 ' + newStatus);
     a.status = newStatus;
     // Auto-count revision rounds: each fresh entry into "Needs Revisions" is one round
     // of rework sent back to the editor. Feeds the Grading tab's Rounds column. Counts
     // both PM/editor kickbacks (here) and category-head kickbacks (setAssetCategoryHeadQc).
     if (newStatus === 'Needs Revisions' && oldStatus !== 'Needs Revisions') countRevisionRound(a);
+    if (newStatus === 'For Review' && oldStatus !== 'For Review') stampSubmitted(a);
     // Stamp assignedAt whenever the transition is INTO Assigned (from any other state).
     // This powers the "To Do Today" column on the Today board.
     if (newStatus === 'Assigned' && oldStatus !== 'Assigned') a.assignedAt = todayISO();
