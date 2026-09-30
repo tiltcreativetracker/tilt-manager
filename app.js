@@ -16684,7 +16684,9 @@ function brollTaggedByEditorToday(editor) {
 function buildTrainingModuleMessage(editor, m) {
   if (!m) return '';
   var mention = editor ? (mentionEditor(editor) + ' ') : '';
-  var lines = [mention + '— Training Task', '*' + (m.title || 'Untitled module') + '*'];
+  var req = parseInt(m.requiredSubmissions, 10) > 0 ? parseInt(m.requiredSubmissions, 10) : 1;
+  var lines = [mention + '— Training Task', '*' + (m.title || 'Untitled module') + '*',
+    'Required submissions: *' + req + '* video' + (req === 1 ? '' : 's')];
   var gdrive = (m.gdriveUrl || m.loomUrl || '').trim();
   var linkBits = [];
   if (m.notionUrl) linkBits.push('<' + m.notionUrl + '|Task Brief>');
