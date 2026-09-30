@@ -22,3 +22,5 @@ Thumbs.db
 # Large background video files — kept locally for reference only. Committing them
 # balloons the repo past GitHub Pages' 1GB limit and slows every clone.
 kinetic_dots_bg/
+Q3-2026-editor-report/
+~$*

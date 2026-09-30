@@ -1490,6 +1490,15 @@
   .report-table tbody tr:hover { background: var(--bg4); }
   .report-table tbody td { padding: 9px 14px; font-size: 12px; color: var(--text2); white-space: nowrap; }
   .report-table .td-name { color: var(--text1); font-weight: 500; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .qr-wrap { margin: 18px 0 24px; }
+  .qr-dl { display: flex; gap: 6px; }
+  .qr-section + .qr-section { margin-top: 14px; }
+  .qr-section > .report-section-header { margin-top: 0; }
+  .qr-table .report-table tbody tr { cursor: default; }
+  .qr-table .report-table tbody tr.qr-total td { color: var(--text3); background: var(--bg2); }
+  .qr-dim { color: var(--text3); font-size: 11px; }
+  .qr-notes { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .qr-note { font-size: 12px; line-height: 1.5; color: var(--text2); background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
   .report-table .td-mono { font-family: 'JetBrains Mono', monospace; }
   .report-table .td-green { font-family: 'JetBrains Mono', monospace; color: var(--green-text); }
   .report-table .td-amber { font-family: 'JetBrains Mono', monospace; color: var(--amber-text); }

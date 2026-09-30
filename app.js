@@ -11991,6 +11991,231 @@ function executeItalyImport() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 
+// ===================== QUARTER EDITOR REPORT =====================
+// Shown on Reporting when the period is Quarterly. Computed live from STATE so the
+// numbers never leave the signed-in app (no exported files on the public host).
+// Definitions match the Q3 2026 report Elsa signed off:
+//   • Approved = status Approved, bucketed by the PM dateApproved month.
+//   • Per day  = approved ÷ Mon–Fri working days in the month (to date for the
+//     current month; holidays not removed).
+//   • New campaign month = earliest video ETA (Organic: earliest Date Assigned,
+//     since Organic has no ETA; either type falls back to Date Assigned when no
+//     video has an ETA). Campaigns whose Month field predates the quarter are
+//     older campaigns and are left out; campaigns with no videos are skipped.
+//   • Gap-filler work = clips tagged (latest tag stamp per clip), training
+//     modules completed, and EODs submitted — work done when there were no
+//     videos to edit.
+// Context notes per month; shown under the report so the numbers read correctly.
+var QUARTER_REPORT_NOTES = {
+  '2026-09': 'September: the team switched focus from Paid Ads to Organic, so less video work came in (fewer new Paid campaigns, and Organic campaigns are smaller). Clip tagging and training filled the gaps when there were no videos to edit — the dip is the strategy change, not a drop in effort.'
+};
+
+function renderQuarterEditorReport(qYear, qNum) {
+  var MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var eds = DAILY_LOG_EDITORS;
+  var today = toLocalISODate(bizNow());
+  var months = [0, 1, 2].map(function(i) {
+    var m = qNum * 3 + i;
+    var key = qYear + '-' + (m < 9 ? '0' : '') + (m + 1);
+    var days = new Date(qYear, m + 1, 0).getDate(), work = 0;
+    for (var d = 1; d <= days; d++) {
+      var dt = new Date(qYear, m, d);
+      if (toLocalISODate(dt) > today) break;
+      var dow = dt.getDay();
+      if (dow !== 0 && dow !== 6) work++;
+    }
+    return { key: key, label: MONTH_SHORT[m], work: work };
+  });
+  var qStart = months[0].key + '-01';
+  var qEnd = months[2].key + '-31';
+  function monthIdx(iso) {
+    if (!iso) return -1;
+    var k = String(iso).slice(0, 7);
+    for (var i = 0; i < 3; i++) if (months[i].key === k) return i;
+    return -1;
+  }
+  function zeros() { return [0, 0, 0]; }
+  function sum(a) { return a[0] + a[1] + a[2]; }
+  function fmt(n) { return (Math.round(n * 100) / 100).toString(); }
+  function campType(c) { return (c && c.type) || 'Paid Ads'; }
+
+  // ── approvals ──
+  var allAppr = zeros(), byEd = {}, byType = { 'Paid Ads': zeros(), 'Organic': zeros() };
+  eds.forEach(function(e) { byEd[e] = zeros(); });
+  STATE.assets.forEach(function(a) {
+    if (a.status !== 'Approved') return;
+    var i = monthIdx(a.dateApproved);
+    if (i < 0) return;
+    allAppr[i]++;
+    if (!byEd[a.editor]) return;
+    byEd[a.editor][i]++;
+    byType[campType(findCampaignById(a.campaignId)) === 'Organic' ? 'Organic' : 'Paid Ads'][i]++;
+  });
+  var workTotal = months[0].work + months[1].work + months[2].work;
+
+  // ── new campaigns ──
+  var byCamp = {};
+  STATE.assets.forEach(function(a) { (byCamp[String(a.campaignId)] = byCamp[String(a.campaignId)] || []).push(a); });
+  var newCamps = { 'Paid Ads': { n: zeros(), vids: zeros() }, 'Organic': { n: zeros(), vids: zeros() } };
+  STATE.campaigns.forEach(function(c) {
+    var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
+    if (!vids.length) return;
+    if (c.monthYear && c.monthYear < months[0].key) return;
+    var t = campType(c) === 'Organic' ? 'Organic' : 'Paid Ads';
+    var dates = vids.map(function(a) { return t === 'Organic' ? a.assignedAt : a.estDelivery; }).filter(Boolean);
+    if (!dates.length) dates = vids.map(function(a) { return a.assignedAt || a.estDelivery; }).filter(Boolean);
+    if (!dates.length) return;
+    dates.sort();
+    var i = monthIdx(dates[0]);
+    if (i < 0) return;
+    newCamps[t].n[i]++;
+    newCamps[t].vids[i] += vids.length;
+  });
+
+  // ── gap-filler work ──
+  var tagged = {}, trained = {}, eods = {};
+  eds.forEach(function(e) { tagged[e] = zeros(); trained[e] = zeros(); eods[e] = zeros(); });
+  (STATE.broll || []).forEach(function(c) {
+    if (!c || !c.taggedBy || !c.taggedAt) return;
+    var ed = emailToEditor(c.taggedBy);
+    if (!tagged[ed]) return;
+    var d = c.taggedAt.toDate ? c.taggedAt.toDate() : new Date(c.taggedAt);
+    if (isNaN(d.getTime())) return;
+    var i = monthIdx(d.toLocaleDateString('en-CA', { timeZone: BIZ_TZ }));
+    if (i >= 0) tagged[ed][i]++;
+  });
+  var tc = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
+  Object.keys(tc).forEach(function(email) {
+    var ed = emailToEditor(email);
+    if (!trained[ed]) return;
+    Object.keys(tc[email] || {}).forEach(function(mid) {
+      var i = monthIdx(tc[email][mid] && tc[email][mid].completedAt);
+      if (i >= 0) trained[ed][i]++;
+    });
+  });
+  var seenEOD = {};
+  function countEOD(ed, dateISO) {
+    var k = ed + '|' + dateISO;
+    if (!eods[ed] || seenEOD[k]) return;
+    var i = monthIdx(dateISO);
+    if (i < 0) return;
+    seenEOD[k] = true; eods[ed][i]++;
+  }
+  Object.keys(STATE.weeklyLog || {}).forEach(function(d) {
+    (STATE.weeklyLog[d] || []).forEach(function(e) { if (e && e.source === 'eod') countEOD(e.editor || e.addedByName, d); });
+  });
+  Object.keys(STATE.eod || {}).forEach(function(ed) {
+    Object.keys(STATE.eod[ed] || {}).forEach(function(d) { if (STATE.eod[ed][d] && STATE.eod[ed][d].submittedAt) countEOD(ed, d); });
+  });
+
+  // ── render ──
+  var mHead = months.map(function(m) { return '<th>' + m.label + '</th>'; }).join('');
+  function table(title, badge, head, rows) {
+    return '<div class="qr-section"><div class="report-section-header"><span class="report-section-title">' + escapeHtml(title) + '</span>' +
+        (badge ? '<span class="report-section-badge">' + escapeHtml(badge) + '</span>' : '') + '</div>' +
+      '<div class="report-table-wrap qr-table"><table class="report-table"><thead><tr>' + head + '</tr></thead><tbody>' +
+      rows.map(function(r) {
+        return '<tr' + (r.total ? ' class="qr-total"' : '') + '>' + r.cells.map(function(c, ci) {
+          return '<td' + (ci === 0 ? ' class="td-name"' : '') + '>' + c + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div></div>';
+  }
+  function perDay(arr) {
+    return months.map(function(m, i) {
+      if (!m.work) return '—';
+      var v = arr[i] / m.work;
+      return fmt(v) + (v >= DAILY_EDITOR_APPROVAL_TARGET ? ' ✅' : '');
+    });
+  }
+  var html = '';
+  html += table('Approved videos — all editors', 'avg ' + fmt(sum(allAppr) / 3) + ' / month',
+    '<th></th>' + mHead + '<th>Total</th><th>Avg / month</th>',
+    [{ cells: ['All editors'].concat(allAppr, [sum(allAppr), fmt(sum(allAppr) / 3)]) }]);
+  html += table('Approved videos per editor', '', '<th>Editor</th>' + mHead + '<th>Total</th><th>Avg / month</th>',
+    eds.map(function(e) { return { cells: [escapeHtml(e)].concat(byEd[e], [sum(byEd[e]), fmt(sum(byEd[e]) / 3)]) }; }));
+  html += table('Videos per day (grading KPI)', 'target ' + DAILY_EDITOR_APPROVAL_TARGET + ' / day · Mon–Fri',
+    '<th>Editor</th>' + mHead + '<th>Quarter avg</th>',
+    eds.map(function(e) { return { cells: [escapeHtml(e)].concat(perDay(byEd[e]), [workTotal ? fmt(sum(byEd[e]) / workTotal) : '—']) }; })
+      .concat([{ total: true, cells: ['Working days'].concat(months.map(function(m) { return m.work; }), [workTotal]) }]));
+  html += table('Approved by campaign type', '', '<th>Type</th>' + mHead + '<th>Total</th>',
+    ['Paid Ads', 'Organic'].map(function(t) { return { cells: [t].concat(byType[t], [sum(byType[t])]) }; }));
+  var campRows = ['Paid Ads', 'Organic'].map(function(t) {
+    var n = newCamps[t].n, v = newCamps[t].vids;
+    return { cells: [t].concat(n.map(function(x, i) { return x + ' <span class="qr-dim">(' + v[i] + ' videos)</span>'; }),
+      [sum(n) + ' <span class="qr-dim">(' + sum(v) + ' videos)</span>', fmt(sum(n) / 3), sum(n) ? fmt(sum(v) / sum(n)) : '—']) };
+  });
+  var allN = [0, 1, 2].map(function(i) { return newCamps['Paid Ads'].n[i] + newCamps['Organic'].n[i]; });
+  var allV = sum(newCamps['Paid Ads'].vids) + sum(newCamps['Organic'].vids);
+  campRows.push({ total: true, cells: ['All'].concat(allN, [sum(allN) + ' <span class="qr-dim">(' + allV + ' videos)</span>', fmt(sum(allN) / 3), sum(allN) ? fmt(allV / sum(allN)) : '—']) });
+  html += table('New campaigns', 'month = earliest video ETA', '<th>Type</th>' + mHead + '<th>Quarter</th><th>Avg / month</th><th>Avg videos / campaign</th>', campRows);
+  html += table('Gap-filler work (when there were no videos to edit)', '', '<th>Editor</th><th>Clips tagged</th><th>Training modules done</th><th>EODs submitted</th>',
+    eds.map(function(e) { return { cells: [escapeHtml(e), sum(tagged[e]), sum(trained[e]), sum(eods[e])] }; }));
+  var notes = months.map(function(m) { return QUARTER_REPORT_NOTES[m.key]; }).filter(Boolean);
+  html += '<div class="qr-section qr-notes">' +
+    notes.map(function(n) { return '<div class="qr-note">' + escapeHtml(n) + '</div>'; }).join('') +
+    '<div class="qr-note qr-dim">Approved = PM Date Approved. Campaigns whose Month field is before the quarter, or with no videos, are not counted as new. Clips tagged uses each clip\'s latest tag date.</div>' +
+  '</div>';
+
+  var qLabel = 'Q' + (qNum + 1) + '-' + qYear;
+  return '<div class="qr-wrap" id="qr-report"><div class="qr-section report-section-header" style="margin-top:0;"><span class="report-section-title">Editor quarter report — Q' + (qNum + 1) + ' ' + qYear + '</span>' +
+    '<span class="qr-dl" data-html2canvas-ignore="true">' +
+      '<button class="edit-btn" onclick="App.downloadQuarterReport(\'pdf\',\'' + qLabel + '\')" title="Download this report as a PDF">⬇ PDF</button>' +
+      '<button class="edit-btn" onclick="App.downloadQuarterReport(\'png\',\'' + qLabel + '\')" title="Download each page as a PNG image">⬇ PNG</button>' +
+    '</span></div>' + html + '</div>';
+}
+
+// Load a script from a CDN once; resolves when it has loaded. Used for the
+// Quarter report downloads so html2canvas/jsPDF only load when someone exports.
+var _loadedScripts = {};
+function loadScriptOnce(src) {
+  if (!_loadedScripts[src]) {
+    _loadedScripts[src] = new Promise(function(resolve, reject) {
+      var el = document.createElement('script');
+      el.src = src; el.onload = resolve;
+      el.onerror = function() { delete _loadedScripts[src]; reject(new Error('Failed to load ' + src)); };
+      document.head.appendChild(el);
+    });
+  }
+  return _loadedScripts[src];
+}
+
+// Snapshot each .qr-section of #qr-report on its own and stack whole sections
+// onto A4-portrait pages, so a heading never gets separated from its table.
+// Returns one canvas per page.
+function renderQuarterReportPages() {
+  var root = document.getElementById('qr-report');
+  if (!root) return Promise.reject(new Error('Report not on screen'));
+  var bg = getComputedStyle(document.body).backgroundColor || '#ffffff';
+  var SCALE = 2, PAD = 24, GAP = 14; // CSS px
+  var sections = Array.prototype.slice.call(root.querySelectorAll('.qr-section'));
+  var shots = [];
+  return sections.reduce(function(p, el) {
+    return p.then(function() {
+      return html2canvas(el, { scale: SCALE, backgroundColor: bg, useCORS: true }).then(function(c) { shots.push(c); });
+    });
+  }, Promise.resolve()).then(function() {
+    var contentW = root.getBoundingClientRect().width;
+    var pageW = contentW + PAD * 2, pageH = pageW * 1.414, bodyH = pageH - PAD * 2;
+    var pages = [], cur = null, y = 0;
+    function newPage() {
+      cur = document.createElement('canvas');
+      cur.width = Math.round(pageW * SCALE); cur.height = Math.round(pageH * SCALE);
+      var ctx = cur.getContext('2d'); ctx.fillStyle = bg; ctx.fillRect(0, 0, cur.width, cur.height);
+      pages.push(cur); y = 0;
+    }
+    newPage();
+    shots.forEach(function(c) {
+      var h = c.height / SCALE;
+      if (y > 0 && y + h > bodyH) newPage();
+      // A section taller than a page is scaled down to fit rather than cut.
+      var k = h > bodyH ? bodyH / h : 1;
+      cur.getContext('2d').drawImage(c, PAD * SCALE, (PAD + y) * SCALE, c.width * k, c.height * k);
+      y += h * k + GAP;
+    });
+    return pages;
+  });
+}
+
 function renderReportingView() {
   // ── read/default UI state ──
   var period   = STATE.reportingPeriod    || 'monthly';
@@ -12632,7 +12857,8 @@ function renderReportingView() {
     '</div>';
   })();
 
-  return '<div class="report-panel">' + controls + paceHtml + editorTallyHtml + mainContent + '</div>';
+  var quarterReportHtml = period === 'quarterly' ? renderQuarterEditorReport(qYear, qNum) : '';
+  return '<div class="report-panel">' + controls + paceHtml + editorTallyHtml + quarterReportHtml + mainContent + '</div>';
 }
 
 // ===================== CAT HEADS REVIEW =====================
@@ -18643,6 +18869,36 @@ var App = {
   toggleEditorTallyCard: function(ed) {
     _editorTallyExpanded[ed] = !_editorTallyExpanded[ed];
     render();
+  },
+  // Quarter report export — PDF (one file, a page per slice) or PNG (one image per page).
+  downloadQuarterReport: function(format, label) {
+    toast('Preparing ' + format.toUpperCase() + '…', 'info');
+    var libs = [loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')];
+    if (format === 'pdf') libs.push(loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
+    Promise.all(libs).then(renderQuarterReportPages).then(function(pages) {
+      var base = 'editor-report-' + label;
+      if (format === 'pdf') {
+        var pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        pages.forEach(function(c, i) {
+          if (i) pdf.addPage();
+          pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+        });
+        pdf.save(base + '.pdf');
+      } else {
+        pages.forEach(function(c, i) {
+          setTimeout(function() {
+            var a = document.createElement('a');
+            a.href = c.toDataURL('image/png');
+            a.download = base + '-page-' + (i + 1) + '.png';
+            document.body.appendChild(a); a.click(); a.remove();
+          }, i * 400);
+        });
+      }
+      toast('Downloaded ' + pages.length + ' page' + (pages.length === 1 ? '' : 's'), 'success');
+    }).catch(function(err) {
+      console.warn('[QuarterReport] export failed:', err);
+      toast('Download failed — ' + ((err && err.message) || 'unknown error'), 'error');
+    });
   },
   setReporting: function(key, val) {
     if (key === 'period')     STATE.reportingPeriod     = val;
