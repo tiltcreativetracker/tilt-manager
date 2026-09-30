@@ -12314,6 +12314,9 @@ var QUARTER_REPORT_NO_TARGET_MONTHS = {
 var QUARTER_REPORT_POST_GOALS = {
   '2026-09': { perDay: 1, channel: 'Instagram' }
 };
+// Revision rounds have only been auto-counted since the Grading tab shipped, so
+// the first-pass rate only uses videos approved on or after this date.
+var REVISION_TRACKING_SINCE = '2026-07-20';
 var QUARTER_REPORT_PHASES = {
   '2026-Q3': [
     { label: 'Jul–Aug', focus: 'Paid ads', months: ['2026-07', '2026-08'] },
@@ -12636,28 +12639,33 @@ function renderQuarterEditorReport(qYear, qNum) {
     var d = daysBetween(starts[0], end);
     if (isFinite(d) && d >= 0) campSpans.push({ month: end.slice(0, 7), days: d });
   });
+  var gradeByAsset = {};
+  (Array.isArray(STATE.grades) ? STATE.grades : []).forEach(function(g) { if (g && g.assetId != null) gradeByAsset[String(g.assetId)] = g; });
   var kpiPhases = phases.map(function(ph) {
     var inPh = {}; ph.months.forEach(function(k) { inPh[k] = true; });
     var approved = STATE.assets.filter(function(a) {
       return a.status === 'Approved' && a.dateApproved && inPh[String(a.dateApproved).slice(0, 7)] && (!eds.length || eds.indexOf(a.editor) >= 0);
     });
     var spans = campSpans.filter(function(x) { return inPh[x.month]; }).map(function(x) { return x.days; });
-    // First-pass = graded videos (Grading tab) with zero revision rounds, using the
-    // same round count the Grading tab shows (live from the Board, or a manual override).
-    var graded = (Array.isArray(STATE.grades) ? STATE.grades : []).filter(function(g) {
-      return g && g.date && inPh[String(g.date).slice(0, 7)] && (!eds.length || eds.indexOf(g.editor) >= 0);
-    });
-    var firstPass = graded.filter(function(g) { return gradeRounds(g) === 0; }).length;
+    // First-pass, per video: every approved video with zero revision rounds. Rounds
+    // are the Board's auto count, or the Grading tab's manual override if one is set.
+    var tracked = approved.filter(function(a) { return String(a.dateApproved).slice(0, 10) >= REVISION_TRACKING_SINCE; });
+    var firstPass = tracked.filter(function(a) {
+      var g = gradeByAsset[String(a.id)];
+      return (g && g.roundsManual ? (Number(g.revisionRounds) || 0) : (Number(a.revisionRounds) || 0)) === 0;
+    }).length;
     return {
       ph: ph,
       edits: approved.length,
       perMonth: approved.length / ph.months.length,
-      fpRate: graded.length ? firstPass / graded.length * 100 : null,
-      fpN: graded.length, fpHit: firstPass,
+      fpRate: tracked.length ? firstPass / tracked.length * 100 : null,
+      fpN: tracked.length, fpHit: firstPass,
       ship: spans.length ? spans.reduce(function(s, d) { return s + d; }, 0) / spans.length : null,
       shipN: spans.length
     };
   });
+  var fpStart = new Date(REVISION_TRACKING_SINCE + 'T00:00:00Z');
+  var fpFrom = fpStart.getUTCDate() + ' ' + MONTH_SHORT[fpStart.getUTCMonth()];
   function kpiCell(value, sub) {
     return '<div class="qr-kpi-cell"><div class="qr-kpi-value">' + value + '</div><div class="qr-kpi-sub">' + sub + '</div></div>';
   }
@@ -12674,15 +12682,15 @@ function renderQuarterEditorReport(qYear, qNum) {
     kpiRow('Video Edits', 'Videos approved by the PM', kpiPhases.map(function(k) {
       return kpiCell(k.edits.toLocaleString(), k.ph.months.length > 1 ? Math.round(k.perMonth) + ' a month' : 'in the month');
     })) +
-    kpiRow('Team First-Pass Rate', 'Graded videos with no revision rounds', kpiPhases.map(function(k) {
-      return k.fpRate == null ? kpiCell('—', 'no graded videos') : kpiCell(Math.round(k.fpRate) + '%', k.fpHit + ' of ' + k.fpN + ' graded videos');
+    kpiRow('Team First-Pass Rate', 'Approved videos with no revision rounds', kpiPhases.map(function(k) {
+      return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%', k.fpHit + ' of ' + k.fpN + ' videos');
     })) +
     kpiRow('Team Time to Ship Quality Edit', 'Per campaign: first video assigned to last video PM-approved', kpiPhases.map(function(k) {
       return k.ship == null ? kpiCell('—', 'no finished campaigns') : kpiCell(fmt1(k.ship) + ' <span class="qr-kpi-unit">days</span>', 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's'));
     }));
-  html += '<div class="qr-section">' + card('Agreed KPIs', 'The three content KPIs agreed with management, split by what the team was focused on',
+  html += '<div class="qr-section">' + card('Editing Team Agreed KPIs', 'The three content KPIs agreed with management, split by what the team was focused on',
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate comes from the Grading tab, by grade date. Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved.</div>') + '</div>';
+    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved.</div>') + '</div>';
 
   // Headline tiles
   html += '<div class="qr-section"><div class="qr-tiles">' +
@@ -12768,7 +12776,7 @@ function renderQuarterEditorReport(qYear, qNum) {
 
   var qLabel = 'Q' + (qNum + 1) + '-' + qYear;
   return '<div class="qr-wrap" id="qr-report"><div class="qr-section qr-hero">' +
-      '<div><div class="qr-eyebrow">Editor report</div><div class="qr-title">Q' + (qNum + 1) + ' ' + qYear + '</div>' +
+      '<div><div class="qr-eyebrow">Production report</div><div class="qr-title">Q' + (qNum + 1) + ' ' + qYear + '</div>' +
       '<div class="qr-subtitle">' + escapeHtml(monthSpan) + ' · ' + eds.map(escapeHtml).join(', ') + '</div></div>' +
       '<span class="qr-dl" data-html2canvas-ignore="true">' +
         '<button class="edit-btn" onclick="App.downloadQuarterReport(\'pdf\',\'' + qLabel + '\')" title="Download this report as an A4 PDF">⬇ Download PDF</button>' +
@@ -19556,7 +19564,7 @@ var App = {
     var libs = [loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')];
     if (format === 'pdf') libs.push(loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
     Promise.all(libs).then(renderQuarterReportPages).then(function(pages) {
-      var base = 'editor-report-' + label;
+      var base = 'production-report-' + label;
       if (format === 'pdf') {
         var pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         pages.forEach(function(c, i) {
