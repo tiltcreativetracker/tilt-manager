@@ -89,7 +89,6 @@
   .sidebar.tr-sidebar-collapsed .sidebar-header { padding: 14px 8px 8px; justify-content: center; }
   .sidebar.tr-sidebar-collapsed .subcamp-item.tr-rail-item { margin: 0 6px 2px; padding: 6px 4px; flex-direction: column; gap: 2px; justify-content: center; }
   .sidebar.tr-sidebar-collapsed .subcamp-item.tr-rail-item::before { display: none; }
-  .tr-empty-tag { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text3); border: 1px dashed var(--border2); border-radius: 3px; padding: 0 4px; margin-left: auto; }
   .url-edit-pencil.tr-del-sub:hover { border-color: #ef4444; color: #ef4444; background: rgba(239,68,68,0.1); }
   .tr-rail-num { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--text2); }
   .sidebar.sidebar-compact .sidebar-header { padding: 14px 8px 8px; justify-content: center; }

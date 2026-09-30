@@ -13115,10 +13115,9 @@ function renderTrainingView() {
 
   // Editors and admins/CLs see the same filter: hide a module only when it has
   // no brief and no links — an empty module is useless to both.
-  // Admins/CLs see every module, so one just added with only a title doesn't
-  // vanish from the sidebar; it's flagged "empty" until it gets content.
-  function moduleHasContent(m) { return !!(m.notionUrl || moduleGdrive(m) || m.footageUrl || m.brief); }
-  var visibleModules = isAdminOrCL ? modules.slice() : modules.filter(moduleHasContent);
+  // Every module shows for everyone — brief and links are all optional, so a
+  // title-only module still appears.
+  var visibleModules = modules.slice();
 
   // Resolve active module; fall back to first visible so the pane never
   // renders blank when modules exist.
@@ -13182,7 +13181,6 @@ function renderTrainingView() {
           'onclick="App.selectTrainingModule(\'' + m.id + '\')" ' +
           'title="' + escapeHtml(m.title || '') + '">' +
             '<div class="subcamp-name">' + escapeHtml(m.title || '(untitled)') + '</div>' +
-            (moduleHasContent(m) ? '' : '<span class="tr-empty-tag" title="Hidden from editors until it has a brief or link">empty</span>') +
             badge +
         '</div>';
       }).join('');
@@ -13473,7 +13471,7 @@ function showEditTrainingModuleModal(moduleId) {
     '<div class="form-grid">' +
       '<div class="form-row full"><label class="form-label">Title</label>' +
         '<input id="f-tm-title" class="form-input" placeholder="e.g. Cut a 15s luxury reel" value="' + escapeHtml((m && m.title) || '') + '"></div>' +
-      '<div class="form-row full"><label class="form-label">Brief</label>' +
+      '<div class="form-row full"><label class="form-label">Brief <span style="color:var(--text3);font-weight:400;">(optional)</span></label>' +
         '<textarea id="f-tm-brief" class="form-input" style="min-height:80px;" placeholder="Short description of what to edit">' + escapeHtml((m && m.brief) || '') + '</textarea></div>' +
       '<div class="form-row"><label class="form-label">Videos required per editor</label>' +
         '<input id="f-tm-required" type="number" min="1" max="20" step="1" class="form-input" value="' + reqVal + '">' +
@@ -15774,7 +15772,7 @@ function renderConfigView() {
     // Training modules — admin-only CRUD. Modules render for editors in the Training tab.
     '<div class="section-title" style="margin-top:24px;">Training modules</div>' +
     '<div class="auto-card">' +
-      '<div class="auto-desc">Add a practice brief editors can start when they\'re idle. Title + brief are required; the URL fields are optional links to a Notion doc, a Google Drive walkthrough (e.g. a work-together recording), or raw footage. Drive file links preview inline for editors — no download needed.</div>' +
+      '<div class="auto-desc">Add a practice brief editors can start when they\'re idle. Only the title is required; the brief and URL fields are optional links to a Notion doc, a Google Drive walkthrough (e.g. a work-together recording), or raw footage. Drive file links preview inline for editors — no download needed.</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">' +
         '<input id="training-mod-title" type="text" class="form-input" placeholder="Title (e.g. Cut a 15s luxury reel)">' +
         '<input id="training-mod-notion" type="url" class="form-input" placeholder="Notion doc URL (optional)">' +
