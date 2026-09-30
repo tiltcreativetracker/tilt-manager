@@ -1573,6 +1573,71 @@ var Fb = {
     });
   },
 
+  // Three-way merge of one field: `base` is the server copy this tab last
+  // adopted, `local` is this tab's copy, `remote` is what the server holds right
+  // now (read inside the save transaction). Whatever this tab didn't change comes
+  // from remote, so a stale copy never reverts a teammate's edit. Objects merge
+  // key by key and record lists (items with an `id` or `code`, e.g. campaigns,
+  // grades, countries) item by item, so two people editing different campaigns,
+  // or different fields of one campaign, both keep their edit. Lists of plain
+  // values (categories, sellers) merge as sets. A true clash on the same value:
+  // this tab's edit wins. Edit vs delete: the edited record is kept.
+  merge3: function(base, local, remote) {
+    var J = Fb.stableJson;
+    var jb = J(base), jl = J(local), jr = J(remote);
+    if (jl === jb) return remote;
+    if (jr === jb || jr === jl) return local;
+    if (local === undefined) return remote;   // deleted here, edited there
+    if (remote === undefined) return local;   // edited here, deleted there
+    var isObj = function(v) { return !!v && typeof v === 'object' && !Array.isArray(v); };
+    if (isObj(local) && isObj(remote) && (base == null || isObj(base))) {
+      var b = base || {}, out = {};
+      Object.keys(local).concat(Object.keys(remote), Object.keys(b)).forEach(function(k) {
+        if (Object.prototype.hasOwnProperty.call(out, k)) return;
+        var v = Fb.merge3(b[k], local[k], remote[k]);
+        if (v !== undefined) out[k] = v;
+      });
+      return out;
+    }
+    if (Array.isArray(local) && Array.isArray(remote) && (base == null || Array.isArray(base))) {
+      var bl = base || [];
+      var bm = Fb._keyedMap(bl), lm = Fb._keyedMap(local), rm = Fb._keyedMap(remote);
+      if (bm && lm && rm) {
+        // Remote's order, then records only this tab has, in local order.
+        var order = remote.map(Fb._recKey).concat(local.map(Fb._recKey).filter(function(k) { return !rm[k]; }));
+        var res = [];
+        order.forEach(function(k) {
+          var v = Fb.merge3(bm[k], lm[k], rm[k]);
+          if (v !== undefined) res.push(v);
+        });
+        return res;
+      }
+      var prim = function(a) { return a.every(function(x) { return x === null || typeof x !== 'object'; }); };
+      if (prim(bl) && prim(local) && prim(remote)) {
+        var inB = {}, inL = {}, inR = {};
+        bl.forEach(function(x) { inB[J(x)] = 1; });
+        local.forEach(function(x) { inL[J(x)] = 1; });
+        remote.forEach(function(x) { inR[J(x)] = 1; });
+        return remote.filter(function(x) { return inL[J(x)] || !inB[J(x)]; })
+          .concat(local.filter(function(x) { return !inB[J(x)] && !inR[J(x)]; }));
+      }
+    }
+    return local;
+  },
+  _recKey: function(r) { return r.id != null ? 'id:' + r.id : 'code:' + r.code; },
+  // key → record for a list whose items all carry a unique id/code, else null.
+  _keyedMap: function(arr) {
+    var m = {};
+    for (var i = 0; i < arr.length; i++) {
+      var r = arr[i];
+      if (!r || typeof r !== 'object' || Array.isArray(r) || (r.id == null && r.code == null)) return null;
+      var k = Fb._recKey(r);
+      if (m[k]) return null;
+      m[k] = r;
+    }
+    return m;
+  },
+
   threadSlotWrites: function(snap) {
     var today = todayUK();
     var server = Fb._serverThreadFields || {};
@@ -1676,22 +1741,50 @@ var Fb = {
     Fb._syncStatus = 'saving';
     Fb._updateSyncDom();
 
-    var batch = fbDb.batch();
-    if (mainDocChanged) {
-      // Only the changed fields (Fb.dirtyFields) plus the attribution stamps.
-      batch.set(fbDb.doc(Fb.STATE_DOC), snap, { mergeFields: dirty.concat(Fb.META_FIELDS) });
-      slotWrites.forEach(function(w) {
-        batch.update(fbDb.doc(Fb.STATE_DOC), w.path, w.value);
+    var stateRef = fbDb.doc(Fb.STATE_DOC);
+    function addWrites(w, payload) {
+      if (mainDocChanged) {
+        // Only the changed fields (Fb.dirtyFields) plus the attribution stamps.
+        w.set(stateRef, payload, { mergeFields: dirty.concat(Fb.META_FIELDS) });
+        slotWrites.forEach(function(sw) { w.update(stateRef, sw.path, sw.value); });
+      }
+      assetsToWrite.forEach(function(a) {
+        w.set(fbDb.collection(Fb.ASSETS_COLL).doc(String(a.id)), a);
+      });
+      assetIdsToDelete.forEach(function(id) {
+        w.delete(fbDb.collection(Fb.ASSETS_COLL).doc(id));
       });
     }
-    assetsToWrite.forEach(function(a) {
-      batch.set(fbDb.collection(Fb.ASSETS_COLL).doc(String(a.id)), a);
-    });
-    assetIdsToDelete.forEach(function(id) {
-      batch.delete(fbDb.collection(Fb.ASSETS_COLL).doc(id));
-    });
+    var commit;
+    if (dirty.length && Fb._serverFields && !Fb._unloading) {
+      // Changed fields are merged against the server's CURRENT copy (Fb.merge3)
+      // inside a transaction, so parts of a field this tab didn't touch (other
+      // campaigns, other keys) keep whatever teammates wrote meanwhile. The
+      // page-unload flush skips this: there's no time for the read round-trip.
+      commit = fbDb.runTransaction(function(tx) {
+        return tx.get(stateRef).then(function(doc) {
+          var remote = doc.exists ? doc.data() : {};
+          var payload = Object.assign({}, snap);
+          dirty.forEach(function(k) {
+            if (!(k in remote)) return;
+            var sb = Fb._serverFields[k];
+            var base = sb === undefined ? undefined : JSON.parse(sb);
+            // Id counters only move forward: a lower merged value would let the
+            // next record reuse an existing id.
+            payload[k] = /^next[A-Z]/.test(k) && typeof snap[k] === 'number'
+              ? Math.max(snap[k], Number(remote[k]) || 0)
+              : Fb.merge3(base, snap[k], remote[k]);
+          });
+          addWrites(tx, payload);
+        });
+      });
+    } else {
+      var batch = fbDb.batch();
+      addWrites(batch, snap);
+      commit = batch.commit();
+    }
 
-    return batch.commit().then(function() {
+    return commit.then(function() {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       Fb._lastUploadedAssets = currentAssetsMap;
       Fb._pendingLocalJson = null;  // confirmed — no longer dirty
@@ -2317,7 +2410,9 @@ var Presence = {
     window.addEventListener('beforeunload', function(e) {
       if (typeof Fb === 'undefined') return;
       if (Fb._uploadTimer) {
+        Fb._unloading = true;
         try { Fb.uploadNow(); } catch (_) {}
+        Fb._unloading = false;
       }
       if (Fb._pendingLocalJson) {
         e.preventDefault();
