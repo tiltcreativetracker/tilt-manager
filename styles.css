@@ -2331,7 +2331,7 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-axis { display: flex; justify-content: space-around; margin-top: 6px; }
   .qr-x { flex: 1; text-align: center; font-size: 11px; color: var(--text2); }
 
-  .qr-hhead, .qr-hrow { display: grid; grid-template-columns: 90px minmax(0, 1fr) 110px 80px; gap: 12px; align-items: center; }
+  .qr-hhead, .qr-hrow { display: grid; grid-template-columns: 90px minmax(0, 1fr) 120px; gap: 12px; align-items: center; }
   .qr-hhead { font-size: 10px; color: var(--text3); padding-bottom: 6px; border-bottom: 1px solid var(--qr-grid); }
   .qr-hhead div:nth-child(n+3), .qr-hstat { text-align: right; }
   .qr-hrow { padding: 8px 0; border-bottom: 1px solid var(--qr-grid); }
@@ -2353,5 +2353,44 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   @media (max-width: 900px) {
     .qr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .qr-pair { grid-template-columns: 1fr; }
-    .qr-hhead, .qr-hrow { grid-template-columns: 70px minmax(0, 1fr) 70px 50px; gap: 8px; }
+    .qr-hhead, .qr-hrow { grid-template-columns: 70px minmax(0, 1fr) 80px; gap: 8px; }
   }
+  /* Quarter report: goals + "why it didn't go to plan" (text lives in Firestore). */
+  .qr-ctx-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .qr-ctx-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+  .qr-ctx-list li { font-size: 13px; line-height: 1.5; color: var(--text2); padding-left: 2px; }
+  .qr-ctx-list li::marker { color: var(--accent2); font-weight: 600; }
+  .qr-ctx-goals { border-left: 3px solid var(--accent); }
+  .qr-ctx-why { border-left: 3px solid var(--amber-text); }
+  .qr-ctx-empty { font-size: 12px; color: var(--text3); font-style: italic; }
+  .qr-ctx-blank .qr-card { border-style: dashed; background: transparent; }
+  /* Quarter report: per-month target line + category goal */
+  .qr-group { position: relative; }
+  .qr-group > .qr-target { left: 4%; right: 4%; }
+  .qr-no-target { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text3); font-style: italic; }
+  .qr-goal-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; }
+  .qr-goal-swatch { background: var(--qr-paid); }
+  .qr-goal-tick-key { width: 2px; height: 12px; background: var(--text1); display: inline-block; }
+  .qr-goal-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px 28px; }
+  .qr-goal-month { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text1);
+    padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--qr-grid); }
+  .qr-goal-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) 44px; gap: 10px; align-items: center; padding: 4px 0; }
+  .qr-goal-name { font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qr-goal-track { position: relative; height: 12px; }
+  .qr-goal-bar { height: 100%; border-radius: 0 4px 4px 0; background: var(--qr-paid); opacity: 0.55; }
+  .qr-goal-bar.qr-goal-met { opacity: 1; }
+  .qr-goal-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text1); border-radius: 1px; }
+  .qr-goal-val { font-size: 12px; font-weight: 600; color: var(--text1); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .qr-goal-check { color: var(--green-text); font-weight: 700; }
+  .qr-goal-skip { margin-top: 10px; font-size: 11px; color: var(--text3); font-style: italic; }
+  /* Quarter report: agreed KPIs split by focus */
+  .qr-kpi-row { display: grid; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--qr-grid); }
+  .qr-kpi-row:last-of-type { border-bottom: none; }
+  .qr-kpi-headrow { padding: 0 0 8px; align-items: end; }
+  .qr-kpi-phase-label { font-size: 12px; font-weight: 600; color: var(--text1); }
+  .qr-kpi-phase-focus { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent2); margin-top: 1px; }
+  .qr-kpi-name { font-size: 13px; font-weight: 600; color: var(--text1); }
+  .qr-kpi-hint { font-size: 11px; font-weight: 400; color: var(--text3); margin-top: 2px; }
+  .qr-kpi-value { font-size: 24px; font-weight: 650; color: var(--text1); line-height: 1.1; }
+  .qr-kpi-unit { font-size: 12px; font-weight: 500; color: var(--text2); }
+  .qr-kpi-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
