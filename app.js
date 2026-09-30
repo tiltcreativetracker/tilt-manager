@@ -12397,59 +12397,190 @@ function renderQuarterEditorReport(qYear, qNum) {
   });
 
   // ── render ──
-  var mHead = months.map(function(m) { return '<th>' + m.label + '</th>'; }).join('');
-  function table(title, badge, head, rows) {
-    return '<div class="qr-section"><div class="report-section-header"><span class="report-section-title">' + escapeHtml(title) + '</span>' +
-        (badge ? '<span class="report-section-badge">' + escapeHtml(badge) + '</span>' : '') + '</div>' +
+  // Charts are plain divs (not SVG) so html2canvas snapshots them faithfully for
+  // the PDF/PNG export. Colours: one fixed hue per editor and per campaign type
+  // (--qr-*), validated for colour-blind separation in light and dark. Every
+  // bar carries a visible value, and each chart has a "See the numbers" table.
+  var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var ED_CLS = { Zidni: 'qr-c-zidni', Sharm: 'qr-c-sharm', Patty: 'qr-c-patty' };
+  function edCls(e) { return ED_CLS[e] || 'qr-c-other'; }
+  function niceMax(v) {
+    if (!(v > 0)) return 1;
+    var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), n = v / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+  }
+  function legend(items) {
+    return '<div class="qr-legend">' + items.map(function(it) {
+      return '<span class="qr-legend-item"><span class="qr-swatch ' + it.cls + '"></span>' + escapeHtml(it.label) + '</span>';
+    }).join('') + '</div>';
+  }
+  // Grouped (or stacked) columns: one group per month, one bar per series.
+  // opts: { stacked, target, targetLabel, fmtVal, unit }
+  function columns(series, opts) {
+    opts = opts || {};
+    var f = opts.fmtVal || function(v) { return String(v); };
+    var peak = 0;
+    months.forEach(function(m, i) {
+      if (opts.stacked) peak = Math.max(peak, series.reduce(function(s, se) { return s + se.values[i]; }, 0));
+      else series.forEach(function(se) { peak = Math.max(peak, se.values[i]); });
+    });
+    if (opts.target) peak = Math.max(peak, opts.target);
+    var max = niceMax(peak * 1.08);
+    var ticks = [max, max / 2, 0];
+    var grid = ticks.map(function(t) {
+      return '<div class="qr-grid-line" style="bottom:' + (t / max * 100) + '%"><span>' + f(t) + '</span></div>';
+    }).join('');
+    var target = opts.target ? '<div class="qr-target" style="bottom:' + (opts.target / max * 100) + '%"><span>' + escapeHtml(opts.targetLabel || '') + '</span></div>' : '';
+    var groups = months.map(function(m, i) {
+      var bars;
+      if (opts.stacked) {
+        var tot = series.reduce(function(s, se) { return s + se.values[i]; }, 0);
+        var segs = series.map(function(se) {
+          var v = se.values[i];
+          if (!v) return '';
+          var pct = v / max * 100;
+          return '<div class="qr-seg ' + se.cls + '" style="height:' + (v / tot * 100) + '%" title="' + escapeHtml(se.label + ' · ' + m.label + ': ' + f(v) + (opts.unit ? ' ' + opts.unit : '')) + '">' +
+            (pct >= 14 ? '<span>' + f(v) + '</span>' : '') + '</div>';
+        }).join('');
+        bars = '<div class="qr-bar-slot"><div class="qr-stack" style="height:' + (tot / max * 100) + '%">' +
+          '<span class="qr-cap">' + f(tot) + '</span>' + segs + '</div></div>';
+      } else {
+        bars = series.map(function(se) {
+          var v = se.values[i];
+          return '<div class="qr-bar-slot"><div class="qr-bar ' + se.cls + (v ? '' : ' qr-bar-zero') + '" style="height:' + (v / max * 100) + '%" title="' +
+            escapeHtml(se.label + ' · ' + m.label + ': ' + f(v) + (opts.unit ? ' ' + opts.unit : '')) + '"><span class="qr-cap">' + f(v) + '</span></div></div>';
+        }).join('');
+      }
+      return '<div class="qr-group">' + bars + '</div>';
+    }).join('');
+    var axis = months.map(function(m) { return '<div class="qr-x">' + m.label + '</div>'; }).join('');
+    return '<div class="qr-chart' + (opts.stacked ? ' qr-chart-stacked' : '') + '"><div class="qr-plot">' + grid + target + '<div class="qr-groups">' + groups + '</div></div>' +
+      '<div class="qr-axis">' + axis + '</div></div>';
+  }
+  function numbers(head, rows) {
+    return '<details class="qr-details" data-html2canvas-ignore="true"><summary>See the numbers</summary>' +
       '<div class="report-table-wrap qr-table"><table class="report-table"><thead><tr>' + head + '</tr></thead><tbody>' +
       rows.map(function(r) {
         return '<tr' + (r.total ? ' class="qr-total"' : '') + '>' + r.cells.map(function(c, ci) {
           return '<td' + (ci === 0 ? ' class="td-name"' : '') + '>' + c + '</td>';
         }).join('') + '</tr>';
-      }).join('') + '</tbody></table></div></div>';
+      }).join('') + '</tbody></table></div></details>';
   }
-  function perDay(arr) {
+  function card(title, sub, body, extraCls) {
+    return '<div class="qr-card' + (extraCls ? ' ' + extraCls : '') + '"><div class="qr-card-head"><div class="qr-card-title">' + escapeHtml(title) + '</div>' +
+      (sub ? '<div class="qr-card-sub">' + sub + '</div>' : '') + '</div>' + body + '</div>';
+  }
+  function tile(label, value, sub) {
+    return '<div class="qr-tile"><div class="qr-tile-label">' + escapeHtml(label) + '</div><div class="qr-tile-value">' + value + '</div>' +
+      '<div class="qr-tile-sub">' + sub + '</div></div>';
+  }
+  function perDayCell(arr) {
     return months.map(function(m, i) {
       if (!m.work) return '—';
       var v = arr[i] / m.work;
       return fmt(v) + (v >= DAILY_EDITOR_APPROVAL_TARGET ? ' ✅' : '');
     });
   }
+  var mHead = months.map(function(m) { return '<th>' + m.label + '</th>'; }).join('');
+  var edSeries = eds.map(function(e) { return { key: e, label: e, cls: edCls(e), values: byEd[e] }; });
+  var edLegend = legend(edSeries);
+  var totalAppr = sum(allAppr);
+  var teamPerDay = workTotal && eds.length ? sum(eds.map(function(e) { return sum(byEd[e]); })) / workTotal / eds.length : 0;
+  var allN = [0, 1, 2].map(function(i) { return newCamps['Paid Ads'].n[i] + newCamps['Organic'].n[i]; });
+  var allV = sum(newCamps['Paid Ads'].vids) + sum(newCamps['Organic'].vids);
+  var tagTotal = sum(eds.map(function(e) { return sum(tagged[e]); }));
+  var trainTotal = sum(eds.map(function(e) { return sum(trained[e]); }));
+  var eodTotal = sum(eds.map(function(e) { return sum(eods[e]); }));
+  var monthSpan = MONTH_LONG[qNum * 3] + ' – ' + MONTH_LONG[qNum * 3 + 2] + ' ' + qYear;
+
   var html = '';
-  html += table('Approved videos — all editors', 'avg ' + fmt(sum(allAppr) / 3) + ' / month',
-    '<th></th>' + mHead + '<th>Total</th><th>Avg / month</th>',
-    [{ cells: ['All editors'].concat(allAppr, [sum(allAppr), fmt(sum(allAppr) / 3)]) }]);
-  html += table('Approved videos per editor', '', '<th>Editor</th>' + mHead + '<th>Total</th><th>Avg / month</th>',
-    eds.map(function(e) { return { cells: [escapeHtml(e)].concat(byEd[e], [sum(byEd[e]), fmt(sum(byEd[e]) / 3)]) }; }));
-  html += table('Videos per day (grading KPI)', 'target ' + DAILY_EDITOR_APPROVAL_TARGET + ' / day · Mon–Fri',
-    '<th>Editor</th>' + mHead + '<th>Quarter avg</th>',
-    eds.map(function(e) { return { cells: [escapeHtml(e)].concat(perDay(byEd[e]), [workTotal ? fmt(sum(byEd[e]) / workTotal) : '—']) }; })
-      .concat([{ total: true, cells: ['Working days'].concat(months.map(function(m) { return m.work; }), [workTotal]) }]));
-  html += table('Approved by campaign type', '', '<th>Type</th>' + mHead + '<th>Total</th>',
-    ['Paid Ads', 'Organic'].map(function(t) { return { cells: [t].concat(byType[t], [sum(byType[t])]) }; }));
+
+  // Headline tiles
+  html += '<div class="qr-section"><div class="qr-tiles">' +
+    tile('Videos approved', totalAppr.toLocaleString(), fmt(totalAppr / 3) + ' a month on average') +
+    tile('Videos per editor per day', fmt(teamPerDay), 'Target is ' + DAILY_EDITOR_APPROVAL_TARGET + ' · Mon–Fri') +
+    tile('New campaigns', sum(allN), allV + ' videos across them') +
+    tile('Clips tagged', tagTotal.toLocaleString(), trainTotal + ' training modules · ' + eodTotal + ' EODs') +
+  '</div></div>';
+
+  // Approved per editor
+  html += '<div class="qr-section">' + card('Approved videos by editor',
+    'Counted in the month the PM approved them',
+    edLegend + columns(edSeries, { unit: 'videos' }) +
+    numbers('<th>Editor</th>' + mHead + '<th>Total</th><th>Avg / month</th>',
+      eds.map(function(e) { return { cells: [escapeHtml(e)].concat(byEd[e], [sum(byEd[e]), fmt(sum(byEd[e]) / 3)]) }; })
+        .concat([{ total: true, cells: ['All editors'].concat(allAppr, [totalAppr, fmt(totalAppr / 3)]) }]))) + '</div>';
+
+  // Daily pace vs target
+  var paceSeries = eds.map(function(e) {
+    return { key: e, label: e, cls: edCls(e), values: months.map(function(m, i) { return m.work ? byEd[e][i] / m.work : 0; }) };
+  });
+  html += '<div class="qr-section">' + card('Daily pace against target',
+    'Approved videos ÷ working days (Mon–Fri) · ' + months.map(function(m) { return m.label + ' ' + m.work + 'd'; }).join(' · '),
+    edLegend + columns(paceSeries, { target: DAILY_EDITOR_APPROVAL_TARGET, targetLabel: 'Target ' + DAILY_EDITOR_APPROVAL_TARGET + ' a day', fmtVal: fmt, unit: 'a day' }) +
+    numbers('<th>Editor</th>' + mHead + '<th>Quarter avg</th>',
+      eds.map(function(e) { return { cells: [escapeHtml(e)].concat(perDayCell(byEd[e]), [workTotal ? fmt(sum(byEd[e]) / workTotal) : '—']) }; })
+        .concat([{ total: true, cells: ['Working days'].concat(months.map(function(m) { return m.work; }), [workTotal]) }]))) + '</div>';
+
+  // Paid vs Organic — two charts side by side
+  var typeLegend = legend([{ label: 'Paid Ads', cls: 'qr-c-paid' }, { label: 'Organic', cls: 'qr-c-organic' }]);
+  var typeSeries = [
+    { label: 'Paid Ads', cls: 'qr-c-paid', values: byType['Paid Ads'] },
+    { label: 'Organic', cls: 'qr-c-organic', values: byType['Organic'] }
+  ];
+  var campSeries = [
+    { label: 'Paid Ads', cls: 'qr-c-paid', values: newCamps['Paid Ads'].n },
+    { label: 'Organic', cls: 'qr-c-organic', values: newCamps['Organic'].n }
+  ];
   var campRows = ['Paid Ads', 'Organic'].map(function(t) {
     var n = newCamps[t].n, v = newCamps[t].vids;
     return { cells: [t].concat(n.map(function(x, i) { return x + ' <span class="qr-dim">(' + v[i] + ' videos)</span>'; }),
       [sum(n) + ' <span class="qr-dim">(' + sum(v) + ' videos)</span>', fmt(sum(n) / 3), sum(n) ? fmt(sum(v) / sum(n)) : '—']) };
   });
-  var allN = [0, 1, 2].map(function(i) { return newCamps['Paid Ads'].n[i] + newCamps['Organic'].n[i]; });
-  var allV = sum(newCamps['Paid Ads'].vids) + sum(newCamps['Organic'].vids);
   campRows.push({ total: true, cells: ['All'].concat(allN, [sum(allN) + ' <span class="qr-dim">(' + allV + ' videos)</span>', fmt(sum(allN) / 3), sum(allN) ? fmt(allV / sum(allN)) : '—']) });
-  html += table('New campaigns', 'month = earliest video ETA', '<th>Type</th>' + mHead + '<th>Quarter</th><th>Avg / month</th><th>Avg videos / campaign</th>', campRows);
-  html += table('Gap-filler work (when there were no videos to edit)', '', '<th>Editor</th><th>Clips tagged</th><th>Training modules done</th><th>EODs submitted</th>',
-    eds.map(function(e) { return { cells: [escapeHtml(e), sum(tagged[e]), sum(trained[e]), sum(eods[e])] }; }));
+  html += '<div class="qr-section"><div class="qr-pair">' +
+    card('Approved videos by campaign type', 'PM approval month',
+      typeLegend + columns(typeSeries, { stacked: true, unit: 'videos' }) +
+      numbers('<th>Type</th>' + mHead + '<th>Total</th>',
+        ['Paid Ads', 'Organic'].map(function(t) { return { cells: [t].concat(byType[t], [sum(byType[t])]) }; }))) +
+    card('New campaigns started', 'Month of the earliest video ETA',
+      typeLegend + columns(campSeries, { stacked: true, unit: 'campaigns' }) +
+      numbers('<th>Type</th>' + mHead + '<th>Quarter</th><th>Avg / month</th><th>Videos / campaign</th>', campRows)) +
+  '</div></div>';
+
+  // Gap-filler work
+  var tagMax = niceMax(Math.max.apply(null, eds.map(function(e) { return sum(tagged[e]); })) || 1);
+  var gapRows = eds.map(function(e) {
+    var t = sum(tagged[e]);
+    return '<div class="qr-hrow">' +
+      '<div class="qr-hname"><span class="qr-swatch ' + edCls(e) + '"></span>' + escapeHtml(e) + '</div>' +
+      '<div class="qr-htrack"><div class="qr-hbar ' + edCls(e) + (t ? '' : ' qr-bar-zero') + '" style="width:' + (t / tagMax * 100) + '%" title="' + escapeHtml(e + ': ' + t + ' clips tagged') + '"></div>' +
+        '<span class="qr-hval">' + t.toLocaleString() + '</span></div>' +
+      '<div class="qr-hstat">' + sum(trained[e]) + '</div>' +
+      '<div class="qr-hstat">' + sum(eods[e]) + '</div>' +
+    '</div>';
+  }).join('');
+  html += '<div class="qr-section">' + card('When there were no videos to edit',
+    'Work editors picked up between briefs',
+    '<div class="qr-hhead"><div></div><div>Clips tagged</div><div>Training modules</div><div>EODs sent</div></div>' + gapRows +
+    numbers('<th>Editor</th><th>Clips tagged</th><th>Training modules done</th><th>EODs submitted</th>',
+      eds.map(function(e) { return { cells: [escapeHtml(e), sum(tagged[e]), sum(trained[e]), sum(eods[e])] }; }))) + '</div>';
+
+  // Context + definitions
   var notes = months.map(function(m) { return QUARTER_REPORT_NOTES[m.key]; }).filter(Boolean);
   html += '<div class="qr-section qr-notes">' +
-    notes.map(function(n) { return '<div class="qr-note">' + escapeHtml(n) + '</div>'; }).join('') +
-    '<div class="qr-note qr-dim">Approved = PM Date Approved. Campaigns whose Month field is before the quarter, or with no videos, are not counted as new. Clips tagged uses each clip\'s latest tag date.</div>' +
+    notes.map(function(n) { return '<div class="qr-note qr-note-callout"><div class="qr-note-title">Reading these numbers</div>' + escapeHtml(n) + '</div>'; }).join('') +
+    '<div class="qr-note qr-footnote"><strong>How we count.</strong> Approved uses the PM Date Approved. A campaign counts as new in the month of its earliest video ETA; campaigns with no videos, or with a Month field before the quarter, are left out. Clips tagged uses each clip\'s latest tag date.</div>' +
   '</div>';
 
   var qLabel = 'Q' + (qNum + 1) + '-' + qYear;
-  return '<div class="qr-wrap" id="qr-report"><div class="qr-section report-section-header" style="margin-top:0;"><span class="report-section-title">Editor quarter report — Q' + (qNum + 1) + ' ' + qYear + '</span>' +
-    '<span class="qr-dl" data-html2canvas-ignore="true">' +
-      '<button class="edit-btn" onclick="App.downloadQuarterReport(\'pdf\',\'' + qLabel + '\')" title="Download this report as a PDF">⬇ PDF</button>' +
-      '<button class="edit-btn" onclick="App.downloadQuarterReport(\'png\',\'' + qLabel + '\')" title="Download each page as a PNG image">⬇ PNG</button>' +
-    '</span></div>' + html + '</div>';
+  return '<div class="qr-wrap" id="qr-report"><div class="qr-section qr-hero">' +
+      '<div><div class="qr-eyebrow">Editor report</div><div class="qr-title">Q' + (qNum + 1) + ' ' + qYear + '</div>' +
+      '<div class="qr-subtitle">' + escapeHtml(monthSpan) + ' · ' + eds.map(escapeHtml).join(', ') + '</div></div>' +
+      '<span class="qr-dl" data-html2canvas-ignore="true">' +
+        '<button class="edit-btn" onclick="App.downloadQuarterReport(\'pdf\',\'' + qLabel + '\')" title="Download this report as an A4 PDF">⬇ Download PDF</button>' +
+        '<button class="edit-btn" onclick="App.downloadQuarterReport(\'png\',\'' + qLabel + '\')" title="Download each page as a PNG image">⬇ PNG</button>' +
+      '</span></div>' + html + '</div>';
 }
 
 // Load a script from a CDN once; resolves when it has loaded. Used for the
@@ -23713,30 +23844,31 @@ window.addEventListener('online', function() {
   var POLL_MS   = 60 * 1000;    // check once a minute
   var reloading = false;
 
-  function isBusy() {
-    // Don't yank the page out from under an active edit: modal open, or an
-    // input/textarea/contenteditable currently focused. We'll retry next tick.
-    var modalOpen = !!document.querySelector('.modal-overlay.open');
-    if (modalOpen) return true;
-    var a = document.activeElement;
-    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return true;
-    return false;
+  // New build detected: a toast that stays until they reload, and a silent
+  // reload the moment they switch away from the tab (so they come back to the
+  // new version without losing anything mid-edit). The unload handler flushes
+  // any save still in its debounce window; a failed save still retrying holds
+  // the auto-reload until it lands.
+  function reloadNow() {
+    if (typeof reloadPreservingView === 'function') reloadPreservingView();
+    else window.location.reload();
   }
-
+  function reloadIfAway() {
+    if (!document.hidden) return;
+    if (typeof Fb !== 'undefined' && Fb._pendingLocalJson) { setTimeout(reloadIfAway, 3000); return; }
+    reloadNow();
+  }
   function scheduleReload() {
     if (reloading) return;
     reloading = true;
-    if (typeof toast === 'function') toast('New version available — reloading…', 'success');
-    // Give the toast a beat to render, then reload once the user's not mid-edit.
-    // Route through reloadPreservingView so we land back on the same tab / campaign
-    // rather than the Campaigns default (STATE.tab / activeSubCampaignId aren't in
-    // the Firestore snapshot).
-    var tryReload = function () {
-      if (isBusy()) { setTimeout(tryReload, 3000); return; }
-      if (typeof reloadPreservingView === 'function') reloadPreservingView();
-      else window.location.reload();
-    };
-    setTimeout(tryReload, 1500);
+    var el = document.createElement('div');
+    el.className = 'update-toast';
+    el.innerHTML = '<span>A new version of the tracker is out. Reload to get it.</span>' +
+      '<button type="button" class="update-toast-reload">Reload</button>';
+    el.querySelector('button').onclick = reloadNow;
+    document.body.appendChild(el);
+    document.addEventListener('visibilitychange', reloadIfAway);
+    reloadIfAway();
   }
 
   function check() {

@@ -2254,3 +2254,9 @@
   .training-note-cell { max-width: 320px; }
   .training-note-text { white-space: pre-wrap; font-size: 12px; color: var(--text2); line-height: 1.4; }
   .training-note-input { width: 100%; min-width: 200px; font-size: 12px; resize: vertical; }
+
+/* Persistent "new version" toast from the auto-update checker (app.js). */
+.update-toast { position: fixed; bottom: 20px; right: 20px; z-index: 100000; display: flex; align-items: center; gap: 12px; max-width: 420px; padding: 10px 10px 10px 16px; background: var(--bg3); border: 1px solid var(--accent); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); font-size: 13px; color: var(--text1); animation: cross-tab-pop 0.25s ease-out; }
+.update-toast-reload { flex-shrink: 0; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+.update-toast-reload:hover { background: var(--accent2); }
+@media (max-width: 480px) { .update-toast { left: 16px; right: 16px; max-width: none; } }
