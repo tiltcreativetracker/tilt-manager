@@ -20104,9 +20104,11 @@ var App = {
       logAction('skipped-notify', 'Training submission ping skipped — no daily thread for ' + editor);
       return;
     }
-    var slotLabel = index + 1 > required ? (' (#' + (index + 1) + ')')
-      : required > 1 ? (' (#' + (index + 1) + ' of ' + required + ')') : '';
-    var msg = '🎬 *' + editor + '* submitted training: *' + moduleTitle + '*' + slotLabel + '\n<' + trimmed + '|Watch submission ↗>';
+    // e.g. "@Patty @Elsa Meme-worthy footage for repurposing - 1/10", title
+    // linked to the submitted video.
+    var filled = current.filter(function(u) { return (u || '').trim(); }).length;
+    var safeTitle = String(moduleTitle).replace(/[<>|]/g, '');
+    var msg = mentionEditor(editor) + ' ' + mentionElsaForIntl() + ' <' + trimmed + '|' + safeTitle + '> - ' + filled + '/' + required;
     postToSlackThread(thread.channelId, thread.threadTs, msg).then(function(r) {
       if (r && r.ok) {
         logAction('notified', 'Training submission ping posted for ' + editor + ' — ' + moduleTitle);
