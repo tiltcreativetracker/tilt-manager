@@ -31,7 +31,7 @@ service cloud.firestore {
 
       allow create: if isTiltUser()
                     && request.auth.uid == uid
-                    && request.resource.data.role in ['editor', 'admin'];
+                    && request.resource.data.role in ['visitor', 'editor', 'admin'];
 
       allow update: if isTiltUser()
                     && request.auth.uid == uid
