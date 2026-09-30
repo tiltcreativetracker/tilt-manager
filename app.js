@@ -629,6 +629,12 @@ var Fb = {
       // UK date. Same treatment for catHeadDailyThreads and intlDailyThread.
       // Remember what the server holds for each thread field so uploadNow can
       // tell which slots this tab actually changed (see Fb.threadSlotWrites).
+      // Server copy of the training fields: uploadNow writes them only where this
+      // tab's STATE differs from it (see Fb.trainingWrites).
+      Fb._serverTraining = {
+        trainingModules: JSON.parse(JSON.stringify(Array.isArray(data.trainingModules) ? data.trainingModules : [])),
+        trainingCompletions: JSON.parse(JSON.stringify((data.trainingCompletions && typeof data.trainingCompletions === 'object') ? data.trainingCompletions : {}))
+      };
       Fb._serverThreadFields = {};
       Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS).forEach(function(f) {
         Fb._serverThreadFields[f] = data[f] ? JSON.parse(JSON.stringify(data[f])) : null;
@@ -739,6 +745,10 @@ var Fb = {
 
         STATE[k] = data[k];
       });
+
+      if (Fb.mergeTrainingEdits()) {
+        setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
+      }
 
       // Merge the campaign tombstone ledger BEFORE the campaigns merge so the
       // filter can drop resurrected ids. Union across local + incoming; keep the
@@ -1432,6 +1442,93 @@ var Fb = {
   // today-dated thread (set here, or rescued by applySnapshot), or the user
   // pressed Clear in the last 15s. Midnight-sweep nulls and stale leftovers are
   // never uploaded — the server may already hold a fresher slot we haven't seen.
+  // ── Training field sync ────────────────────────────────────────────────
+  // trainingModules / trainingCompletions used to ride the whole-doc write, so
+  // any teammate's routine save uploaded their (possibly stale) copy and wiped
+  // a module another admin had just added. Now each tab writes them only where
+  // it changed them vs. the server copy (Fb._serverTraining), and completions
+  // per email. Edits this tab sent are also remembered for TRAINING_TRACK_MS
+  // so, if an older-build tab still clobbers them, mergeTrainingEdits puts
+  // them back and re-uploads.
+  TRAINING_TRACK_MS: 30 * 60 * 1000,
+  _trackModules: {},  // moduleId → { m: module | null (deleted), at }
+  _trackRecs: {},     // email → { moduleId → { rec, at } }
+  trainingWrites: function(snap) {
+    var srv = Fb._serverTraining;
+    if (!srv) return [];
+    var writes = [];
+    var now = Date.now();
+    var localMods = snap.trainingModules || [];
+    if (JSON.stringify(localMods) !== JSON.stringify(srv.trainingModules)) {
+      writes.push({ path: new firebase.firestore.FieldPath('trainingModules'), value: localMods });
+      var byId = {};
+      srv.trainingModules.forEach(function(m) { if (m && m.id) byId[m.id] = JSON.stringify(m); });
+      localMods.forEach(function(m) {
+        if (!m || !m.id) return;
+        if (byId[m.id] !== JSON.stringify(m)) Fb._trackModules[m.id] = { m: JSON.parse(JSON.stringify(m)), at: now };
+        delete byId[m.id];
+      });
+      Object.keys(byId).forEach(function(id) { Fb._trackModules[id] = { m: null, at: now }; });
+    }
+    var local = snap.trainingCompletions || {};
+    var server = srv.trainingCompletions;
+    Object.keys(local).concat(Object.keys(server)).forEach(function(email, i, a) {
+      if (a.indexOf(email) !== i) return;
+      var lb = local[email] || {}, sb = server[email] || {};
+      if (JSON.stringify(lb) === JSON.stringify(sb)) return;
+      writes.push({ path: new firebase.firestore.FieldPath('trainingCompletions', email),
+        value: local[email] ? local[email] : firebase.firestore.FieldValue.delete() });
+      Object.keys(lb).forEach(function(mid) {
+        if (JSON.stringify(lb[mid]) === JSON.stringify(sb[mid])) return;
+        (Fb._trackRecs[email] = Fb._trackRecs[email] || {})[mid] = { rec: JSON.parse(JSON.stringify(lb[mid])), at: now };
+      });
+    });
+    return writes;
+  },
+  // After an incoming snapshot is copied onto STATE: re-apply this tab's recent
+  // training edits that the snapshot is missing. Returns true if anything was
+  // restored (caller re-uploads). A module edit someone made after ours
+  // (newer updatedAt) wins and stops tracking.
+  mergeTrainingEdits: function() {
+    var now = Date.now(), restored = false;
+    var mods = Array.isArray(STATE.trainingModules) ? STATE.trainingModules.slice() : [];
+    Object.keys(Fb._trackModules).forEach(function(id) {
+      var t = Fb._trackModules[id];
+      var idx = -1;
+      for (var i = 0; i < mods.length; i++) if (mods[i] && mods[i].id === id) { idx = i; break; }
+      var inc = idx >= 0 ? mods[idx] : null;
+      if (now - t.at > Fb.TRAINING_TRACK_MS) { delete Fb._trackModules[id]; return; }
+      if (t.m === null) {
+        if (inc) { mods.splice(idx, 1); restored = true; } else delete Fb._trackModules[id];
+        return;
+      }
+      if (inc && JSON.stringify(inc) === JSON.stringify(t.m)) { delete Fb._trackModules[id]; return; }
+      var incAt = inc ? Date.parse(inc.updatedAt || inc.createdAt || '') || 0 : 0;
+      if (inc && incAt > t.at) { delete Fb._trackModules[id]; return; }
+      var copy = JSON.parse(JSON.stringify(t.m));
+      if (idx >= 0) mods[idx] = copy; else mods.push(copy);
+      restored = true;
+    });
+    STATE.trainingModules = mods;
+    var comps = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
+    Object.keys(Fb._trackRecs).forEach(function(email) {
+      Object.keys(Fb._trackRecs[email]).forEach(function(mid) {
+        var t = Fb._trackRecs[email][mid];
+        var inc = (comps[email] || {})[mid];
+        if (now - t.at > Fb.TRAINING_TRACK_MS || JSON.stringify(inc) === JSON.stringify(t.rec)) {
+          delete Fb._trackRecs[email][mid];
+          return;
+        }
+        comps[email] = Object.assign({}, comps[email] || {});
+        comps[email][mid] = JSON.parse(JSON.stringify(t.rec));
+        restored = true;
+      });
+      if (!Object.keys(Fb._trackRecs[email]).length) delete Fb._trackRecs[email];
+    });
+    STATE.trainingCompletions = comps;
+    return restored;
+  },
+
   threadSlotWrites: function(snap) {
     var today = todayUK();
     var server = Fb._serverThreadFields || {};
@@ -1531,12 +1628,15 @@ var Fb = {
       // Daily-thread fields are left out of the whole-doc write and patched per
       // slot instead. A tab that slept overnight would otherwise upload its
       // swept-to-null threads and wipe the links the 9am scheduler just wrote.
+      // Training fields likewise: only what this tab changed (Fb.trainingWrites).
+      // Until the first snapshot sets the baseline they stay in the whole-doc write.
       var threadFields = Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS);
+      if (Fb._serverTraining) threadFields = threadFields.concat(['trainingModules', 'trainingCompletions']);
       var mainFields = Object.keys(snap).filter(function(k) {
         return threadFields.indexOf(k) < 0 && snap[k] !== undefined;
       });
       batch.set(fbDb.doc(Fb.STATE_DOC), snap, { mergeFields: mainFields });
-      Fb.threadSlotWrites(snap).forEach(function(w) {
+      Fb.threadSlotWrites(snap).concat(Fb.trainingWrites(snap)).forEach(function(w) {
         batch.update(fbDb.doc(Fb.STATE_DOC), w.path, w.value);
       });
     }
@@ -1552,6 +1652,12 @@ var Fb = {
       Fb._lastUploadJson = json;
       Fb._lastUploadedAssets = currentAssetsMap;
       Fb._pendingLocalJson = null;  // confirmed — no longer dirty
+      if (mainDocChanged && Fb._serverTraining) {
+        Fb._serverTraining = {
+          trainingModules: JSON.parse(JSON.stringify(snap.trainingModules || [])),
+          trainingCompletions: JSON.parse(JSON.stringify(snap.trainingCompletions || {}))
+        };
+      }
       Fb._retryDelay = 3000;        // reset backoff for next failure
       if (Fb._retryTimer) { clearTimeout(Fb._retryTimer); Fb._retryTimer = null; }
       // Discard any snapshot that was deferred during this upload. It was captured
