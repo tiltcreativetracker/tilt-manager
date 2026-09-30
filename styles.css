@@ -2255,8 +2255,12 @@
   .training-note-text { white-space: pre-wrap; font-size: 12px; color: var(--text2); line-height: 1.4; }
   .training-note-input { width: 100%; min-width: 200px; font-size: 12px; resize: vertical; }
 
-/* Persistent "new version" toast from the auto-update checker (app.js). */
-.update-toast { position: fixed; bottom: 20px; right: 20px; z-index: 100000; display: flex; align-items: center; gap: 12px; max-width: 420px; padding: 10px 10px 10px 16px; background: var(--bg3); border: 1px solid var(--accent); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); font-size: 13px; color: var(--text1); animation: cross-tab-pop 0.25s ease-out; }
-.update-toast-reload { flex-shrink: 0; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.15s; }
-.update-toast-reload:hover { background: var(--accent2); }
-@media (max-width: 480px) { .update-toast { left: 16px; right: 16px; max-width: none; } }
+/* Persistent "new version" banner from the auto-update checker (app.js). Pinned
+   to the top; the app is pushed down by its height (--update-banner-h, set in JS). */
+.update-toast { position: fixed; top: 0; left: 0; right: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 8px 44px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 500; box-shadow: 0 2px 10px rgba(0,0,0,0.15); animation: update-banner-in 0.25s ease-out; }
+.update-toast-reload { flex-shrink: 0; background: #fff; color: var(--accent); border: none; border-radius: 6px; padding: 5px 14px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; transition: opacity 0.15s; }
+.update-toast-reload:hover { opacity: 0.85; }
+.update-toast-close { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: #fff; opacity: 0.75; font-size: 20px; line-height: 1; padding: 2px 6px; cursor: pointer; font-family: inherit; }
+.update-toast-close:hover { opacity: 1; }
+body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: calc(100vh - var(--update-banner-h, 40px)); }
+@keyframes update-banner-in { from { transform: translateY(-100%); } to { transform: translateY(0); } }

@@ -12404,6 +12404,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   var ED_CLS = { Zidni: 'qr-c-zidni', Sharm: 'qr-c-sharm', Patty: 'qr-c-patty' };
   function edCls(e) { return ED_CLS[e] || 'qr-c-other'; }
+  function fmt1(n) { return (Math.round(n * 10) / 10).toString(); }
   function niceMax(v) {
     if (!(v > 0)) return 1;
     var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), n = v / p;
@@ -12435,12 +12436,13 @@ function renderQuarterEditorReport(qYear, qNum) {
       var bars;
       if (opts.stacked) {
         var tot = series.reduce(function(s, se) { return s + se.values[i]; }, 0);
+        var parts = series.filter(function(se) { return se.values[i]; }).length;
         var segs = series.map(function(se) {
           var v = se.values[i];
           if (!v) return '';
           var pct = v / max * 100;
           return '<div class="qr-seg ' + se.cls + '" style="height:' + (v / tot * 100) + '%" title="' + escapeHtml(se.label + ' · ' + m.label + ': ' + f(v) + (opts.unit ? ' ' + opts.unit : '')) + '">' +
-            (pct >= 14 ? '<span>' + f(v) + '</span>' : '') + '</div>';
+            (parts > 1 && pct >= 14 ? '<span>' + f(v) + '</span>' : '') + '</div>';
         }).join('');
         bars = '<div class="qr-bar-slot"><div class="qr-stack" style="height:' + (tot / max * 100) + '%">' +
           '<span class="qr-cap">' + f(tot) + '</span>' + segs + '</div></div>';
@@ -12497,8 +12499,8 @@ function renderQuarterEditorReport(qYear, qNum) {
 
   // Headline tiles
   html += '<div class="qr-section"><div class="qr-tiles">' +
-    tile('Videos approved', totalAppr.toLocaleString(), fmt(totalAppr / 3) + ' a month on average') +
-    tile('Videos per editor per day', fmt(teamPerDay), 'Target is ' + DAILY_EDITOR_APPROVAL_TARGET + ' · Mon–Fri') +
+    tile('Videos approved', totalAppr.toLocaleString(), Math.round(totalAppr / 3) + ' a month on average') +
+    tile('Videos per editor per day', fmt1(teamPerDay), 'Target is ' + DAILY_EDITOR_APPROVAL_TARGET + ' · Mon–Fri') +
     tile('New campaigns', sum(allN), allV + ' videos across them') +
     tile('Clips tagged', tagTotal.toLocaleString(), trainTotal + ' training modules · ' + eodTotal + ' EODs') +
   '</div></div>';
@@ -12517,7 +12519,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   });
   html += '<div class="qr-section">' + card('Daily pace against target',
     'Approved videos ÷ working days (Mon–Fri) · ' + months.map(function(m) { return m.label + ' ' + m.work + 'd'; }).join(' · '),
-    edLegend + columns(paceSeries, { target: DAILY_EDITOR_APPROVAL_TARGET, targetLabel: 'Target ' + DAILY_EDITOR_APPROVAL_TARGET + ' a day', fmtVal: fmt, unit: 'a day' }) +
+    edLegend + columns(paceSeries, { target: DAILY_EDITOR_APPROVAL_TARGET, targetLabel: 'Target ' + DAILY_EDITOR_APPROVAL_TARGET + ' a day', fmtVal: fmt1, unit: 'a day' }) +
     numbers('<th>Editor</th>' + mHead + '<th>Quarter avg</th>',
       eds.map(function(e) { return { cells: [escapeHtml(e)].concat(perDayCell(byEd[e]), [workTotal ? fmt(sum(byEd[e]) / workTotal) : '—']) }; })
         .concat([{ total: true, cells: ['Working days'].concat(months.map(function(m) { return m.work; }), [workTotal]) }]))) + '</div>';
@@ -23864,9 +23866,21 @@ window.addEventListener('online', function() {
     var el = document.createElement('div');
     el.className = 'update-toast';
     el.innerHTML = '<span>A new version of the tracker is out. Reload to get it.</span>' +
-      '<button type="button" class="update-toast-reload">Reload</button>';
-    el.querySelector('button').onclick = reloadNow;
+      '<button type="button" class="update-toast-reload">Reload</button>' +
+      '<button type="button" class="update-toast-close" title="Dismiss (it still reloads when you switch tabs)" aria-label="Dismiss">\u00d7</button>';
+    el.querySelector('.update-toast-reload').onclick = reloadNow;
+    // Closing only hides the banner; the reload-on-tab-switch stays armed.
+    el.querySelector('.update-toast-close').onclick = function() {
+      el.remove();
+      window.removeEventListener('resize', fitBanner);
+      document.body.classList.remove('has-update-banner');
+    };
     document.body.appendChild(el);
+    // Push the app down so the banner doesn't cover the top bar.
+    var fitBanner = function() { document.body.style.setProperty('--update-banner-h', el.offsetHeight + 'px'); };
+    fitBanner();
+    window.addEventListener('resize', fitBanner);
+    document.body.classList.add('has-update-banner');
     document.addEventListener('visibilitychange', reloadIfAway);
     reloadIfAway();
   }
