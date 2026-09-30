@@ -407,7 +407,6 @@ var Fb = {
   _todayGradesBackup: null, // yyyy-mm-dd string; blocks the write from firing again today
   _suppressUpload: false,
   _uploadTimer: null,
-  _lastUploadJson: null,    // last-uploaded payload JSON, to skip no-op re-writes
   _lastUploadedAssets: {},  // map of assetId → JSON string, for subcollection diffing
   _assetsMigrated: false,   // true once legacy assets have been written to subcollection
   _firstSnapshot: true,     // first incoming snapshot triggers init/migration logic
@@ -489,6 +488,7 @@ var Fb = {
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedByTab: Fb._tabId,
       _lastEditedAt: Date.now(),
+      _appVer: Fb.APP_VER,
       deletedCampaignIds: STATE.deletedCampaignIds || {}
     };
     // Safety net: if still over target, progressively trim history fields.
@@ -629,6 +629,13 @@ var Fb = {
       // UK date. Same treatment for catHeadDailyThreads and intlDailyThread.
       // Remember what the server holds for each thread field so uploadNow can
       // tell which slots this tab actually changed (see Fb.threadSlotWrites).
+      // Baseline for the changed-fields-only rule (see Fb.dirtyFields): what the
+      // server held for every field when this tab last adopted a snapshot.
+      Fb._serverFields = {};
+      Object.keys(data).forEach(function(k) { Fb._serverFields[k] = Fb.stableJson(data[k]); });
+      if (data._appVer && data._appVer !== Fb.APP_VER && typeof window.checkForNewBuild === 'function') {
+        window.checkForNewBuild();
+      }
       // Server copy of the training fields: uploadNow writes them only where this
       // tab's STATE differs from it (see Fb.trainingWrites).
       Fb._serverTraining = {
@@ -1529,6 +1536,43 @@ var Fb = {
     return restored;
   },
 
+  // ── RULE: a tab only uploads the fields it changed ─────────────────────
+  // Every save used to write EVERY shared field from this tab's memory, so a
+  // tab that was behind (asleep, mid-retry, or still on the previous build
+  // after a deploy) wiped whatever teammates had changed since, e.g. a
+  // just-added training module or a new tab's data. Now uploadNow writes a
+  // field only when this tab's copy differs from the server copy it last
+  // adopted (Fb._serverFields). Anything this tab didn't touch is left alone,
+  // however stale its copy is. New STATE fields get this for free: add them to
+  // buildSnapshot and they're covered. Fields with finer-grained writers
+  // (daily-thread slots, training) are excluded by the caller.
+  APP_VER: (function() {
+    var el = document.querySelector('script[src*="app.js"]');
+    var m = el && el.getAttribute('src').match(/[?&]v=([\w.\-]+)/);
+    return m ? m[1] : null;
+  })(),
+  META_FIELDS: ['_lastEditedBy', '_lastEditedByName', '_lastEditedByTab', '_lastEditedAt', '_appVer'],
+  _serverFields: null,
+  // JSON.stringify with sorted object keys, so a merge that only reorders keys
+  // doesn't count as a change.
+  stableJson: function(v) {
+    return JSON.stringify(v, function(k, val) {
+      if (!val || typeof val !== 'object' || Array.isArray(val)) return val;
+      var out = {};
+      Object.keys(val).sort().forEach(function(key) { out[key] = val[key]; });
+      return out;
+    });
+  },
+  // Fields of `snap` to include in the whole-field write. Before the first
+  // server snapshot there's no baseline, so everything goes (first-ever write).
+  dirtyFields: function(snap, exclude) {
+    var srv = Fb._serverFields;
+    return Object.keys(snap).filter(function(k) {
+      if (snap[k] === undefined || exclude.indexOf(k) >= 0 || Fb.META_FIELDS.indexOf(k) >= 0) return false;
+      return !srv || Fb.stableJson(snap[k]) !== srv[k];
+    });
+  },
+
   threadSlotWrites: function(snap) {
     var today = todayUK();
     var server = Fb._serverThreadFields || {};
@@ -1610,7 +1654,16 @@ var Fb = {
       return !currentAssetsMap[id];
     });
 
-    var mainDocChanged = (json !== Fb._lastUploadJson);
+    // Daily-thread fields are left out of the whole-field write and patched per
+    // slot instead. A tab that slept overnight would otherwise upload its
+    // swept-to-null threads and wipe the links the 9am scheduler just wrote.
+    // Training fields likewise: only what this tab changed (Fb.trainingWrites).
+    // Until the first snapshot sets the baseline they stay in the whole-field write.
+    var threadFields = Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS);
+    if (Fb._serverTraining) threadFields = threadFields.concat(['trainingModules', 'trainingCompletions']);
+    var dirty = Fb.dirtyFields(snap, threadFields);
+    var slotWrites = Fb.threadSlotWrites(snap).concat(Fb.trainingWrites(snap));
+    var mainDocChanged = dirty.length > 0 || slotWrites.length > 0;
     if (!mainDocChanged && assetsToWrite.length === 0 && assetIdsToDelete.length === 0) {
       Fb._uploadTimer = null;
       Fb._syncStatus = 'idle';
@@ -1625,18 +1678,9 @@ var Fb = {
 
     var batch = fbDb.batch();
     if (mainDocChanged) {
-      // Daily-thread fields are left out of the whole-doc write and patched per
-      // slot instead. A tab that slept overnight would otherwise upload its
-      // swept-to-null threads and wipe the links the 9am scheduler just wrote.
-      // Training fields likewise: only what this tab changed (Fb.trainingWrites).
-      // Until the first snapshot sets the baseline they stay in the whole-doc write.
-      var threadFields = Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS);
-      if (Fb._serverTraining) threadFields = threadFields.concat(['trainingModules', 'trainingCompletions']);
-      var mainFields = Object.keys(snap).filter(function(k) {
-        return threadFields.indexOf(k) < 0 && snap[k] !== undefined;
-      });
-      batch.set(fbDb.doc(Fb.STATE_DOC), snap, { mergeFields: mainFields });
-      Fb.threadSlotWrites(snap).concat(Fb.trainingWrites(snap)).forEach(function(w) {
+      // Only the changed fields (Fb.dirtyFields) plus the attribution stamps.
+      batch.set(fbDb.doc(Fb.STATE_DOC), snap, { mergeFields: dirty.concat(Fb.META_FIELDS) });
+      slotWrites.forEach(function(w) {
         batch.update(fbDb.doc(Fb.STATE_DOC), w.path, w.value);
       });
     }
@@ -1649,9 +1693,9 @@ var Fb = {
 
     return batch.commit().then(function() {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
-      Fb._lastUploadJson = json;
       Fb._lastUploadedAssets = currentAssetsMap;
       Fb._pendingLocalJson = null;  // confirmed — no longer dirty
+      if (Fb._serverFields) dirty.forEach(function(k) { Fb._serverFields[k] = Fb.stableJson(snap[k]); });
       if (mainDocChanged && Fb._serverTraining) {
         Fb._serverTraining = {
           trainingModules: JSON.parse(JSON.stringify(snap.trainingModules || [])),
@@ -1688,7 +1732,6 @@ var Fb = {
     }).catch(function(err) {
       if (Fb._uploadTimer === _sentinel) Fb._uploadTimer = null;
       console.warn('[Fb] upload failed:', err);
-      Fb._lastUploadJson = null;
       Fb._pendingLocalJson = json;
       // Don't retry quota errors — they won't resolve until the daily reset.
       // Retrying would burn even more quota and make things worse.
@@ -23614,6 +23657,10 @@ window.addEventListener('online', function() {
       })
       .catch(function () { /* transient — try again next tick */ });
   }
+
+  // Fb.applySnapshot calls this when a teammate's write carries a different
+  // build stamp (_appVer), so an old tab finds out now rather than at the next poll.
+  window.checkForNewBuild = check;
 
   // Kick off after a short delay so it doesn't race the initial page load,
   // then poll on an interval AND when the tab comes back to the foreground
