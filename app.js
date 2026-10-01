@@ -12468,6 +12468,8 @@ var QUARTER_REPORT_POST_GOALS = {
 var REVISION_TRACKING_SINCE = '2026-07-20';
 // PM approval turnaround target, in days (last submitted → PM approved).
 var APPROVAL_TURNAROUND_TARGET_DAYS = 1;
+// Team First-Pass Rate target, in percent.
+var FIRST_PASS_TARGET_PCT = 90;
 // Campaigns left out of the report's Time to Ship (and its reasons list), by
 // campaign id → name (for reference only; not shown on the report). Set by the PM.
 var QUARTER_REPORT_EXCLUDED_CAMPAIGNS = {
@@ -12903,6 +12905,8 @@ function renderQuarterEditorReport(qYear, qNum) {
     if (!d) return 'Same as ' + escapeHtml(kpiPhases[i - 1].ph.label);
     return (d > 0 ? '▲ ' : '▼ ') + Math.abs(d).toLocaleString() + (unit ? ' ' + unit : '') + vs;
   }
+  // ✓ when a target is met, red ✗ when it's missed.
+  function hitMark(met) { return met ? ' <span class="qr-goal-check">✓</span>' : ' <span class="qr-kpi-x">✗</span>'; }
   function daysUnit(v) { return fmt1(v) === '1' ? 'day' : 'days'; }
   var kpiHead = '<div class="qr-kpi-row qr-kpi-headrow" style="grid-template-columns:minmax(150px,1.1fr) repeat(' + kpiPhases.length + ',minmax(0,1fr))"><div></div>' +
     kpiPhases.map(function(k) {
@@ -12919,12 +12923,12 @@ function renderQuarterEditorReport(qYear, qNum) {
       var split = k.paid.toLocaleString() + ' Paid Ads · ' + (k.edits - k.paid).toLocaleString() + ' Organic';
       if (!t) return kpiCell(k.edits.toLocaleString(), (k.ph.months.length > 1 ? Math.round(k.perMonth) + ' a month · ' : '') + split, d);
       var met = k.edits >= t;
-      return kpiCell(k.edits.toLocaleString() + (met ? ' <span class="qr-goal-check">✓</span>' : ''),
+      return kpiCell(k.edits.toLocaleString() + hitMark(met),
         '<span class="' + (met ? 'qr-kpi-met' : 'qr-kpi-miss') + '">' + Math.round(k.edits / t * 100) + '% of the ' + t + ' target</span> · ' + split, d);
     })) +
-    kpiRow('Team First-Pass Rate', 'Approved videos with no rework before PM approval', kpiPhases.map(function(k, i) {
+    kpiRow('Team First-Pass Rate', 'Approved videos with no rework before PM approval · target ' + FIRST_PASS_TARGET_PCT + '%', kpiPhases.map(function(k, i) {
       if (!isKpi(k, 'firstPass')) return notKpi(k);
-      return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%', k.fpHit + ' of ' + k.fpN + ' videos',
+      return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%' + hitMark(Math.round(k.fpRate) >= FIRST_PASS_TARGET_PCT), k.fpHit + ' of ' + k.fpN + ' videos',
         kpiDelta(i, function(x) { return x.fpRate == null ? null : Math.round(x.fpRate); }, 'pts', 0, 'firstPass'));
     })) +
     kpiRow('Team Time to Ship Quality Edit', 'Per campaign: first video assigned to last video PM-approved', kpiPhases.map(function(k, i) {
@@ -12941,7 +12945,7 @@ function renderQuarterEditorReport(qYear, qNum) {
     kpiRow('Approval turnaround', 'Per video: last sent for review to PM-approved · target ' + APPROVAL_TURNAROUND_TARGET_DAYS + ' day', kpiPhases.map(function(k, i) {
       if (k.turnaround.avg == null) return kpiCell('—', noSubmitData);
       var met = k.turnaround.avg <= APPROVAL_TURNAROUND_TARGET_DAYS;
-      return kpiCell(fmt1(k.turnaround.avg) + ' <span class="qr-kpi-unit">' + daysUnit(k.turnaround.avg) + '</span>' + (met ? ' <span class="qr-goal-check">✓</span>' : ''), 'average of ' + k.turnaround.n + ' videos',
+      return kpiCell(fmt1(k.turnaround.avg) + ' <span class="qr-kpi-unit">' + daysUnit(k.turnaround.avg) + '</span>' + hitMark(met), 'average of ' + k.turnaround.n + ' videos',
         kpiDelta(i, function(x) { return x.turnaround.avg; }, 'days', 1));
     }));
   var slowAny = kpiPhases.some(function(k) { return k.slow.length && isKpi(k, 'ship'); });
