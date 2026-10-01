@@ -12967,11 +12967,11 @@ function renderQuarterEditorReport(qYear, qNum) {
       calc: function(k) { return k.edits; }, target: function(k) { return k.ph.editTarget || null; },
       fmt: function(v) { return Math.round(v).toLocaleString(); }, fmtT: function(t) { return String(t); },
       sub: function(k) { return (k.ph.months.length > 1 ? Math.round(k.perMonth) + ' a month · ' : '') + k.paid.toLocaleString() + ' Paid Ads · ' + (k.edits - k.paid).toLocaleString() + ' Organic'; }, empty: '' },
-    { key: 'firstPass', name: 'Team First-Pass Rate', hint: 'Approved videos with no rework before PM approval', higher: true, digits: 0, unit: 'pts',
+    { key: 'firstPass', name: 'QA + Brand', hint: 'Approved videos with no rework before PM approval', higher: true, digits: 0, unit: 'pts',
       calc: function(k) { return k.fpRate == null ? null : Math.round(k.fpRate); }, target: function() { return FIRST_PASS_TARGET_PCT; },
       fmt: function(v) { return Math.round(v) + '%'; }, fmtT: function(t) { return t + '%'; },
       sub: function(k) { return k.fpHit + ' of ' + k.fpN + ' videos'; }, empty: 'no tracked videos' },
-    { key: 'ship', name: 'Team Time to Ship Quality Edit', hint: 'Per campaign: first video assigned to last video PM-approved', higher: false, digits: 1, unit: 'days',
+    { key: 'ship', name: 'Speed', hint: 'Per campaign: first video assigned to last video PM-approved', higher: false, digits: 1, unit: 'days',
       calc: function(k) { return k.ship; }, target: function() { return null; }, fmt: fmtDays, fmtT: function(t) { return fmt1(t) + ' ' + daysUnit(t); },
       sub: function(k) { return 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's') + (k.shipMedian != null ? ' · typical ' + fmt1(k.shipMedian) + ' ' + daysUnit(k.shipMedian) : ''); }, empty: 'no finished campaigns' },
     { key: 'toSubmit', split: true, name: 'Days to first submission', hint: 'Per video: assigned to first sent for PM review', higher: false, digits: 1, unit: 'days',
@@ -13061,7 +13061,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   html += '<div class="qr-section"><div class="qr-card"><div class="qr-card-head qr-ctx-head"><div><div class="qr-card-title">Editing Team Agreed KPIs</div>' +
     '<div class="qr-card-sub">The content KPIs agreed with management for each month, with what the team was focused on</div></div>' + kpiEditBtn + '</div>' +
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. The Organic Training batch counts as training, not production, so it is left out of every number except training.' +
+    '<div class="qr-goal-skip">Innovation isn\'t one of the agreed KPIs, so it\'s left out of this table. QA + Brand is the first-pass rate: it counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Speed is time to ship: it counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. The Organic Training batch counts as training, not production, so it is left out of every number except training.' +
     (Object.keys(kpiEdits).length ? ' Numbers marked Edited were changed by hand by an admin.' : '') + '</div></div></div>';
 
   // Headline tiles
