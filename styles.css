@@ -2392,6 +2392,7 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-kpi-phase-label { font-size: 12px; font-weight: 600; color: var(--text1); }
   .qr-kpi-phase-focus { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent2); margin-top: 1px; }
   .qr-kpi-name { font-size: 13px; font-weight: 600; color: var(--text1); }
+  .qr-kpi-pillar { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent2); margin-top: 2px; }
   .qr-kpi-hint { font-size: 11px; font-weight: 400; color: var(--text3); margin-top: 2px; }
   .qr-kpi-value { font-size: 24px; font-weight: 650; color: var(--text1); line-height: 1.1; }
   .qr-kpi-unit { font-size: 12px; font-weight: 500; color: var(--text2); }
