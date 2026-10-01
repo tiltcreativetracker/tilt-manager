@@ -12475,9 +12475,9 @@ var FIRST_PASS_TARGET_PCT = 90;
 var QUARTER_REPORT_EXCLUDED_CAMPAIGNS = {
   'cmralkxj2b9pu5t': 'Womenswear 2'
 };
-// Campaigns left out of Approval turnaround, by campaign id → name. Organic Training
-// was a training batch that waited days for review by design, not production work.
-var QUARTER_REPORT_TURNAROUND_EXCLUDED = {
+// Campaigns left out of the whole Agreed KPIs table, by campaign id → name. Organic
+// Training was a training batch that waited days for review by design, not production work.
+var QUARTER_REPORT_KPI_EXCLUDED = {
   'cmtii2xzgu0hzef': 'Organic Training'
 };
 // International campaigns (any country other than UK) are one rolling campaign per
@@ -12804,7 +12804,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var campSpans = [];
   function fmtDay(iso) { var dt = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); return dt.getUTCDate() + ' ' + MONTH_SHORT[dt.getUTCMonth()]; }
   STATE.campaigns.forEach(function(c) {
-    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)] || isIntlReportCampaign(c)) return;
+    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)] || QUARTER_REPORT_KPI_EXCLUDED[String(c.id)] || isIntlReportCampaign(c)) return;
     var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
     if (!vids.length || vids.some(function(a) { return a.status !== 'Approved' || !a.dateApproved; })) return;
     var starts = vids.map(function(a) { return a.assignedAt; }).filter(Boolean).sort();
@@ -12853,7 +12853,8 @@ function renderQuarterEditorReport(qYear, qNum) {
   var kpiPhases = phases.map(function(ph) {
     var inPh = {}; ph.months.forEach(function(k) { inPh[k] = true; });
     var approved = STATE.assets.filter(function(a) {
-      return a.status === 'Approved' && a.dateApproved && inPh[String(a.dateApproved).slice(0, 7)] && (!eds.length || eds.indexOf(a.editor) >= 0);
+      return a.status === 'Approved' && a.dateApproved && inPh[String(a.dateApproved).slice(0, 7)] && (!eds.length || eds.indexOf(a.editor) >= 0) &&
+        !QUARTER_REPORT_KPI_EXCLUDED[String(a.campaignId)];
     });
     var phCamps = campSpans.filter(function(x) { return inPh[x.month]; });
     var spans = phCamps.map(function(x) { return x.days; });
@@ -12875,7 +12876,7 @@ function renderQuarterEditorReport(qYear, qNum) {
       return { n: ds.length, avg: ds.length ? ds.reduce(function(t, d) { return t + d; }, 0) / ds.length : null };
     }
     var toSubmit = avgDays(approved, 'assignedAt', 'firstSubmittedAt');
-    var turnaround = avgDays(approved.filter(function(a) { return !QUARTER_REPORT_TURNAROUND_EXCLUDED[String(a.campaignId)]; }), 'submittedAt', 'dateApproved');
+    var turnaround = avgDays(approved, 'submittedAt', 'dateApproved');
     return {
       ph: ph,
       toSubmit: toSubmit, turnaround: turnaround,
@@ -13011,7 +13012,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   html += '<div class="qr-section"><div class="qr-card"><div class="qr-card-head qr-ctx-head"><div><div class="qr-card-title">Editing Team Agreed KPIs</div>' +
     '<div class="qr-card-sub">The content KPIs agreed with management for each month, with what the team was focused on</div></div>' + kpiEditBtn + '</div>' +
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. Approval turnaround leaves out the Organic Training batch.' +
+    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. The KPIs leave out the Organic Training batch.' +
     (Object.keys(kpiEdits).length ? ' Numbers marked Edited were changed by hand by an admin.' : '') + '</div></div></div>';
 
   // Headline tiles
