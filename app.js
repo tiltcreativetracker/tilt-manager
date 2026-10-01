@@ -12478,11 +12478,13 @@ var QUARTER_REPORT_EXCLUDED_CAMPAIGNS = {
 // (per-campaign Time to Ship, the per-category goal) don't apply to them.
 function isIntlReportCampaign(c) { return !!(c && c.country && c.country !== 'UK'); }
 // One KPI column per month, labelled with what the team was focused on. editTarget
-// is the agreed monthly Video Edits target (Paid Ads months: 200 a month).
+// is the agreed monthly Video Edits target (Paid Ads months: 200 a month). kpis lists
+// the KPIs agreed for that month ('edits' | 'firstPass' | 'ship'); leave it out when
+// all three applied. KPIs not agreed for a month show "Not a KPI" instead of a number.
 var QUARTER_REPORT_PHASES = {
   '2026-Q3': [
-    { label: 'Jul', focus: 'Paid ads', months: ['2026-07'], editTarget: MONTHLY_APPROVAL_TARGET },
-    { label: 'Aug', focus: 'Paid ads', months: ['2026-08'], editTarget: MONTHLY_APPROVAL_TARGET },
+    { label: 'Jul', focus: 'Paid ads', months: ['2026-07'], editTarget: MONTHLY_APPROVAL_TARGET, kpis: ['edits'] },
+    { label: 'Aug', focus: 'Paid ads', months: ['2026-08'], editTarget: MONTHLY_APPROVAL_TARGET, kpis: ['edits'] },
     { label: 'Sep', focus: 'Organic', months: ['2026-09'] }
   ]
 };
@@ -12889,8 +12891,11 @@ function renderQuarterEditorReport(qYear, qNum) {
   }
   // Month-to-month change against the previous column: "▲ 12 vs Jul".
   // pick(k) returns the number to compare (or null); unit follows the change.
-  function kpiDelta(i, pick, unit, digits) {
+  function isKpi(k, key) { return !k.ph.kpis || k.ph.kpis.indexOf(key) >= 0; }
+  function notKpi(k) { return kpiCell('<span class="qr-dim">—</span>', 'Not a KPI in ' + escapeHtml(k.ph.label)); }
+  function kpiDelta(i, pick, unit, digits, key) {
     if (!i) return '';
+    if (key && (!isKpi(kpiPhases[i], key) || !isKpi(kpiPhases[i - 1], key))) return '';
     var cur = pick(kpiPhases[i]), prev = pick(kpiPhases[i - 1]);
     if (cur == null || prev == null) return '';
     var f = Math.pow(10, digits || 0), d = Math.round((cur - prev) * f) / f;
@@ -12918,12 +12923,14 @@ function renderQuarterEditorReport(qYear, qNum) {
         '<span class="' + (met ? 'qr-kpi-met' : 'qr-kpi-miss') + '">' + Math.round(k.edits / t * 100) + '% of the ' + t + ' target</span> · ' + split, d);
     })) +
     kpiRow('Team First-Pass Rate', 'Approved videos with no rework before PM approval', kpiPhases.map(function(k, i) {
+      if (!isKpi(k, 'firstPass')) return notKpi(k);
       return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%', k.fpHit + ' of ' + k.fpN + ' videos',
-        kpiDelta(i, function(x) { return x.fpRate == null ? null : Math.round(x.fpRate); }, 'pts', 0));
+        kpiDelta(i, function(x) { return x.fpRate == null ? null : Math.round(x.fpRate); }, 'pts', 0, 'firstPass'));
     })) +
     kpiRow('Team Time to Ship Quality Edit', 'Per campaign: first video assigned to last video PM-approved', kpiPhases.map(function(k, i) {
+      if (!isKpi(k, 'ship')) return notKpi(k);
       return k.ship == null ? kpiCell('—', 'no finished campaigns') : kpiCell(fmt1(k.ship) + ' <span class="qr-kpi-unit">' + daysUnit(k.ship) + '</span>', 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's') + (k.shipMedian != null ? ' · typical ' + fmt1(k.shipMedian) + ' ' + daysUnit(k.shipMedian) : ''),
-        kpiDelta(i, function(x) { return x.ship; }, 'days', 1));
+        kpiDelta(i, function(x) { return x.ship; }, 'days', 1, 'ship'));
     }));
   var noSubmitData = '<span class="qr-dim">Tracked from 1 Oct 2026</span>';
   kpiBody += '<div class="qr-kpi-sep">How time to ship splits</div>' +
@@ -12937,11 +12944,11 @@ function renderQuarterEditorReport(qYear, qNum) {
       return kpiCell(fmt1(k.turnaround.avg) + ' <span class="qr-kpi-unit">' + daysUnit(k.turnaround.avg) + '</span>' + (met ? ' <span class="qr-goal-check">✓</span>' : ''), 'average of ' + k.turnaround.n + ' videos',
         kpiDelta(i, function(x) { return x.turnaround.avg; }, 'days', 1));
     }));
-  var slowAny = kpiPhases.some(function(k) { return k.slow.length; });
+  var slowAny = kpiPhases.some(function(k) { return k.slow.length && isKpi(k, 'ship'); });
   if (slowAny) {
     kpiBody += '<div class="qr-kpi-sep">What made time to ship longer</div><div class="qr-slow">' +
       kpiPhases.map(function(k) {
-        if (!k.slow.length) return '';
+        if (!k.slow.length || !isKpi(k, 'ship')) return '';
         var rest = k.shipN - k.slow.length;
         var restAvg = rest ? (k.ship * k.shipN - k.slow.reduce(function(t, x) { return t + x.days; }, 0)) / rest : null;
         return '<div class="qr-slow-col"><div class="qr-slow-head">' + escapeHtml(k.ph.label) +
@@ -12952,7 +12959,7 @@ function renderQuarterEditorReport(qYear, qNum) {
           }).join('') + '</div>';
       }).join('') + '</div>';
   }
-  html += '<div class="qr-section">' + card('Editing Team Agreed KPIs', 'The three content KPIs agreed with management, month by month, with what the team was focused on',
+  html += '<div class="qr-section">' + card('Editing Team Agreed KPIs', 'The content KPIs agreed with management for each month, with what the team was focused on',
     kpiBody +
     '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only.</div>') + '</div>';
 
