@@ -12475,6 +12475,11 @@ var FIRST_PASS_TARGET_PCT = 90;
 var QUARTER_REPORT_EXCLUDED_CAMPAIGNS = {
   'cmralkxj2b9pu5t': 'Womenswear 2'
 };
+// Campaigns left out of Approval turnaround, by campaign id → name. Organic Training
+// was a training batch that waited days for review by design, not production work.
+var QUARTER_REPORT_TURNAROUND_EXCLUDED = {
+  'cmtii2xzgu0hzef': 'Organic Training'
+};
 // International campaigns (any country other than UK) are one rolling campaign per
 // month, so their dates spread across the month by design. The UK production rules
 // (per-campaign Time to Ship, the per-category goal) don't apply to them.
@@ -12870,7 +12875,7 @@ function renderQuarterEditorReport(qYear, qNum) {
       return { n: ds.length, avg: ds.length ? ds.reduce(function(t, d) { return t + d; }, 0) / ds.length : null };
     }
     var toSubmit = avgDays(approved, 'assignedAt', 'firstSubmittedAt');
-    var turnaround = avgDays(approved, 'submittedAt', 'dateApproved');
+    var turnaround = avgDays(approved.filter(function(a) { return !QUARTER_REPORT_TURNAROUND_EXCLUDED[String(a.campaignId)]; }), 'submittedAt', 'dateApproved');
     return {
       ph: ph,
       toSubmit: toSubmit, turnaround: turnaround,
@@ -13006,7 +13011,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   html += '<div class="qr-section"><div class="qr-card"><div class="qr-card-head qr-ctx-head"><div><div class="qr-card-title">Editing Team Agreed KPIs</div>' +
     '<div class="qr-card-sub">The content KPIs agreed with management for each month, with what the team was focused on</div></div>' + kpiEditBtn + '</div>' +
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only.' +
+    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. Approval turnaround leaves out the Organic Training batch.' +
     (Object.keys(kpiEdits).length ? ' Numbers marked Edited were changed by hand by an admin.' : '') + '</div></div></div>';
 
   // Headline tiles
