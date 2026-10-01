@@ -635,6 +635,14 @@ var Fb = {
       // server held for every field when this tab last adopted a snapshot.
       Fb._serverFields = {};
       Object.keys(data).forEach(function(k) { Fb._serverFields[k] = Fb.stableJson(data[k]); });
+      // Remote force-reload: an admin stamps state/app.forceReloadAt (ms) and
+      // every tab that booted before it reloads. applySnapshot only gets here
+      // with no save pending, so nothing unsent is lost.
+      if (Number(data.forceReloadAt) > Fb._bootAt && !Fb._forceReloading) {
+        Fb._forceReloading = true;
+        reloadPreservingView('force');
+        return;
+      }
       if (data._appVer && data._appVer !== Fb.APP_VER && typeof window.checkForNewBuild === 'function') {
         window.checkForNewBuild();
       }
@@ -757,6 +765,7 @@ var Fb = {
         if (k === 'deletedCampaignIds') return;
         // Training — healed against this tab's copy below (Fb.healTraining).
         if (k === 'deletedTrainingModuleIds') return;
+        if (k === 'forceReloadAt') return;
 
         STATE[k] = data[k];
       });
@@ -1629,6 +1638,7 @@ var Fb = {
   // however stale its copy is. New STATE fields get this for free: add them to
   // buildSnapshot and they're covered. Fields with finer-grained writers
   // (daily-thread slots, training) are excluded by the caller.
+  _bootAt: Date.now(), // compared with state/app.forceReloadAt (see applySnapshot)
   APP_VER: (function() {
     var el = document.querySelector('script[src*="app.js"]');
     var m = el && el.getAttribute('src').match(/[?&]v=([\w.\-]+)/);
