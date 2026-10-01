@@ -2334,6 +2334,7 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-hhead, .qr-hrow { display: grid; grid-template-columns: 90px minmax(0, 1fr) 120px; gap: 12px; align-items: center; }
   .qr-hhead { font-size: 10px; color: var(--text3); padding-bottom: 6px; border-bottom: 1px solid var(--qr-grid); }
   .qr-hhead div:nth-child(n+3), .qr-hstat { text-align: right; }
+  .qr-hhead.qr-h4, .qr-hrow.qr-h4 { grid-template-columns: 90px minmax(0, 1fr) 110px 110px; }
   .qr-hrow { padding: 8px 0; border-bottom: 1px solid var(--qr-grid); }
   .qr-hrow:last-of-type { border-bottom: none; }
   .qr-hname { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; color: var(--text1); }

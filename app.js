@@ -12475,9 +12475,11 @@ var FIRST_PASS_TARGET_PCT = 90;
 var QUARTER_REPORT_EXCLUDED_CAMPAIGNS = {
   'cmralkxj2b9pu5t': 'Womenswear 2'
 };
-// Campaigns left out of the whole Agreed KPIs table, by campaign id → name. Organic
-// Training was a training batch that waited days for review by design, not production work.
-var QUARTER_REPORT_KPI_EXCLUDED = {
+// Training campaigns, by campaign id → name. Their videos are practice, not production:
+// they're left out of every number on the quarter report and count as training instead
+// (under "When there were no videos to edit"). Organic Training waited days for review
+// by design.
+var QUARTER_REPORT_TRAINING_CAMPAIGNS = {
   'cmtii2xzgu0hzef': 'Organic Training'
 };
 // International campaigns (any country other than UK) are one rolling campaign per
@@ -12502,6 +12504,9 @@ var QUARTER_REPORT_NOTES = {
 function renderQuarterEditorReport(qYear, qNum) {
   var MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var eds = DAILY_LOG_EDITORS;
+  // Training-campaign videos count as training, not production (see QUARTER_REPORT_TRAINING_CAMPAIGNS).
+  function isTrainingVid(a) { return !!QUARTER_REPORT_TRAINING_CAMPAIGNS[String(a.campaignId)]; }
+  var assets = STATE.assets.filter(function(a) { return !isTrainingVid(a); });
   var today = toLocalISODate(bizNow());
   var months = [0, 1, 2].map(function(i) {
     var m = qNum * 3 + i;
@@ -12533,7 +12538,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   // ── approvals ──
   var allAppr = zeros(), byEd = {}, byType = { 'Paid Ads': zeros(), 'Organic': zeros() };
   eds.forEach(function(e) { byEd[e] = zeros(); });
-  STATE.assets.forEach(function(a) {
+  assets.forEach(function(a) {
     if (a.status !== 'Approved') return;
     var i = monthIdx(a.dateApproved);
     if (i < 0) return;
@@ -12546,7 +12551,7 @@ function renderQuarterEditorReport(qYear, qNum) {
 
   // ── new campaigns ──
   var byCamp = {};
-  STATE.assets.forEach(function(a) { (byCamp[String(a.campaignId)] = byCamp[String(a.campaignId)] || []).push(a); });
+  assets.forEach(function(a) { (byCamp[String(a.campaignId)] = byCamp[String(a.campaignId)] || []).push(a); });
   var newCamps = { 'Paid Ads': { n: zeros(), vids: zeros() }, 'Organic': { n: zeros(), vids: zeros() } };
   STATE.campaigns.forEach(function(c) {
     var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
@@ -12583,6 +12588,15 @@ function renderQuarterEditorReport(qYear, qNum) {
       var i = monthIdx(tc[email][mid] && tc[email][mid].completedAt);
       if (i >= 0) trained[ed][i]++;
     });
+  });
+
+  // Training videos: approved videos in training campaigns, in their PM approval month.
+  var trainVids = {};
+  eds.forEach(function(e) { trainVids[e] = zeros(); });
+  STATE.assets.forEach(function(a) {
+    if (!isTrainingVid(a) || a.status !== 'Approved' || !trainVids[a.editor]) return;
+    var i = monthIdx(a.dateApproved);
+    if (i >= 0) trainVids[a.editor][i]++;
   });
 
   // ── render ──
@@ -12691,6 +12705,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var allV = sum(newCamps['Paid Ads'].vids) + sum(newCamps['Organic'].vids);
   var tagTotal = sum(eds.map(function(e) { return sum(tagged[e]); }));
   var trainTotal = sum(eds.map(function(e) { return sum(trained[e]); }));
+  var trainVidTotal = sum(eds.map(function(e) { return sum(trainVids[e]); }));
   var monthSpan = MONTH_LONG[qNum * 3] + ' – ' + MONTH_LONG[qNum * 3 + 2] + ' ' + qYear;
 
   var qKey = qYear + '-Q' + (qNum + 1), qName = 'Q' + (qNum + 1);
@@ -12718,7 +12733,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   // Production goals, first on the report: videos per category (months with a
   // target) and organic posts per day (QUARTER_REPORT_POST_GOALS months).
   var byCat = {};
-  STATE.assets.forEach(function(a) {
+  assets.forEach(function(a) {
     if (a.status === 'Cancelled') return;
     if (isIntlReportCampaign(findCampaignById(a.campaignId))) return;
     var i = monthIdx(a.estDelivery || a.assignedAt);
@@ -12753,7 +12768,7 @@ function renderQuarterEditorReport(qYear, qNum) {
       if (!pg) return '';
       var y = qYear, mo = qNum * 3 + i, nDays = new Date(y, mo + 1, 0).getDate();
       var perDay = {};
-      STATE.assets.forEach(function(a) {
+      assets.forEach(function(a) {
         if (!a.datePosted || String(a.datePosted).slice(0, 7) !== m.key) return;
         var c = findCampaignById(a.campaignId);
         if (!c || c.type !== 'Organic') return;
@@ -12804,7 +12819,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var campSpans = [];
   function fmtDay(iso) { var dt = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); return dt.getUTCDate() + ' ' + MONTH_SHORT[dt.getUTCMonth()]; }
   STATE.campaigns.forEach(function(c) {
-    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)] || QUARTER_REPORT_KPI_EXCLUDED[String(c.id)] || isIntlReportCampaign(c)) return;
+    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)] || QUARTER_REPORT_TRAINING_CAMPAIGNS[String(c.id)] || isIntlReportCampaign(c)) return;
     var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
     if (!vids.length || vids.some(function(a) { return a.status !== 'Approved' || !a.dateApproved; })) return;
     var starts = vids.map(function(a) { return a.assignedAt; }).filter(Boolean).sort();
@@ -12852,9 +12867,9 @@ function renderQuarterEditorReport(qYear, qNum) {
   (Array.isArray(STATE.grades) ? STATE.grades : []).forEach(function(g) { if (g && g.assetId != null) gradeByAsset[String(g.assetId)] = g; });
   var kpiPhases = phases.map(function(ph) {
     var inPh = {}; ph.months.forEach(function(k) { inPh[k] = true; });
-    var approved = STATE.assets.filter(function(a) {
+    var approved = assets.filter(function(a) {
       return a.status === 'Approved' && a.dateApproved && inPh[String(a.dateApproved).slice(0, 7)] && (!eds.length || eds.indexOf(a.editor) >= 0) &&
-        !QUARTER_REPORT_KPI_EXCLUDED[String(a.campaignId)];
+        true;
     });
     var phCamps = campSpans.filter(function(x) { return inPh[x.month]; });
     var spans = phCamps.map(function(x) { return x.days; });
@@ -13012,7 +13027,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   html += '<div class="qr-section"><div class="qr-card"><div class="qr-card-head qr-ctx-head"><div><div class="qr-card-title">Editing Team Agreed KPIs</div>' +
     '<div class="qr-card-sub">The content KPIs agreed with management for each month, with what the team was focused on</div></div>' + kpiEditBtn + '</div>' +
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. The KPIs leave out the Organic Training batch.' +
+    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only. The Organic Training batch counts as training, not production, so it is left out of every number except training.' +
     (Object.keys(kpiEdits).length ? ' Numbers marked Edited were changed by hand by an admin.' : '') + '</div></div></div>';
 
   // Headline tiles
@@ -13020,7 +13035,7 @@ function renderQuarterEditorReport(qYear, qNum) {
     tile('New campaigns', sum(allN), allV + ' videos across them') +
     tile('Videos approved', totalAppr.toLocaleString(), Math.round(totalAppr / 3) + ' a month on average') +
     tile('Videos per editor per day', fmt1(teamPerDay), 'Target is ' + DAILY_EDITOR_APPROVAL_TARGET + (targetSpan ? ' in ' + targetSpan : '') + ' · Mon–Fri') +
-    tile('Clips tagged', tagTotal.toLocaleString(), trainTotal + ' training modules completed') +
+    tile('Clips tagged', tagTotal.toLocaleString(), trainTotal + ' training modules' + (trainVidTotal ? ' and ' + trainVidTotal + ' training videos' : '') + ' completed') +
   '</div></div>';
 
   // Campaigns first: new campaigns + Paid vs Organic, side by side
@@ -13073,18 +13088,19 @@ function renderQuarterEditorReport(qYear, qNum) {
   var tagMax = niceMax(Math.max.apply(null, eds.map(function(e) { return sum(tagged[e]); })) || 1);
   var gapRows = eds.map(function(e) {
     var t = sum(tagged[e]);
-    return '<div class="qr-hrow">' +
+    return '<div class="qr-hrow' + (trainVidTotal ? ' qr-h4' : '') + '">' +
       '<div class="qr-hname"><span class="qr-swatch ' + edCls(e) + '"></span>' + escapeHtml(e) + '</div>' +
       '<div class="qr-htrack"><div class="qr-hbar ' + edCls(e) + (t ? '' : ' qr-bar-zero') + '" style="width:' + (t / tagMax * 100) + '%" title="' + escapeHtml(e + ': ' + t + ' clips tagged') + '"></div>' +
         '<span class="qr-hval">' + t.toLocaleString() + '</span></div>' +
       '<div class="qr-hstat">' + sum(trained[e]) + '</div>' +
+      (trainVidTotal ? '<div class="qr-hstat">' + sum(trainVids[e]) + '</div>' : '') +
     '</div>';
   }).join('');
   html += '<div class="qr-section">' + card('When there were no videos to edit',
     'Work editors picked up between briefs',
-    '<div class="qr-hhead"><div></div><div>Clips tagged</div><div>Training modules</div></div>' + gapRows +
-    numbers('<th>Editor</th><th>Clips tagged</th><th>Training modules done</th>',
-      eds.map(function(e) { return { cells: [escapeHtml(e), sum(tagged[e]), sum(trained[e])] }; }))) + '</div>';
+    '<div class="qr-hhead' + (trainVidTotal ? ' qr-h4' : '') + '"><div></div><div>Clips tagged</div><div>Training modules</div>' + (trainVidTotal ? '<div>Training videos</div>' : '') + '</div>' + gapRows +
+    numbers('<th>Editor</th><th>Clips tagged</th><th>Training modules done</th>' + (trainVidTotal ? '<th>Training videos</th>' : ''),
+      eds.map(function(e) { return { cells: [escapeHtml(e), sum(tagged[e]), sum(trained[e])].concat(trainVidTotal ? [sum(trainVids[e])] : []) }; }))) + '</div>';
 
   // Context + definitions
   // Why the quarter went the way it did. Once a PM has written this, it replaces
