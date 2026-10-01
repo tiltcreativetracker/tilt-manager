@@ -2317,9 +2317,9 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-target span { position: absolute; right: 0; bottom: 3px; font-size: 10px; font-weight: 600; color: var(--text2);
     background: var(--bg3); padding: 0 4px; border-radius: 3px; }
   .qr-groups { position: absolute; inset: 0; display: flex; justify-content: space-around; }
-  .qr-group { display: flex; align-items: flex-end; justify-content: center; gap: 2px; flex: 1; height: 100%; }
-  .qr-bar-slot { position: relative; height: 100%; display: flex; align-items: flex-end; width: 24px; }
-  .qr-chart-stacked .qr-bar-slot { width: 40px; }
+  .qr-group { display: flex; align-items: flex-end; justify-content: center; gap: 4px; flex: 1; height: 100%; padding: 0 6%; }
+  .qr-bar-slot { position: relative; height: 100%; display: flex; align-items: flex-end; flex: 0 1 44px; min-width: 12px; }
+  .qr-chart-stacked .qr-bar-slot { flex-basis: 72px; }
   .qr-bar { position: relative; width: 100%; border-radius: 4px 4px 0 0; min-height: 0; }
   .qr-bar-zero { min-height: 0; }
   .qr-cap { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 3px;
@@ -2340,7 +2340,7 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-htrack { display: flex; align-items: center; gap: 8px; }
   .qr-hbar { height: 14px; border-radius: 0 4px 4px 0; }
   .qr-hval { font-size: 12px; font-weight: 600; color: var(--text1); font-variant-numeric: tabular-nums; }
-  .qr-hstat { font-size: 16px; font-weight: 600; color: var(--text1); font-variant-numeric: tabular-nums; }
+  .qr-hstat { font-size: 12px; font-weight: 600; color: var(--text1); font-variant-numeric: tabular-nums; }
 
   .qr-details { margin-top: 10px; }
   .qr-details summary { cursor: pointer; font-size: 11px; color: var(--text3); user-select: none; width: max-content; }
@@ -2363,10 +2363,11 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-ctx-goals { border-left: 3px solid var(--accent); }
   .qr-ctx-why { border-left: 3px solid var(--amber-text); }
   .qr-ctx-empty { font-size: 12px; color: var(--text3); font-style: italic; }
-  .qr-ctx-blank .qr-card { border-style: dashed; background: transparent; }
+  .qr-ctx-blank .qr-card { border: 1px dashed var(--border); background: transparent; padding-bottom: 14px; }
+  .qr-ctx-blank .qr-ctx-head { margin-bottom: 6px; }
   /* Quarter report: per-month target line + category goal */
   .qr-group { position: relative; }
-  .qr-group > .qr-target { left: 4%; right: 4%; }
+  .qr-group > .qr-target { left: 0; right: 0; }
   .qr-no-target { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text3); font-style: italic; }
   .qr-goal-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; }
   .qr-goal-swatch { background: var(--qr-paid); }

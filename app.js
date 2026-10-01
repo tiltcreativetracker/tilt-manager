@@ -13605,8 +13605,13 @@ function renderReportingView() {
     '</div>';
   })();
 
-  var quarterReportHtml = period === 'quarterly' ? renderQuarterEditorReport(qYear, qNum) : '';
-  return '<div class="report-panel">' + controls + paceHtml + editorTallyHtml + quarterReportHtml + mainContent + '</div>';
+  // Quarterly leads with the production report. The pace card and editor tally are
+  // left out there: the report already shows approvals per editor, and they count
+  // with looser date rules, so the page would show two different totals.
+  if (period === 'quarterly') {
+    return '<div class="report-panel">' + controls + renderQuarterEditorReport(qYear, qNum) + mainContent + '</div>';
+  }
+  return '<div class="report-panel">' + controls + paceHtml + editorTallyHtml + mainContent + '</div>';
 }
 
 // ===================== CAT HEADS REVIEW =====================
