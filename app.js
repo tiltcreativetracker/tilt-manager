@@ -12892,63 +12892,101 @@ function renderQuarterEditorReport(qYear, qNum) {
     return '<div class="qr-kpi-cell"><div class="qr-kpi-value">' + value + '</div><div class="qr-kpi-sub">' + sub + '</div>' +
       (delta ? '<div class="qr-kpi-delta">' + delta + '</div>' : '') + '</div>';
   }
-  // Month-to-month change against the previous column: "▲ 12 vs Jul".
-  // pick(k) returns the number to compare (or null); unit follows the change.
-  function isKpi(k, key) { return !k.ph.kpis || k.ph.kpis.indexOf(key) >= 0; }
-  function notKpi(k) { return kpiCell('<span class="qr-dim">—</span>', 'Not a KPI in ' + escapeHtml(k.ph.label)); }
-  function kpiDelta(i, pick, unit, digits, key) {
-    if (!i) return '';
-    if (key && (!isKpi(kpiPhases[i], key) || !isKpi(kpiPhases[i - 1], key))) return '';
-    var cur = pick(kpiPhases[i]), prev = pick(kpiPhases[i - 1]);
-    if (cur == null || prev == null) return '';
-    var f = Math.pow(10, digits || 0), d = Math.round((cur - prev) * f) / f;
-    var vs = ' vs ' + escapeHtml(kpiPhases[i - 1].ph.label);
-    if (!d) return 'Same as ' + escapeHtml(kpiPhases[i - 1].ph.label);
-    return (d > 0 ? '▲ ' : '▼ ') + Math.abs(d).toLocaleString() + (unit ? ' ' + unit : '') + vs;
-  }
   // ✓ when a target is met, red ✗ when it's missed.
   function hitMark(met) { return met ? ' <span class="qr-goal-check">✓</span>' : ' <span class="qr-kpi-x">✗</span>'; }
   function daysUnit(v) { return fmt1(v) === '1' ? 'day' : 'days'; }
-  var kpiHead = '<div class="qr-kpi-row qr-kpi-headrow" style="grid-template-columns:minmax(150px,1.1fr) repeat(' + kpiPhases.length + ',minmax(0,1fr))"><div></div>' +
-    kpiPhases.map(function(k) {
-      return '<div class="qr-kpi-phase"><div class="qr-kpi-phase-label">' + escapeHtml(k.ph.label) + '</div>' +
-        (k.ph.focus ? '<div class="qr-kpi-phase-focus">' + escapeHtml(k.ph.focus) + ' focus</div>' : '') + '</div>';
-    }).join('') + '</div>';
-  function kpiRow(name, hint, cells) {
-    return '<div class="qr-kpi-row" style="grid-template-columns:minmax(150px,1.1fr) repeat(' + kpiPhases.length + ',minmax(0,1fr))">' +
-      '<div class="qr-kpi-name">' + escapeHtml(name) + '<div class="qr-kpi-hint">' + escapeHtml(hint) + '</div></div>' + cells.join('') + '</div>';
-  }
-  var kpiBody = kpiHead +
-    kpiRow('Video Edits', 'Videos approved by the PM · Paid Ads months: target ' + MONTHLY_APPROVAL_TARGET + ' a month', kpiPhases.map(function(k, i) {
-      var t = k.ph.editTarget, d = kpiDelta(i, function(x) { return x.edits; }, '', 0);
-      var split = k.paid.toLocaleString() + ' Paid Ads · ' + (k.edits - k.paid).toLocaleString() + ' Organic';
-      if (!t) return kpiCell(k.edits.toLocaleString(), (k.ph.months.length > 1 ? Math.round(k.perMonth) + ' a month · ' : '') + split, d);
-      var met = k.edits >= t;
-      return kpiCell(k.edits.toLocaleString() + hitMark(met),
-        '<span class="' + (met ? 'qr-kpi-met' : 'qr-kpi-miss') + '">' + Math.round(k.edits / t * 100) + '% of the ' + t + ' target</span> · ' + split, d);
-    })) +
-    kpiRow('Team First-Pass Rate', 'Approved videos with no rework before PM approval · target ' + FIRST_PASS_TARGET_PCT + '%', kpiPhases.map(function(k, i) {
-      if (!isKpi(k, 'firstPass')) return notKpi(k);
-      return k.fpRate == null ? kpiCell('—', 'no tracked videos') : kpiCell(Math.round(k.fpRate) + '%' + hitMark(Math.round(k.fpRate) >= FIRST_PASS_TARGET_PCT), k.fpHit + ' of ' + k.fpN + ' videos',
-        kpiDelta(i, function(x) { return x.fpRate == null ? null : Math.round(x.fpRate); }, 'pts', 0, 'firstPass'));
-    })) +
-    kpiRow('Team Time to Ship Quality Edit', 'Per campaign: first video assigned to last video PM-approved', kpiPhases.map(function(k, i) {
-      if (!isKpi(k, 'ship')) return notKpi(k);
-      return k.ship == null ? kpiCell('—', 'no finished campaigns') : kpiCell(fmt1(k.ship) + ' <span class="qr-kpi-unit">' + daysUnit(k.ship) + '</span>', 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's') + (k.shipMedian != null ? ' · typical ' + fmt1(k.shipMedian) + ' ' + daysUnit(k.shipMedian) : ''),
-        kpiDelta(i, function(x) { return x.ship; }, 'days', 1, 'ship'));
-    }));
+  function fmtDays(v) { return fmt1(v) + ' <span class="qr-kpi-unit">' + daysUnit(v) + '</span>'; }
+  function numOrNull(v) { return (v === '' || v == null || isNaN(Number(v))) ? null : Number(v); }
   var noSubmitData = '<span class="qr-dim">Tracked from 1 Oct 2026</span>';
-  kpiBody += '<div class="qr-kpi-sep">How time to ship splits</div>' +
-    kpiRow('Days to first submission', 'Per video: assigned to first sent for PM review', kpiPhases.map(function(k, i) {
-      return k.toSubmit.avg == null ? kpiCell('—', noSubmitData) : kpiCell(fmt1(k.toSubmit.avg) + ' <span class="qr-kpi-unit">' + daysUnit(k.toSubmit.avg) + '</span>', 'average of ' + k.toSubmit.n + ' videos',
-        kpiDelta(i, function(x) { return x.toSubmit.avg; }, 'days', 1));
-    })) +
-    kpiRow('Approval turnaround', 'Per video: last sent for review to PM-approved · target ' + APPROVAL_TURNAROUND_TARGET_DAYS + ' day', kpiPhases.map(function(k, i) {
-      if (k.turnaround.avg == null) return kpiCell('—', noSubmitData);
-      var met = k.turnaround.avg <= APPROVAL_TURNAROUND_TARGET_DAYS;
-      return kpiCell(fmt1(k.turnaround.avg) + ' <span class="qr-kpi-unit">' + daysUnit(k.turnaround.avg) + '</span>' + hitMark(met), 'average of ' + k.turnaround.n + ' videos',
-        kpiDelta(i, function(x) { return x.turnaround.avg; }, 'days', 1));
-    }));
+  // Admin edits to this table live in STATE.quarterContext[qKey].kpi, keyed by each
+  // column's first month: { focus, rows: { <kpi key>: { value, target, off } } }.
+  // A blank value or target falls back to the tracker's number or the default target;
+  // target 'none' removes the target. See App.editQuarterKpis.
+  var kpiEdits = (ctx.kpi && typeof ctx.kpi === 'object') ? ctx.kpi : {};
+  function colKey(k) { return k.ph.months[0]; }
+  function kpiEdit(k, key) { var c = kpiEdits[colKey(k)]; return (c && c.rows && c.rows[key]) || {}; }
+  function focusOf(k) { var c = kpiEdits[colKey(k)]; return (c && typeof c.focus === 'string' && c.focus !== '') ? c.focus : k.ph.focus; }
+  // split rows break time to ship down; they show in every month unless switched off.
+  var KPI_DEFS = [
+    { key: 'edits', name: 'Video Edits', hint: 'Videos approved by the PM', higher: true, digits: 0, unit: '',
+      calc: function(k) { return k.edits; }, target: function(k) { return k.ph.editTarget || null; },
+      fmt: function(v) { return Math.round(v).toLocaleString(); }, fmtT: function(t) { return String(t); },
+      sub: function(k) { return (k.ph.months.length > 1 ? Math.round(k.perMonth) + ' a month · ' : '') + k.paid.toLocaleString() + ' Paid Ads · ' + (k.edits - k.paid).toLocaleString() + ' Organic'; }, empty: '' },
+    { key: 'firstPass', name: 'Team First-Pass Rate', hint: 'Approved videos with no rework before PM approval', higher: true, digits: 0, unit: 'pts',
+      calc: function(k) { return k.fpRate == null ? null : Math.round(k.fpRate); }, target: function() { return FIRST_PASS_TARGET_PCT; },
+      fmt: function(v) { return Math.round(v) + '%'; }, fmtT: function(t) { return t + '%'; },
+      sub: function(k) { return k.fpHit + ' of ' + k.fpN + ' videos'; }, empty: 'no tracked videos' },
+    { key: 'ship', name: 'Team Time to Ship Quality Edit', hint: 'Per campaign: first video assigned to last video PM-approved', higher: false, digits: 1, unit: 'days',
+      calc: function(k) { return k.ship; }, target: function() { return null; }, fmt: fmtDays, fmtT: function(t) { return fmt1(t) + ' ' + daysUnit(t); },
+      sub: function(k) { return 'average of ' + k.shipN + ' finished campaign' + (k.shipN === 1 ? '' : 's') + (k.shipMedian != null ? ' · typical ' + fmt1(k.shipMedian) + ' ' + daysUnit(k.shipMedian) : ''); }, empty: 'no finished campaigns' },
+    { key: 'toSubmit', split: true, name: 'Days to first submission', hint: 'Per video: assigned to first sent for PM review', higher: false, digits: 1, unit: 'days',
+      calc: function(k) { return k.toSubmit.avg; }, target: function() { return null; }, fmt: fmtDays, fmtT: function(t) { return fmt1(t) + ' ' + daysUnit(t); },
+      sub: function(k) { return 'average of ' + k.toSubmit.n + ' videos'; }, empty: noSubmitData },
+    { key: 'turnaround', split: true, name: 'Approval turnaround', hint: 'Per video: last sent for review to PM-approved', higher: false, digits: 1, unit: 'days',
+      calc: function(k) { return k.turnaround.avg; }, target: function() { return APPROVAL_TURNAROUND_TARGET_DAYS; }, fmt: fmtDays, fmtT: function(t) { return fmt1(t) + ' ' + daysUnit(t); },
+      sub: function(k) { return 'average of ' + k.turnaround.n + ' videos'; }, empty: noSubmitData }
+  ];
+  function kpiDefault(k, def) { return def.split ? true : (!k.ph.kpis || k.ph.kpis.indexOf(def.key) >= 0); }
+  function isKpi(k, key) {
+    var def = KPI_DEFS.filter(function(d) { return d.key === key; })[0], e = kpiEdit(k, key);
+    return typeof e.off === 'boolean' ? !e.off : kpiDefault(k, def);
+  }
+  function kpiValue(k, def) { var v = numOrNull(kpiEdit(k, def.key).value); return v != null ? v : def.calc(k); }
+  function kpiTarget(k, def) {
+    var t = kpiEdit(k, def.key).target;
+    if (t === 'none') return null;
+    return numOrNull(t) != null ? Number(t) : def.target(k);
+  }
+  function kpiCellFor(def, k, i) {
+    if (!isKpi(k, def.key)) return kpiCell('<span class="qr-dim">—</span>', 'Not a KPI in ' + escapeHtml(k.ph.label));
+    var v = kpiValue(k, def), t = kpiTarget(k, def), edited = numOrNull(kpiEdit(k, def.key).value) != null;
+    if (v == null) return kpiCell('—', def.empty);
+    var met = t == null ? null : (def.higher ? v >= t : v <= t);
+    var calc = def.calc(k);
+    var sub = edited ? '<span class="qr-kpi-edited">Edited</span> · tracker: ' + (calc == null ? '—' : def.fmt(calc).replace(/<[^>]+>/g, '')) : def.sub(k);
+    if (t != null) {
+      sub = def.key === 'edits'
+        ? '<span class="' + (met ? 'qr-kpi-met' : 'qr-kpi-miss') + '">' + Math.round(v / t * 100) + '% of the ' + def.fmtT(t) + ' target</span> · ' + sub
+        : sub + ' · target ' + def.fmtT(t);
+    }
+    var delta = '';
+    if (i && isKpi(kpiPhases[i - 1], def.key)) {
+      var prev = kpiValue(kpiPhases[i - 1], def), lbl = escapeHtml(kpiPhases[i - 1].ph.label);
+      if (prev != null) {
+        var f = Math.pow(10, def.digits), d = Math.round((v - prev) * f) / f;
+        delta = !d ? 'Same as ' + lbl : (d > 0 ? '▲ ' : '▼ ') + Math.abs(d).toLocaleString() + (def.unit ? ' ' + def.unit : '') + ' vs ' + lbl;
+      }
+    }
+    return kpiCell(def.fmt(v) + (met == null ? '' : hitMark(met)), sub, delta);
+  }
+  var kpiCols = 'grid-template-columns:minmax(150px,1.1fr) repeat(' + kpiPhases.length + ',minmax(0,1fr))';
+  var kpiHead = '<div class="qr-kpi-row qr-kpi-headrow" style="' + kpiCols + '"><div></div>' +
+    kpiPhases.map(function(k) {
+      var fo = focusOf(k);
+      return '<div class="qr-kpi-phase"><div class="qr-kpi-phase-label">' + escapeHtml(k.ph.label) + '</div>' +
+        (fo ? '<div class="qr-kpi-phase-focus">' + escapeHtml(fo) + ' focus</div>' : '') + '</div>';
+    }).join('') + '</div>';
+  function kpiRow(def) {
+    return '<div class="qr-kpi-row" style="' + kpiCols + '">' +
+      '<div class="qr-kpi-name">' + escapeHtml(def.name) + '<div class="qr-kpi-hint">' + escapeHtml(def.hint) + '</div></div>' +
+      kpiPhases.map(function(k, i) { return kpiCellFor(def, k, i); }).join('') + '</div>';
+  }
+  var kpiBody = kpiHead + KPI_DEFS.filter(function(d) { return !d.split; }).map(kpiRow).join('') +
+    '<div class="qr-kpi-sep">How time to ship splits</div>' + KPI_DEFS.filter(function(d) { return d.split; }).map(kpiRow).join('');
+  // What the edit dialog needs: each column's tracker numbers and defaults.
+  window._qrKpiModel = {
+    qKey: qKey,
+    defs: KPI_DEFS.map(function(d) { return { key: d.key, name: d.name, unit: d.key === 'firstPass' ? '%' : d.key === 'edits' ? 'videos' : 'days' }; }),
+    cols: kpiPhases.map(function(k) {
+      var rows = {};
+      KPI_DEFS.forEach(function(d) {
+        var c = d.calc(k);
+        rows[d.key] = { calc: c == null ? null : (d.digits ? Math.round(c * 10) / 10 : Math.round(c)), target: d.target(k), kpi: kpiDefault(k, d), edit: kpiEdit(k, d.key) };
+      });
+      var ce = kpiEdits[colKey(k)] || {};
+      return { key: colKey(k), label: k.ph.label, focusDefault: k.ph.focus || '', focus: ce.focus || '', rows: rows };
+    })
+  };
   var slowAny = kpiPhases.some(function(k) { return k.slow.length && isKpi(k, 'ship'); });
   if (slowAny) {
     kpiBody += '<div class="qr-kpi-sep">What made time to ship longer</div><div class="qr-slow">' +
@@ -12964,9 +13002,12 @@ function renderQuarterEditorReport(qYear, qNum) {
           }).join('') + '</div>';
       }).join('') + '</div>';
   }
-  html += '<div class="qr-section">' + card('Editing Team Agreed KPIs', 'The content KPIs agreed with management for each month, with what the team was focused on',
+  var kpiEditBtn = canEditCtx ? '<button class="edit-btn qr-ctx-edit" data-html2canvas-ignore="true" onclick="App.editQuarterKpis()">Edit</button>' : '';
+  html += '<div class="qr-section"><div class="qr-card"><div class="qr-card-head qr-ctx-head"><div><div class="qr-card-title">Editing Team Agreed KPIs</div>' +
+    '<div class="qr-card-sub">The content KPIs agreed with management for each month, with what the team was focused on</div></div>' + kpiEditBtn + '</div>' +
     kpiBody +
-    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only.</div>') + '</div>';
+    '<div class="qr-goal-skip">First-pass rate counts every video PM-approved from ' + fpFrom + ', when revision counting started (manual Grading overrides apply). Time to ship counts campaigns that started this quarter and have every video PM-approved, in the month the last one was approved. Time to ship and the category goal cover UK campaigns only.' +
+    (Object.keys(kpiEdits).length ? ' Numbers marked Edited were changed by hand by an admin.' : '') + '</div></div></div>';
 
   // Headline tiles
   html += '<div class="qr-section"><div class="qr-tiles">' +
@@ -19466,16 +19507,71 @@ var App = {
       '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Cancel</button><button class="submit-btn" id="modal-submit">Save</button></div>',
       function() {
         if (!STATE.quarterContext || typeof STATE.quarterContext !== 'object') STATE.quarterContext = {};
-        STATE.quarterContext[qKey] = {
+        STATE.quarterContext[qKey] = Object.assign({}, STATE.quarterContext[qKey] || {}, {
           goals: document.getElementById('f-qctx-goals').value.trim(),
           why: document.getElementById('f-qctx-why').value.trim(),
           updatedAt: Date.now(),
           updatedBy: Auth.user.displayName || Auth.user.email || ''
-        };
+        });
         saveState();
         closeModal();
         render();
         toast(q + ' report text saved', 'success');
+      });
+  },
+  // Edit the Agreed KPIs table on the quarter report (admin only). Per month: focus
+  // label, and per KPI whether it counts, a hand-set value and a target. Blank fields
+  // fall back to the tracker's numbers; target "none" removes the target.
+  editQuarterKpis: function() {
+    if (!(Auth && Auth.user && Auth.user.role === 'admin')) { toast('Only admins can edit this', 'error'); return; }
+    var m = window._qrKpiModel;
+    if (!m) return;
+    function v(x) { return x == null ? '' : escapeHtml(String(x)); }
+    var cols = m.cols.map(function(c, ci) {
+      var rows = m.defs.map(function(d) {
+        var r = c.rows[d.key], e = r.edit || {}, on = typeof e.off === 'boolean' ? !e.off : r.kpi;
+        return '<tr><td style="padding:4px 6px;font-size:12px;">' + escapeHtml(d.name) + ' <span style="color:var(--text3);">(' + d.unit + ')</span></td>' +
+          '<td style="padding:4px 6px;text-align:center;"><input type="checkbox" id="qk-' + ci + '-' + d.key + '-on"' + (on ? ' checked' : '') + '></td>' +
+          '<td style="padding:4px 6px;"><input class="form-input" style="width:90px;" id="qk-' + ci + '-' + d.key + '-value" value="' + v(e.value) + '" placeholder="' + v(r.calc == null ? '—' : r.calc) + '"></td>' +
+          '<td style="padding:4px 6px;"><input class="form-input" style="width:90px;" id="qk-' + ci + '-' + d.key + '-target" value="' + v(e.target) + '" placeholder="' + v(r.target == null ? 'none' : r.target) + '"></td></tr>';
+      }).join('');
+      return '<div style="margin-bottom:14px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><b style="font-size:13px;">' + escapeHtml(c.label) + '</b>' +
+        '<input class="form-input" style="flex:1;" id="qk-' + ci + '-focus" value="' + v(c.focus) + '" placeholder="Focus: ' + v(c.focusDefault || 'none') + '"></div>' +
+        '<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:10px;color:var(--text3);text-align:left;"><th style="padding:2px 6px;">KPI</th><th style="padding:2px 6px;">Counts</th><th style="padding:2px 6px;">Value</th><th style="padding:2px 6px;">Target</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }).join('');
+    openModal(
+      '<div class="modal-title">Edit Agreed KPIs</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Leave a field blank to use the tracker\'s number (shown in grey). Type <b>none</b> as a target to remove it. Hand-set numbers show as Edited on the report.</div>' +
+      '<div style="max-height:60vh;overflow:auto;">' + cols + '</div>' +
+      '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Cancel</button><button class="submit-btn" id="modal-submit">Save</button></div>',
+      function() {
+        var kpi = {};
+        m.cols.forEach(function(c, ci) {
+          var col = {}, rows = {};
+          var fo = document.getElementById('qk-' + ci + '-focus').value.trim();
+          if (fo) col.focus = fo;
+          m.defs.forEach(function(d) {
+            var r = c.rows[d.key], e = {};
+            var on = document.getElementById('qk-' + ci + '-' + d.key + '-on').checked;
+            var val = document.getElementById('qk-' + ci + '-' + d.key + '-value').value.trim().replace(/[%,]/g, '');
+            var tgt = document.getElementById('qk-' + ci + '-' + d.key + '-target').value.trim().replace(/[%,]/g, '');
+            if (on !== r.kpi) e.off = !on;
+            if (val !== '' && !isNaN(Number(val))) e.value = Number(val);
+            if (/^none$/i.test(tgt)) e.target = 'none';
+            else if (tgt !== '' && !isNaN(Number(tgt))) e.target = Number(tgt);
+            if (Object.keys(e).length) rows[d.key] = e;
+          });
+          if (Object.keys(rows).length) col.rows = rows;
+          if (Object.keys(col).length) kpi[c.key] = col;
+        });
+        if (!STATE.quarterContext || typeof STATE.quarterContext !== 'object') STATE.quarterContext = {};
+        STATE.quarterContext[m.qKey] = Object.assign({}, STATE.quarterContext[m.qKey] || {}, {
+          kpi: kpi, updatedAt: Date.now(), updatedBy: Auth.user.displayName || Auth.user.email || ''
+        });
+        saveState();
+        closeModal();
+        render();
+        toast('KPIs saved', 'success');
       });
   },
   setScorecardMeta: function(editor, field, value) {
