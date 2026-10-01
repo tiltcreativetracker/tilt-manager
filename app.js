@@ -12690,7 +12690,8 @@ function renderQuarterEditorReport(qYear, qNum) {
 
   var qKey = qYear + '-Q' + (qNum + 1), qName = 'Q' + (qNum + 1);
   var ctx = (STATE.quarterContext && STATE.quarterContext[qKey]) || {};
-  var canEditCtx = !!(Auth && Auth.user && (Auth.user.role === 'pm' || Auth.user.role === 'admin'));
+  // Goals / why text is admin-only to edit; everyone who can open Reporting can read it.
+  var canEditCtx = !!(Auth && Auth.user && Auth.user.role === 'admin');
   function ctxLines(text) {
     return String(text || '').split('\n').map(function(l) { return l.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, '').trim(); }).filter(Boolean);
   }
@@ -19453,7 +19454,7 @@ var App = {
   // Set an editor's manual scorecard input (avgVideosPerDay / targetPerDay).
   // Edit the Goals / "why it didn't go to plan" text on the Editor quarter report.
   editQuarterContext: function(qKey) {
-    if (!(Auth && Auth.user && (Auth.user.role === 'pm' || Auth.user.role === 'admin'))) { toast('Only PMs can edit this', 'error'); return; }
+    if (!(Auth && Auth.user && Auth.user.role === 'admin')) { toast('Only admins can edit this', 'error'); return; }
     var q = qKey.slice(5), ctx = (STATE.quarterContext && STATE.quarterContext[qKey]) || {};
     openModal(
       '<div class="modal-title">' + escapeHtml(q) + ' goals and what got in the way</div>' +
