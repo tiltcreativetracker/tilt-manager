@@ -2395,6 +2395,9 @@ body.has-update-banner .app { margin-top: var(--update-banner-h, 40px); height: 
   .qr-kpi-value { font-size: 24px; font-weight: 650; color: var(--text1); line-height: 1.1; }
   .qr-kpi-unit { font-size: 12px; font-weight: 500; color: var(--text2); }
   .qr-kpi-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .qr-kpi-delta { font-size: 10px; color: var(--text3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .qr-kpi-met { color: var(--green-text); font-weight: 600; }
+  .qr-kpi-miss { color: var(--amber-text); font-weight: 600; }
   /* Quarter report: organic posting calendar */
   .qr-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; margin-top: 4px; }
   .qr-cal-wd { font-size: 9px; color: var(--text3); text-align: center; padding-bottom: 2px; }
