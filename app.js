@@ -484,6 +484,7 @@ var Fb = {
       editingStyleNotionUrl: STATE.editingStyleNotionUrl || '',
       trainingModules: Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [],
       trainingCompletions: (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {},
+      deletedTrainingModuleIds: (STATE.deletedTrainingModuleIds && typeof STATE.deletedTrainingModuleIds === 'object') ? STATE.deletedTrainingModuleIds : {},
       weeklyLog: (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {},
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
@@ -698,6 +699,10 @@ var Fb = {
       // teammate's routine save uploads the WHOLE map from their in-memory STATE; if
       // they hadn't yet received your Slack-channel or webhook update, their empty
       // slot wipes yours in Firestore. Snapshot pre-apply so we can merge slot-by-slot.
+      var _localTraining = {
+        modules: Array.isArray(STATE.trainingModules) ? STATE.trainingModules : [],
+        completions: (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {}
+      };
       var _localConfigMaps = {};
       ['editorSlackChannels','editorSlackIds','categoryHeadSlackIds','pmSlackIds',
        'categoryHeadOverrides','qcWebhooks','countryWebhooks'].forEach(function(name) {
@@ -750,11 +755,14 @@ var Fb = {
         if (k === 'pendingBatches' || k === 'qcDismissed' || k === 'gradingStreak') return;
         // Campaign delete tombstones — merged (union, newest ts wins) below.
         if (k === 'deletedCampaignIds') return;
+        // Training — healed against this tab's copy below (Fb.healTraining).
+        if (k === 'deletedTrainingModuleIds') return;
 
         STATE[k] = data[k];
       });
 
-      if (Fb.mergeTrainingEdits()) {
+      var _trainingHealed = Fb.healTraining(_localTraining, data.deletedTrainingModuleIds);
+      if (Fb.mergeTrainingEdits() || _trainingHealed) {
         setTimeout(function() { if (typeof Fb !== 'undefined' && Fb.scheduleUpload) Fb.scheduleUpload(); }, 100);
       }
 
@@ -1461,9 +1469,55 @@ var Fb = {
   TRAINING_TRACK_MS: 30 * 60 * 1000,
   _trackModules: {},  // moduleId → { m: module | null (deleted), at }
   _trackRecs: {},     // email → { moduleId → { rec, at } }
+  // Modules and completion records only ever leave through an explicit delete:
+  // a module needs a deletedTrainingModuleIds tombstone, and completion records
+  // are never removed (clearing a submission edits the record). So when one
+  // copy is missing something the other has, that copy is stale (a sleeping
+  // laptop, a tab on an old build) and the missing piece goes back in. Called
+  // by applySnapshot (other = this tab's copy before the snapshot landed,
+  // incomingTombs = the snapshot's) and by trainingWrites (other = the server
+  // copy), so a stale STATE can never upload a deletion. Mutates STATE; returns
+  // true if anything was put back.
+  healTraining: function(other, incomingTombs) {
+    var tombs = {};
+    [STATE.deletedTrainingModuleIds, incomingTombs].forEach(function(src) {
+      if (!src || typeof src !== 'object') return;
+      Object.keys(src).forEach(function(id) { tombs[id] = Math.max(tombs[id] || 0, Number(src[id]) || 0); });
+    });
+    STATE.deletedTrainingModuleIds = tombs;
+    var healed = false;
+    var mods = (Array.isArray(STATE.trainingModules) ? STATE.trainingModules : []).filter(function(m) {
+      return !(m && m.id && tombs[m.id]);
+    });
+    var have = {};
+    mods.forEach(function(m) { if (m && m.id) have[m.id] = true; });
+    (other.modules || []).forEach(function(m) {
+      if (!m || !m.id || have[m.id] || tombs[m.id]) return;
+      mods.push(JSON.parse(JSON.stringify(m)));
+      have[m.id] = true;
+      healed = true;
+    });
+    STATE.trainingModules = mods;
+    var comps = (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {};
+    var oc = other.completions || {};
+    Object.keys(oc).forEach(function(email) {
+      Object.keys(oc[email] || {}).forEach(function(mid) {
+        if (comps[email] && comps[email][mid]) return;
+        comps[email] = Object.assign({}, comps[email] || {});
+        comps[email][mid] = JSON.parse(JSON.stringify(oc[email][mid]));
+        healed = true;
+      });
+    });
+    STATE.trainingCompletions = comps;
+    if (healed) console.warn('[Fb] training: put back modules/completions missing from a stale copy');
+    return healed;
+  },
   trainingWrites: function(snap) {
     var srv = Fb._serverTraining;
     if (!srv) return [];
+    Fb.healTraining({ modules: srv.trainingModules, completions: srv.trainingCompletions });
+    snap.trainingModules = STATE.trainingModules;
+    snap.trainingCompletions = STATE.trainingCompletions;
     var writes = [];
     var now = Date.now();
     var localMods = snap.trainingModules || [];
@@ -2919,6 +2973,10 @@ var STATE = {
   // per-editor and stored inline in the snapshot (small collection, fits fine).
   trainingModules: [],
   trainingCompletions: {},
+  // moduleId → ms deleted. The only way a module leaves the list: a module
+  // missing from a copy without a tombstone is treated as a stale copy and
+  // put back (see Fb.healTraining).
+  deletedTrainingModuleIds: {},
   // Which training module the current viewer is looking at. Per-user (see
   // PER_USER_UI_FIELDS) — everyone lands on the first visible module by
   // default and picks their own from the Training sidebar.
@@ -20940,6 +20998,9 @@ var App = {
     if (!roleAtLeast('admin')) return;
     if (!confirm('Delete this training module? Completions for it stay in the log but the module disappears.')) return;
     STATE.trainingModules = (STATE.trainingModules || []).filter(function(m) { return m.id !== moduleId; });
+    // Tombstone: without it the sync treats the missing module as a stale copy and puts it back.
+    STATE.deletedTrainingModuleIds = Object.assign({}, STATE.deletedTrainingModuleIds || {});
+    STATE.deletedTrainingModuleIds[moduleId] = Date.now();
     // If the Training-sidebar selection pointed at the just-deleted module,
     // clear it so renderTrainingView falls back to the first remaining module.
     if (STATE.activeTrainingModuleId === moduleId) STATE.activeTrainingModuleId = null;
