@@ -13153,7 +13153,7 @@ function renderQuarterEditorReport(qYear, qNum) {
       '<div class="qr-subtitle">' + escapeHtml(monthSpan) + ' · ' + eds.map(escapeHtml).join(', ') + '</div></div>' +
       '<span class="qr-dl" data-html2canvas-ignore="true">' +
         '<button class="edit-btn" onclick="App.downloadQuarterReport(\'pdf\',\'' + qLabel + '\')" title="Download this report as an A4 PDF">⬇ Download PDF</button>' +
-        '<button class="edit-btn" onclick="App.downloadQuarterReport(\'png\',\'' + qLabel + '\')" title="Download the whole report as one PNG image">⬇ PNG</button>' +
+        '<button class="edit-btn" onclick="App.downloadQuarterReport(\'png\',\'' + qLabel + '\')" title="Download each page as a PNG image">⬇ PNG</button>' +
       '</span></div>' + html + '</div>';
 }
 
@@ -13174,9 +13174,8 @@ function loadScriptOnce(src) {
 
 // Snapshot each .qr-section of #qr-report on its own and stack whole sections
 // onto A4-portrait pages, so a heading never gets separated from its table.
-// Returns one canvas per page. With continuous, returns a single canvas with every
-// section stacked and no page breaks (for the PNG download).
-function renderQuarterReportPages(continuous) {
+// Returns one canvas per page.
+function renderQuarterReportPages() {
   var root = document.getElementById('qr-report');
   if (!root) return Promise.reject(new Error('Report not on screen'));
   var bg = getComputedStyle(document.body).backgroundColor || '#ffffff';
@@ -13189,20 +13188,6 @@ function renderQuarterReportPages(continuous) {
     });
   }, Promise.resolve()).then(function() {
     var contentW = root.getBoundingClientRect().width;
-    if (continuous) {
-      // Long reports are scaled down to stay under the browser's canvas height limit.
-      var totalH = shots.reduce(function(t, c) { return t + c.height / SCALE; }, 0) + GAP * (shots.length - 1) + PAD * 2;
-      var k = Math.min(1, 32000 / (totalH * SCALE));
-      var one = document.createElement('canvas');
-      one.width = Math.round((contentW + PAD * 2) * SCALE * k); one.height = Math.round(totalH * SCALE * k);
-      var cx = one.getContext('2d'); cx.fillStyle = bg; cx.fillRect(0, 0, one.width, one.height);
-      var yy = PAD;
-      shots.forEach(function(c) {
-        cx.drawImage(c, PAD * SCALE * k, yy * SCALE * k, c.width * k, c.height * k);
-        yy += c.height / SCALE + GAP;
-      });
-      return [one];
-    }
     var pageW = contentW + PAD * 2, pageH = pageW * 1.414, bodyH = pageH - PAD * 2;
     var pages = [], cur = null, y = 0;
     function newPage() {
@@ -20011,7 +19996,7 @@ var App = {
     toast('Preparing ' + format.toUpperCase() + '…', 'info');
     var libs = [loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')];
     if (format === 'pdf') libs.push(loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
-    Promise.all(libs).then(function() { return renderQuarterReportPages(format === 'png'); }).then(function(pages) {
+    Promise.all(libs).then(renderQuarterReportPages).then(function(pages) {
       var base = 'production-report-' + label;
       if (format === 'pdf') {
         var pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -20021,17 +20006,36 @@ var App = {
         });
         pdf.save(base + '.pdf');
       } else {
-        // One continuous PNG: browsers block a page from starting several downloads
-        // in a row, so separate files per page only delivered the first one.
-        var out = pages[0];
-        out.toBlob(function(blob) {
-          var url = URL.createObjectURL(blob), a = document.createElement('a');
-          a.href = url; a.download = base + '.png';
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
-        }, 'image/png');
+        // Browsers block a page from starting several downloads in a row, so only the
+        // first page used to arrive. Each page now gets its own link in a dialog: a click
+        // on a link always downloads. "Download all" tries them in a row (Chrome may ask
+        // to allow multiple downloads).
+        Promise.all(pages.map(function(c) {
+          return new Promise(function(res) { c.toBlob(function(b) { res(URL.createObjectURL(b)); }, 'image/png'); });
+        })).then(function(urls) {
+          var names = urls.map(function(u, i) { return base + '-page-' + (i + 1) + '-of-' + urls.length + '.png'; });
+          (window._qrPngUrls || []).forEach(function(u) { URL.revokeObjectURL(u); }); // previous export's pages
+          window._qrPngUrls = urls;
+          openModal(
+            '<div class="modal-title">Download ' + urls.length + ' PNG page' + (urls.length === 1 ? '' : 's') + '</div>' +
+            '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;">Click each page to save it, or Download all. If your browser asks to allow multiple downloads, say Allow.</div>' +
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px;">' + urls.map(function(u, i) {
+              return '<a href="' + u + '" download="' + escapeHtml(names[i]) + '" class="edit-btn" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;text-decoration:none;">' +
+                '<img src="' + u + '" alt="" style="width:110px;border:1px solid var(--border);border-radius:4px;">' +
+                '<span>⬇ Page ' + (i + 1) + '</span></a>';
+            }).join('') + '</div>' +
+            '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Close</button><button class="submit-btn" id="modal-submit">⬇ Download all</button></div>',
+            function() {
+              urls.forEach(function(u, i) {
+                setTimeout(function() {
+                  var a = document.createElement('a'); a.href = u; a.download = names[i];
+                  document.body.appendChild(a); a.click(); a.remove();
+                }, i * 600);
+              });
+            });
+        });
       }
-      toast(format === 'pdf' ? 'Downloaded ' + pages.length + ' page' + (pages.length === 1 ? '' : 's') : 'Downloaded the report as one image', 'success');
+      if (format === 'pdf') toast('Downloaded ' + pages.length + ' page' + (pages.length === 1 ? '' : 's'), 'success');
     }).catch(function(err) {
       console.warn('[QuarterReport] export failed:', err);
       toast('Download failed — ' + ((err && err.message) || 'unknown error'), 'error');
