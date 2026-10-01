@@ -3273,7 +3273,7 @@ function getAvailableTallyMonths() {
 // Optional filterFn(asset, campaign) scopes the count (e.g. UK Paid Ads only).
 function countVideosByMonthYear(monthKey, filterFn) {
   var n = 0;
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return;
     var camp = findCampaignById(a.campaignId);
     if (!camp) return;
@@ -3291,7 +3291,7 @@ function countVideosByMonthYear(monthKey, filterFn) {
 // Paid Ads toward the monthly 200 goal).
 function countApprovedInRange(startISO, endISO, filterFn) {
   var n = 0;
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status !== 'Approved') return;
     if (!a.dateApproved) return;
     if (a.dateApproved < startISO || a.dateApproved > endISO) return;
@@ -3309,7 +3309,7 @@ function countApprovedInRange(startISO, endISO, filterFn) {
 // Matches the Content tab's "in period" logic so both views agree on the monthly total.
 function countApprovedForMonth(monthKey, filterFn) {
   var n = 0;
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status !== 'Approved') return;
     var camp = findCampaignById(a.campaignId);
     if (!camp) return;
@@ -4524,6 +4524,29 @@ function findCampaignById(id) {
   return null;
 }
 
+// Training campaigns are practice batches, not production. Their videos stay on
+// Campaigns and Board so they can be worked on, but every count, report, pace,
+// scorecard and Slack tally leaves them out (the quarter report shows them as
+// training). Set with the "Training campaign" box on Edit Campaign; campaigns marked
+// before that box existed are listed in QUARTER_REPORT_TRAINING_CAMPAIGNS.
+function isTrainingCampaign(c) { return !!(c && !c.notTraining && (c.isTraining || QUARTER_REPORT_TRAINING_CAMPAIGNS[String(c.id)])); }
+function trainingCampaignIds() {
+  var ids = {};
+  STATE.campaigns.forEach(function(c) { if (isTrainingCampaign(c)) ids[String(c.id)] = true; });
+  return ids;
+}
+function productionAssets() {
+  var ids = trainingCampaignIds();
+  return (STATE.assets || []).filter(function(a) { return !ids[String(a.campaignId)]; });
+}
+function productionCampaigns() { return STATE.campaigns.filter(function(c) { return !isTrainingCampaign(c); }); }
+// Grades on training videos are left out too (free-text grades with no video count).
+function productionGrades() {
+  var ids = trainingCampaignIds(), byId = {};
+  (STATE.assets || []).forEach(function(a) { if (ids[String(a.campaignId)]) byId[String(a.id)] = true; });
+  return (STATE.grades || []).filter(function(g) { return !(g && g.assetId != null && byId[String(g.assetId)]); });
+}
+
 function findAssetById(id) {
   var sid = String(id);
   for (var i = 0; i < STATE.assets.length; i++) if (String(STATE.assets[i].id) === sid) return STATE.assets[i];
@@ -5437,6 +5460,13 @@ function showEditCampaignModal() {
         '<div style="font-size:11px; color:var(--text3); margin-top:4px; padding-left:24px;">Useful when the team shares one folder + brief per campaign instead of per video. The campaign-level Raw / Brief links above will be used in notifications when a video has no per-asset link.</div>' +
       '</div>' +
       '<div class="form-row full">' +
+        '<label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
+          '<input type="checkbox" id="f-ctraining" style="width:auto; margin:0;"' + (isTrainingCampaign(c) ? ' checked' : '') + '>' +
+          '<span>Training campaign</span>' +
+        '</label>' +
+        '<div style="font-size:11px; color:var(--text3); margin-top:4px; padding-left:24px;">Practice videos, not production. They stay here and on the Board, but every count, report, pace and scorecard leaves them out.</div>' +
+      '</div>' +
+      '<div class="form-row full">' +
         '<label class="form-label">Slack Webhook Override <span style="color:var(--text3); font-weight:400;">(optional)</span></label>' +
         '<input id="f-cslack" class="form-input" placeholder="https://hooks.slack.com/services/... (leave blank to use country/global webhook)" value="' + escapeHtml(c.slackOverride) + '">' +
         '<div style="font-size:11px; color:var(--text3); margin-top:4px;">Notifications and QC reports for this campaign will route here instead of the country webhook.</div>' +
@@ -5460,6 +5490,10 @@ function showEditCampaignModal() {
     c.goneLive = document.getElementById('f-cgonelive').value || '';
     c.killedDate = document.getElementById('f-ckilleddate').value || '';
     c.hideAssetLinkCols = !!document.getElementById('f-chideLinks').checked;
+    c.isTraining = !!document.getElementById('f-ctraining').checked;
+    // Unticking a campaign from the built-in list has to override that list.
+    if (!c.isTraining && QUARTER_REPORT_TRAINING_CAMPAIGNS[String(c.id)]) c.notTraining = true;
+    if (c.isTraining) delete c.notTraining;
     reorderCampaigns(true);
     STATE.expandedCountries[c.country] = true;
     logAction('updated', 'Campaign "' + c.name + '" edited');
@@ -7034,7 +7068,7 @@ function getApprovedThisWeekByCountry() {
   var range = getThisWeekRange();
   var byCountry = {};
   STATE.countries.forEach(function(c) { byCountry[c.code] = 0; });
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status !== 'Approved') return;
     if (!a.dateApproved) return;
     if (a.dateApproved < range.start || a.dateApproved > range.end) return;
@@ -7051,7 +7085,7 @@ function getApprovedTodayByCountry() {
   var today = todayISO();
   var byCountry = {};
   STATE.countries.forEach(function(c) { byCountry[c.code] = 0; });
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status !== 'Approved') return;
     if (a.dateApproved !== today) return;
     var camp = findCampaignById(a.campaignId);
@@ -7729,7 +7763,7 @@ function computeDailyLog(days) {
   var byEditor = {};
   DAILY_LOG_EDITORS.forEach(function(e) { byEditor[e] = { videos: [], approvedByDay: days.map(function() { return 0; }) }; });
 
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     // Only include assets currently assigned to an editor we track in the log.
     // Unassigned drafts, historical re-assignments, and non-log editors (e.g. Elsa)
     // are ignored \u2014 the tab is for tracking per-editor accountability on live work.
@@ -8772,7 +8806,7 @@ function currentEditorFromAuth() {
 // Approved video (uses asset.dateApproved). Feeds streak + Speed Demon + rank.
 function perEditorApprovalDates(editor) {
   var set = Object.create(null);
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status !== 'Approved') return;
     if (!a.dateApproved) return;
     if (a.editor !== editor) return;
@@ -8868,7 +8902,7 @@ function computeEditorWrap(editor) {
   var streak = computeEditorStreak(editor);
   // Best-ever week: scan all approval dates, bucket by isoWeekStart, find max.
   var perWeek = Object.create(null);
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.status !== 'Approved' || !a.dateApproved || a.editor !== editor) return;
     var wkStart = isoWeekStart(a.dateApproved);
     if (!wkStart) return;
@@ -8923,7 +8957,7 @@ function computeEditorWrap(editor) {
 //
 // Shape: { id, label, emoji, description, group, tier?, earned, progress?, target?, earnedAt? }
 function computeEditorBadges(editor) {
-  var assets = STATE.assets.filter(function(a) {
+  var assets = productionAssets().filter(function(a) {
     return a.editor === editor && a.status === 'Approved' && a.dateApproved;
   });
   var lifetime = assets.length;
@@ -9053,7 +9087,7 @@ function computeEditorBadges(editor) {
   })();
 
   // Perfect Grade — any grade with brand+qa+idea and within revision cap.
-  var perfectGrade = (STATE.grades || []).some(function(g) {
+  var perfectGrade = productionGrades().some(function(g) {
     return g.editor === editor && !g.dismissed && g.brandPass && g.qaClean && g.newIdea && (typeof gradeWithinCap === 'function' ? gradeWithinCap(g) : true);
   });
 
@@ -9264,8 +9298,8 @@ function renderEditorStatsView() {
   var _esTodayISO = todayUK();
   var _esThisWeekStart = isoWeekStart(_esTodayISO);
   var _esThisYM = _esTodayISO.slice(0, 7);
-  var _esWeekGrades  = (STATE.grades || []).filter(function(g) { return g && !g.dismissed && isoWeekStart(g.date) === _esThisWeekStart; });
-  var _esMonthGrades = (STATE.grades || []).filter(function(g) { return g && !g.dismissed && (g.date || '').slice(0, 7) === _esThisYM; });
+  var _esWeekGrades  = productionGrades().filter(function(g) { return g && !g.dismissed && isoWeekStart(g.date) === _esThisWeekStart; });
+  var _esMonthGrades = productionGrades().filter(function(g) { return g && !g.dismissed && (g.date || '').slice(0, 7) === _esThisYM; });
   var _esWeekCard  = computeScorecard(selected, _esWeekGrades,  null);
   var _esMonthCard = computeScorecard(selected, _esMonthGrades, null);
   var _esThisMonthLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(_esThisYM.slice(5, 7), 10) - 1] + ' ' + _esThisYM.slice(0, 4);
@@ -9645,7 +9679,7 @@ function gradeForAsset(assetId) {
 function resolveGradingYM() {
   var y = STATE.gradingYear, m = STATE.gradingMonth;
   if (!y || !m) {
-    var yms = (STATE.assets || []).map(assetPeriodYM).filter(Boolean).sort();
+    var yms = productionAssets().map(assetPeriodYM).filter(Boolean).sort();
     var latest = yms.length ? yms[yms.length - 1] : todayUK().slice(0, 7);
     if (!y) y = latest.slice(0, 4);
     if (!m) m = latest.slice(5, 7);
@@ -9657,7 +9691,7 @@ function resolveGradingYM() {
 
 // The grades that fall inside the given YM ('YYYY-MM'), by their stored date.
 function gradesInYM(ym) {
-  return (STATE.grades || []).filter(function(g) { return (g.date || '').slice(0, 7) === ym; });
+  return productionGrades().filter(function(g) { return (g.date || '').slice(0, 7) === ym; });
 }
 
 // ── Editing Style tab ─────────────────────────────────────────────────────
@@ -9804,7 +9838,7 @@ function renderGradingView() {
   // Weeks (Mon-anchored) that actually have videos in the month+type scope, so the week
   // filter only offers weeks with gradable work. Clamp a stale selection to "whole month".
   var weekSet = {};
-  (STATE.assets || []).forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (!assetInMonthType(a)) return;
     var w = isoWeekStart(assetPeriodDate(a)); if (w) weekSet[w] = true;
   });
@@ -9821,7 +9855,7 @@ function renderGradingView() {
   // week. The week filter narrows the dropdown too, so it only offers campaigns that
   // actually have gradable videos in the chosen week.
   var campsInMonth = (STATE.campaigns || []).filter(function(c) {
-    return campMatchesType(c) && (STATE.assets || []).some(function(a) { return a.campaignId === c.id && assetPeriodYM(a) === selYM && inWeek(a); });
+    return campMatchesType(c) && productionAssets().some(function(a) { return a.campaignId === c.id && assetPeriodYM(a) === selYM && inWeek(a); });
   });
   // Resolve the selected campaign — either the sentinel 'all' (every campaign in scope)
   // or a specific campaign id. Falls back to the first campaign in scope if the persisted
@@ -9838,7 +9872,7 @@ function renderGradingView() {
   // the original name-only sort.
   var monthCampAssets;
   if (allCampaigns) {
-    monthCampAssets = (STATE.assets || []).filter(function(a) {
+    monthCampAssets = productionAssets().filter(function(a) {
       return assetInMonthType(a) && inWeek(a);
     }).slice().sort(function(a, b) {
       var ca = findCampaignById(a.campaignId), cb = findCampaignById(b.campaignId);
@@ -9847,7 +9881,7 @@ function renderGradingView() {
       return byCamp !== 0 ? byCamp : (a.name || '').localeCompare(b.name || '');
     });
   } else if (campSel) {
-    monthCampAssets = (STATE.assets || []).filter(function(a) {
+    monthCampAssets = productionAssets().filter(function(a) {
       return a.campaignId === campSel.id && assetPeriodYM(a) === selYM && inWeek(a);
     }).slice().sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
   } else {
@@ -9870,7 +9904,7 @@ function renderGradingView() {
   // Primary = the campaign list you're looking at (drives the ring + celebration).
   var primary = progressOf(monthCampAssets);
   // Month-wide (this filter + week, across all campaigns) = the secondary "big picture" stat.
-  var monthScopeAssets = (STATE.assets || []).filter(function(a) { return assetInMonthType(a) && inWeek(a); });
+  var monthScopeAssets = productionAssets().filter(function(a) { return assetInMonthType(a) && inWeek(a); });
   var monthProg = progressOf(monthScopeAssets);
   var gradedThisCamp = primary.graded;
 
@@ -9958,7 +9992,7 @@ function renderGradingView() {
     return '<option value="' + mv + '"' + (mv === selMonth ? ' selected' : '') + '>' + name + '</option>';
   }).join('');
   var yearsSet = {};
-  (STATE.assets || []).forEach(function(a) { var ym = assetPeriodYM(a); if (ym) yearsSet[ym.slice(0, 4)] = true; });
+  productionAssets().forEach(function(a) { var ym = assetPeriodYM(a); if (ym) yearsSet[ym.slice(0, 4)] = true; });
   yearsSet[todayUK().slice(0, 4)] = true; yearsSet[selYear] = true;
   var yearOpts = Object.keys(yearsSet).sort().reverse().map(function(y) {
     return '<option value="' + y + '"' + (y === selYear ? ' selected' : '') + '>' + y + '</option>';
@@ -10186,7 +10220,7 @@ function renderGradingView() {
     var a = findAssetById(g.assetId);
     return !!(a && a.campaignId === campSel.id);
   }
-  var gradesInScopeMonth = (STATE.grades || []).filter(function(g) {
+  var gradesInScopeMonth = productionGrades().filter(function(g) {
     return _inScopeType(g) && _inScopeCamp(g) && (g.date || '').slice(0, 7) === _rollupYM;
   });
   // Resolve the "week" the Sel Week column shows: explicit filter → current week if in
@@ -10210,10 +10244,10 @@ function renderGradingView() {
   var _scQuarterYMs = [0, 1, 2].map(function(i) { return selYear + '-' + String((_scQuarter - 1) * 3 + 1 + i).padStart(2, '0'); });
   var periodGrades, periodLabel;
   if (scPeriod === 'week') {
-    periodGrades = (STATE.grades || []).filter(function(g) { return _inScopeType(g) && isoWeekStart(g.date) === _rollupWeekStart; });
+    periodGrades = productionGrades().filter(function(g) { return _inScopeType(g) && isoWeekStart(g.date) === _rollupWeekStart; });
     periodLabel = weekRangeLabel(_rollupWeekStart) + ' · ' + typeLabel;
   } else if (scPeriod === 'quarter') {
-    periodGrades = (STATE.grades || []).filter(function(g) { return _inScopeType(g) && _scQuarterYMs.indexOf((g.date || '').slice(0, 7)) >= 0; });
+    periodGrades = productionGrades().filter(function(g) { return _inScopeType(g) && _scQuarterYMs.indexOf((g.date || '').slice(0, 7)) >= 0; });
     periodLabel = 'Q' + _scQuarter + ' ' + selYear + ' · ' + typeLabel;
   } else {
     periodGrades = scopedGrades;
@@ -10232,8 +10266,8 @@ function renderGradingView() {
   // rollups so the comparison is apples-to-apples.
   var _prevWeekStart = _prevIsoWeekStart(_rollupWeekStart);
   var _prevYM        = _prevYearMonth(_rollupYM);
-  var gradesPrevWeek  = (STATE.grades || []).filter(function(g) { return _inScopeType(g) && _inScopeCamp(g) && isoWeekStart(g.date) === _prevWeekStart; });
-  var gradesPrevMonth = (STATE.grades || []).filter(function(g) { return _inScopeType(g) && _inScopeCamp(g) && (g.date || '').slice(0, 7) === _prevYM; });
+  var gradesPrevWeek  = productionGrades().filter(function(g) { return _inScopeType(g) && _inScopeCamp(g) && isoWeekStart(g.date) === _prevWeekStart; });
+  var gradesPrevMonth = productionGrades().filter(function(g) { return _inScopeType(g) && _inScopeCamp(g) && (g.date || '').slice(0, 7) === _prevYM; });
   var prevWeekByEditor = {}, prevMonthByEditor = {};
   GRADING_EDITORS.forEach(function(e) {
     prevWeekByEditor[e]  = computeScorecard(e, gradesPrevWeek,  suggestedTarget);
@@ -12505,7 +12539,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var eds = DAILY_LOG_EDITORS;
   // Training-campaign videos count as training, not production (see QUARTER_REPORT_TRAINING_CAMPAIGNS).
-  function isTrainingVid(a) { return !!QUARTER_REPORT_TRAINING_CAMPAIGNS[String(a.campaignId)]; }
+  function isTrainingVid(a) { return isTrainingCampaign(findCampaignById(a.campaignId)); }
   var assets = STATE.assets.filter(function(a) { return !isTrainingVid(a); });
   var today = toLocalISODate(bizNow());
   var months = [0, 1, 2].map(function(i) {
@@ -12819,7 +12853,7 @@ function renderQuarterEditorReport(qYear, qNum) {
   var campSpans = [];
   function fmtDay(iso) { var dt = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); return dt.getUTCDate() + ' ' + MONTH_SHORT[dt.getUTCMonth()]; }
   STATE.campaigns.forEach(function(c) {
-    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)] || QUARTER_REPORT_TRAINING_CAMPAIGNS[String(c.id)] || isIntlReportCampaign(c)) return;
+    if (QUARTER_REPORT_EXCLUDED_CAMPAIGNS[String(c.id)] || isTrainingCampaign(c) || isIntlReportCampaign(c)) return;
     var vids = (byCamp[String(c.id)] || []).filter(function(a) { return a.status !== 'Cancelled'; });
     if (!vids.length || vids.some(function(a) { return a.status !== 'Approved' || !a.dateApproved; })) return;
     var starts = vids.map(function(a) { return a.assignedAt; }).filter(Boolean).sort();
@@ -13267,7 +13301,7 @@ function renderReportingView() {
   var category = STATE.reportingCategory || 'all';
 
   // ── filter campaigns ──
-  var camps = STATE.campaigns.filter(function(c) {
+  var camps = productionCampaigns().filter(function(c) {
     if (country !== 'all' && c.country !== country) return false;
     if (type !== 'all' && (c.type || 'Paid Ads') !== type) return false;
     return true;
@@ -13275,7 +13309,7 @@ function renderReportingView() {
 
   // ── gather assets per campaign, filtered to date range ──
   function campAssets(campId) {
-    return STATE.assets.filter(function(a) {
+    return productionAssets().filter(function(a) {
       return String(a.campaignId) === String(campId);
     });
   }
@@ -13316,7 +13350,7 @@ function renderReportingView() {
     if (country === 'UK' && type === 'Paid Ads') {
       // UK Paid Media pace — compare against MONTHLY_APPROVAL_TARGET (pro-rated for weekly/quarterly)
       // When approval filter is 'pm', we still show the pace bar but label it accordingly.
-      var ukPaidApproved = STATE.assets.filter(function(a) {
+      var ukPaidApproved = productionAssets().filter(function(a) {
         var c = findCampaignById(a.campaignId);
         if (!c || c.country !== 'UK' || (c.type || 'Paid Ads') !== 'Paid Ads') return false;
         return paceApprovedInRange(a, 'UK');
@@ -13364,7 +13398,7 @@ function renderReportingView() {
     var displayCount, subLabel;
     if (approval === 'all') {
       // "All" approval filter: count every asset in range regardless of approval status
-      displayCount = STATE.assets.filter(function(a) {
+      displayCount = productionAssets().filter(function(a) {
         var c = findCampaignById(a.campaignId);
         if (c) {
           if (country !== 'all' && c.country !== country) return false;
@@ -13380,7 +13414,7 @@ function renderReportingView() {
       subLabel = 'tracked ' + periodLabel + ' by date';
     } else if (approval === 'not_pm') {
       // Count active assets dated this period that have NOT been PM-approved yet
-      displayCount = STATE.assets.filter(function(a) {
+      displayCount = productionAssets().filter(function(a) {
         if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return false;
         if (a.status === 'Approved') return false;
         var c = findCampaignById(a.campaignId);
@@ -13398,7 +13432,7 @@ function renderReportingView() {
       subLabel = 'not yet PM-approved · dated ' + periodLabel;
     } else if (approval === 'not_ch') {
       // PM-approved but cat head not yet signed off (UK/US only; simple countries excluded)
-      displayCount = STATE.assets.filter(function(a) {
+      displayCount = productionAssets().filter(function(a) {
         if (a.status === 'Cancelled' || a.categoryHeadQc === 'Cancelled') return false;
         if (a.status !== 'Approved') return false;
         if (a.categoryHeadQc === 'Approved') return false;
@@ -13415,7 +13449,7 @@ function renderReportingView() {
       }).length;
       subLabel = 'PM-approved · awaiting Cat Head · dated ' + periodLabel;
     } else {
-      displayCount = STATE.assets.filter(function(a) {
+      displayCount = productionAssets().filter(function(a) {
         var c = findCampaignById(a.campaignId);
         if (c) {
           if (country !== 'all' && c.country !== country) return false;
@@ -13745,7 +13779,7 @@ function renderReportingView() {
     var counts = {}; // editor -> approved video count
     EDITORS.forEach(function(e) { counts[e] = { total: 0 }; });
 
-    STATE.assets.forEach(function(a) {
+    productionAssets().forEach(function(a) {
       var c = findCampaignById(a.campaignId);
       if (country !== 'all' && (!c || c.country !== country)) return;
       if (type !== 'all' && (!c || (c.type || 'Paid Ads') !== type)) return;
@@ -13771,7 +13805,7 @@ function renderReportingView() {
       var isExpanded = !isEmpty && !!_editorTallyExpanded[ed];
       var videoListHtml = '';
       if (isExpanded) {
-        var editorVideos = STATE.assets.filter(function(a) {
+        var editorVideos = productionAssets().filter(function(a) {
           if (a.editor !== ed || a.status !== 'Approved') return false;
           var c = findCampaignById(a.campaignId);
           if (country !== 'all' && (!c || c.country !== country)) return false;
@@ -17665,7 +17699,7 @@ function buildDailyTallyForEditor(editor) {
   var today = todayISO();
   var items = [];
   var byCategory = {};
-  STATE.assets.forEach(function(a) {
+  productionAssets().forEach(function(a) {
     if (a.editor !== editor) return;
     if (a.status !== 'Approved') return;
     if (a.dateApproved !== today) return;
@@ -20469,14 +20503,14 @@ var App = {
       return a.categoryHeadQc==='Approved';
     }
 
-    var camps = STATE.campaigns.filter(function(c) {
+    var camps = productionCampaigns().filter(function(c) {
       if (country !== 'all' && c.country !== country) return false;
       if (type !== 'all' && (c.type||'Paid Ads') !== type) return false;
       return true;
     });
 
     camps = camps.filter(function(c) {
-      var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      var assets = productionAssets().filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
       if (approval !== 'all') assets = assets.filter(function(a) {
         if (approval === 'not_pm') return a.status!=='Approved' && a.categoryHeadQc!=='Cancelled';
@@ -20496,7 +20530,7 @@ var App = {
     var totalApproved = 0;
     var lines = ['Editing Report - ' + periodLabel, ''];
     camps.forEach(function(c) {
-      var allAssets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      var allAssets = productionAssets().filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category||'')===category; });
       var active = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
       var approvedInPeriod = active.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
@@ -20580,14 +20614,14 @@ var App = {
       return a.categoryHeadQc==='Approved';
     }
 
-    var camps = STATE.campaigns.filter(function(c) {
+    var camps = productionCampaigns().filter(function(c) {
       if (country !== 'all' && c.country !== country) return false;
       if (type !== 'all' && (c.type||'Paid Ads') !== type) return false;
       return true;
     });
 
     camps = camps.filter(function(c) {
-      var assets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      var assets = productionAssets().filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') assets = assets.filter(function(a) { return (a.category||'')===category; });
       if (approval !== 'all') assets = assets.filter(function(a) {
         if (approval === 'not_pm') return a.status!=='Approved' && a.categoryHeadQc!=='Cancelled';
@@ -20636,7 +20670,7 @@ var App = {
     lines.push('CAMPAIGN BREAKDOWN');
 
     camps.forEach(function(c) {
-      var allAssets = STATE.assets.filter(function(a) { return String(a.campaignId)===String(c.id); });
+      var allAssets = productionAssets().filter(function(a) { return String(a.campaignId)===String(c.id); });
       if (category !== 'all') allAssets = allAssets.filter(function(a) { return (a.category||'')===category; });
       var active = allAssets.filter(function(a) { return a.status !== 'Cancelled' && a.categoryHeadQc !== 'Cancelled'; });
       var approvedInPeriod = active.filter(function(a) { return assetApprovedInPeriod(a, c.country); }).length;
@@ -20666,7 +20700,7 @@ var App = {
     // Team snapshot — pool all grades whose date falls in the report's range,
     // then compute QA / Brand / Innovation rates plus speed metrics. Independent
     // of the country / type / category filters (this is a team-wide KPI).
-    var snapGrades = (STATE.grades || []).filter(function(g) {
+    var snapGrades = productionGrades().filter(function(g) {
       if (!g || g.dismissed) return false;
       var d = g.date || '';
       return d >= range.start && d <= range.end;
@@ -23482,7 +23516,7 @@ var App = {
     var typeLabel = gradingType === 'all' ? 'All types' : gradingType;
     var suggestedTarget = suggestedTargetForType(gradingType);
 
-    var qGrades = (STATE.grades || []).filter(function(g) {
+    var qGrades = productionGrades().filter(function(g) {
       if (!g || g.dismissed) return false;
       if (!inQuarter(g.date)) return false;
       if (gradingType !== 'all' && gradeCampaignType(g) !== gradingType) return false;
