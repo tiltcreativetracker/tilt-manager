@@ -3999,6 +3999,19 @@ var EDITABLE_FIELDS = {
     value: function(a) { return toISODate(a.estDelivery); },
     appMethod: 'setAssetEta'
   },
+  // Date Assigned / Date Submitted — auto-stamped on status changes, editable by hand.
+  assignedAt: {
+    kind: 'date',
+    display: function(a) { return '<span class="date-cell">' + (a.assignedAt ? escapeHtml(formatDate(a.assignedAt)) : '\u2014') + '</span>'; },
+    value: function(a) { return toISODate(a.assignedAt); },
+    appMethod: 'setAssetAssignedAt'
+  },
+  submittedAt: {
+    kind: 'date',
+    display: function(a) { return '<span class="date-cell" title="Auto-stamped when the video last went to For Review">' + (a.submittedAt ? escapeHtml(formatDate(a.submittedAt)) : '\u2014') + '</span>'; },
+    value: function(a) { return toISODate(a.submittedAt); },
+    appMethod: 'setAssetSubmittedAt'
+  },
   dateApproved: {
     kind: 'date',
     display: function(a) { return '<span class="date-cell">' + (a.dateApproved ? escapeHtml(formatDate(a.dateApproved)) : '\u2014') + '</span>'; },
@@ -6432,7 +6445,8 @@ function renderCampaignsView() {
   // conditional columns in the <thead>/row markup below. Organic adds back 2 slots for
   // CL QC + CL Date Approved (replacing the hidden CH QC + CH Date Approved), plus
   // Distribution + Date Posted.
-  var colCount = 12 + (hideLinkCols ? 0 : 2) + (showSparksCode ? 1 : 0) + (showIgLink ? 1 : 0) + (hideCHQC ? 0 : 2) + (isOrganic ? 4 : 0);
+  // 13 = the always-on columns incl. Date Assigned + Date Submitted; Paid Ads adds Est. Delivery.
+  var colCount = 13 + (isOrganic ? 0 : 1) + (hideLinkCols ? 0 : 2) + (showSparksCode ? 1 : 0) + (showIgLink ? 1 : 0) + (hideCHQC ? 0 : 2) + (isOrganic ? 4 : 0);
 
   // Build one <tr> for an asset. Extracted so it can be emitted either flat or under
   // weekly group headers.
@@ -6449,11 +6463,10 @@ function renderCampaignsView() {
         '<td>' + renderEditableCell(a, 'editor') + '</td>' +
         '<td class="link-cell">' + renderEditableCell(a, 'finalVideo') + '</td>' +
         (showSparksCode ? '<td>' + renderEditableCell(a, 'sparksCode') + '</td>' : '') +
-        // Organic swaps Est. Delivery for Date Assigned (read-only display of assignedAt).
-        (isOrganic
-          ? '<td><span class="date-cell">' + (a.assignedAt ? escapeHtml(formatDate(a.assignedAt)) : '—') + '</span></td>'
-          : '<td>' + renderEditableCell(a, 'estDelivery') + '</td>') +
-        '<td><span class="date-cell" title="Auto-stamped when the video last went to For Review">' + (a.submittedAt ? escapeHtml(formatDate(a.submittedAt)) : '—') + '</span></td>' +
+        // Date Assigned for every campaign; Paid Ads also shows Est. Delivery (Organic has none).
+        '<td>' + renderEditableCell(a, 'assignedAt') + '</td>' +
+        (isOrganic ? '' : '<td>' + renderEditableCell(a, 'estDelivery') + '</td>') +
+        '<td>' + renderEditableCell(a, 'submittedAt') + '</td>' +
         '<td>' + renderEditableCell(a, 'dateApproved') + '</td>' +
         '<td>' + renderEditableCell(a, 'qc') + '</td>' +
         '<td>' + renderStatusSelect(a) + '</td>' +
@@ -6676,7 +6689,7 @@ function renderCampaignsView() {
       '<button class="primary-btn" onclick="App.showAssetModal(null)">+ Add Video</button>' +
     '</div>' +
     '<div class="table-wrap"><table><thead><tr>' +
-      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>' + (isOrganic ? 'Date Assigned' : 'Estimated Delivery') + '</th><th>Date Submitted</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th><th>Distribution</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + (isOrganic ? '<th>Date Posted</th>' : '') + '<th style="width:110px">Actions</th>' +
+      '<th style="width:28px"></th><th style="width:50px">NO.</th><th>Video Name</th><th>Category</th><th>Difficulty</th>' + (hideLinkCols ? '' : '<th>Raw</th><th>Brief</th>') + '<th>Editor</th><th>Video</th>' + (showSparksCode ? '<th>Sparks Code</th>' : '') + '<th>Date Assigned</th>' + (isOrganic ? '' : '<th>Estimated Delivery</th>') + '<th>Date Submitted</th><th>Date Approved</th><th>Footage QC</th><th>Status</th>' + (hideCHQC ? '' : '<th>Category Head QC</th><th>CH Date Approved</th>') + (isOrganic ? '<th>Content Lead QC</th><th>CL QC Date Approved</th><th>Distribution</th>' : '') + (showIgLink ? '<th>IG Link</th>' : '') + (isOrganic ? '<th>Date Posted</th>' : '') + '<th style="width:110px">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
 }
 
@@ -20564,6 +20577,29 @@ var App = {
     recordUndo(a, ['dateApproved'], 'date approved: ' + (a.dateApproved ? formatDate(a.dateApproved) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     a.dateApproved = iso;
     logAction('updated', 'Asset "' + a.name + '" date approved \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    render();
+  },
+  setAssetAssignedAt: function(id, newDate) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var iso = toISODate(newDate);
+    if (a.assignedAt === iso) { render(); return; }
+    recordUndo(a, ['assignedAt'], 'date assigned: ' + (a.assignedAt ? formatDate(a.assignedAt) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    a.assignedAt = iso;
+    logAction('updated', 'Asset "' + a.name + '" date assigned \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    render();
+  },
+  // Date Submitted is the last submission; keep the first-submission date no later than it.
+  setAssetSubmittedAt: function(id, newDate) {
+    var a = findAssetById(id);
+    if (!a) return;
+    var iso = toISODate(newDate);
+    if (a.submittedAt === iso) { render(); return; }
+    recordUndo(a, ['submittedAt', 'firstSubmittedAt'], 'date submitted: ' + (a.submittedAt ? formatDate(a.submittedAt) : 'empty') + ' \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
+    a.submittedAt = iso;
+    if (!iso) a.firstSubmittedAt = '';
+    else if (!a.firstSubmittedAt || a.firstSubmittedAt > iso) a.firstSubmittedAt = iso;
+    logAction('updated', 'Asset "' + a.name + '" date submitted \u2192 ' + (iso ? formatDate(iso) : 'cleared'));
     render();
   },
   setAssetChDateApproved: function(id, newDate) {
