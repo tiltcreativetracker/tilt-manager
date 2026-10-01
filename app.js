@@ -1522,29 +1522,57 @@ var Fb = {
     var now = Date.now();
     var localMods = snap.trainingModules || [];
     if (JSON.stringify(localMods) !== JSON.stringify(srv.trainingModules)) {
-      writes.push({ path: new firebase.firestore.FieldPath('trainingModules'), value: localMods });
-      var byId = {};
+      var byId = {}, changed = {};
       srv.trainingModules.forEach(function(m) { if (m && m.id) byId[m.id] = JSON.stringify(m); });
       localMods.forEach(function(m) {
         if (!m || !m.id) return;
-        if (byId[m.id] !== JSON.stringify(m)) Fb._trackModules[m.id] = { m: JSON.parse(JSON.stringify(m)), at: now };
+        if (byId[m.id] !== JSON.stringify(m)) {
+          changed[m.id] = m;
+          Fb._trackModules[m.id] = { m: JSON.parse(JSON.stringify(m)), at: now };
+        }
         delete byId[m.id];
       });
+      // Left over = deleted here (healTraining only lets tombstoned ones go).
       Object.keys(byId).forEach(function(id) { Fb._trackModules[id] = { m: null, at: now }; });
+      writes.push({
+        path: new firebase.firestore.FieldPath('trainingModules'),
+        value: localMods,
+        // Inside the upload transaction: start from the server's CURRENT list
+        // and apply only this tab's own adds/edits/tombstoned deletes, so an
+        // edit to one module can't roll back a teammate's edit to another.
+        remap: function(remote) {
+          var tombs = Object.assign({}, remote.deletedTrainingModuleIds || {}, STATE.deletedTrainingModuleIds || {});
+          var out = [], seen = {};
+          (Array.isArray(remote.trainingModules) ? remote.trainingModules : []).forEach(function(m) {
+            if (!m || !m.id) return;
+            if (tombs[m.id]) return;
+            out.push(changed[m.id] || m);
+            seen[m.id] = true;
+          });
+          localMods.forEach(function(m) {
+            if (m && m.id && !seen[m.id] && !tombs[m.id]) out.push(m);
+          });
+          return out;
+        }
+      });
     }
+    // Completions: one write per changed record (email → moduleId), never a
+    // whole editor map and never a delete, so a tab can only touch the exact
+    // records it edited.
     var local = snap.trainingCompletions || {};
     var server = srv.trainingCompletions;
-    Object.keys(local).concat(Object.keys(server)).forEach(function(email, i, a) {
-      if (a.indexOf(email) !== i) return;
+    Object.keys(local).forEach(function(email) {
       var lb = local[email] || {}, sb = server[email] || {};
-      if (JSON.stringify(lb) === JSON.stringify(sb)) return;
-      writes.push({ path: new firebase.firestore.FieldPath('trainingCompletions', email),
-        value: local[email] ? local[email] : firebase.firestore.FieldValue.delete() });
       Object.keys(lb).forEach(function(mid) {
         if (JSON.stringify(lb[mid]) === JSON.stringify(sb[mid])) return;
+        writes.push({ path: new firebase.firestore.FieldPath('trainingCompletions', email, mid), value: lb[mid] });
         (Fb._trackRecs[email] = Fb._trackRecs[email] || {})[mid] = { rec: JSON.parse(JSON.stringify(lb[mid])), at: now };
       });
     });
+    // Proof for the Firestore rule that this write comes from a build that
+    // writes training safely; older builds can't set it, so their whole-field
+    // training writes are refused server-side.
+    if (writes.length) writes.push({ path: new firebase.firestore.FieldPath('_trainingWriteAt'), value: firebase.firestore.FieldValue.serverTimestamp() });
     return writes;
   },
   // After an incoming snapshot is copied onto STATE: re-apply this tab's recent
@@ -1777,13 +1805,14 @@ var Fb = {
     // Daily-thread fields are left out of the whole-field write and patched per
     // slot instead. A tab that slept overnight would otherwise upload its
     // swept-to-null threads and wipe the links the 9am scheduler just wrote.
-    // Training fields likewise: only what this tab changed (Fb.trainingWrites).
-    // Until the first snapshot sets the baseline they stay in the whole-field write.
-    var threadFields = Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS);
-    if (Fb._serverTraining) threadFields = threadFields.concat(['trainingModules', 'trainingCompletions']);
+    // Training fields likewise: only what this tab changed (Fb.trainingWrites),
+    // and nothing at all until a server snapshot has set the baseline.
+    var threadFields = Fb.THREAD_MAP_FIELDS.concat(Fb.THREAD_SINGLE_FIELDS)
+      .concat(['trainingModules', 'trainingCompletions', '_trainingWriteAt']);
     var dirty = Fb.dirtyFields(snap, threadFields);
     var slotWrites = Fb.threadSlotWrites(snap).concat(Fb.trainingWrites(snap));
     var mainDocChanged = dirty.length > 0 || slotWrites.length > 0;
+    var remapped = slotWrites.some(function(sw) { return sw.remap; });
     if (!mainDocChanged && assetsToWrite.length === 0 && assetIdsToDelete.length === 0) {
       Fb._uploadTimer = null;
       Fb._syncStatus = 'idle';
@@ -1797,11 +1826,13 @@ var Fb = {
     Fb._updateSyncDom();
 
     var stateRef = fbDb.doc(Fb.STATE_DOC);
-    function addWrites(w, payload) {
+    function addWrites(w, payload, remote) {
       if (mainDocChanged) {
         // Only the changed fields (Fb.dirtyFields) plus the attribution stamps.
         w.set(stateRef, payload, { mergeFields: dirty.concat(Fb.META_FIELDS) });
-        slotWrites.forEach(function(sw) { w.update(stateRef, sw.path, sw.value); });
+        slotWrites.forEach(function(sw) {
+          w.update(stateRef, sw.path, (sw.remap && remote) ? sw.remap(remote) : sw.value);
+        });
       }
       assetsToWrite.forEach(function(a) {
         w.set(fbDb.collection(Fb.ASSETS_COLL).doc(String(a.id)), a);
@@ -1811,7 +1842,7 @@ var Fb = {
       });
     }
     var commit;
-    if (dirty.length && Fb._serverFields && !Fb._unloading) {
+    if ((dirty.length || remapped) && Fb._serverFields && !Fb._unloading) {
       // Changed fields are merged against the server's CURRENT copy (Fb.merge3)
       // inside a transaction, so parts of a field this tab didn't touch (other
       // campaigns, other keys) keep whatever teammates wrote meanwhile. The
@@ -1830,7 +1861,7 @@ var Fb = {
               ? Math.max(snap[k], Number(remote[k]) || 0)
               : Fb.merge3(base, snap[k], remote[k]);
           });
-          addWrites(tx, payload);
+          addWrites(tx, payload, remote);
         });
       });
     } else {
@@ -1855,10 +1886,21 @@ var Fb = {
       // Discard any snapshot that was deferred during this upload. It was captured
       // before our write committed, so it's older than what's now in Firestore.
       // Replaying it would restore stale batch items and trigger duplicate sends.
+      // But its changes are real, and no new snapshot will bring them, so
+      // re-read the server copy instead; same when the training list was merged
+      // server-side (the tab hasn't seen the merged result). Otherwise the tab
+      // keeps a stale copy until someone else saves.
+      var refetch = remapped;
       if (Fb._pendingSnapshotData) {
         clearTimeout(Fb._snapshotRetryTimer);
         Fb._pendingSnapshotData = null;
         Fb._snapshotRetries = 0;
+        refetch = true;
+      }
+      if (refetch) {
+        stateRef.get({ source: 'server' }).then(function(doc) {
+          if (doc.exists) Fb.applySnapshot(doc.data());
+        }).catch(function(err) { console.warn('[Fb] post-upload refetch failed:', err); });
       }
       // Discard deferred assets snapshot too — our fresh commit will trigger a new
       // confirmed snapshot from Firestore that reflects the latest state.

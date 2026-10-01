@@ -43,9 +43,31 @@ service cloud.firestore {
     }
 
     // ----- state/app -----
+    // Training guard: training modules and submissions were wiped twice
+    // (2026-09-30) by browsers holding a stale copy. A write that changes
+    // trainingModules / trainingCompletions must
+    //   - carry _trainingWriteAt = server time (only builds that write training
+    //     per record / merged against the server do; older builds can't),
+    //   - keep every editor's completions map,
+    //   - not shrink the module list unless it also adds a delete tombstone.
+    function trainingWriteOk() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let touched = after.diff(before).affectedKeys().hasAny(['trainingModules', 'trainingCompletions']);
+      return !touched || (
+        after.get('_trainingWriteAt', null) is timestamp
+        && after._trainingWriteAt == request.time
+        && after.get('trainingCompletions', {}).keys().hasAll(before.get('trainingCompletions', {}).keys())
+        && (after.get('trainingModules', []).size() >= before.get('trainingModules', []).size()
+            || after.get('deletedTrainingModuleIds', {}).size() > before.get('deletedTrainingModuleIds', {}).size())
+      );
+    }
+
     match /state/app {
-      allow read:  if isTiltUser();
-      allow write: if isTiltUser();
+      allow read:   if isTiltUser();
+      allow create: if isTiltUser();
+      allow update: if isTiltUser() && trainingWriteOk();
+      allow delete: if false;
     }
 
 		// ----- state/app/assets/{assetId} -----
