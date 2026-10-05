@@ -1436,6 +1436,103 @@ exports.runBiWeeklyKpiNow = onCall(
   }
 );
 
+// ── Briefs: weekly summary to the admin Slack channel ───────────────
+// Counts last week's (Mon–Fri, UK dates) entries in state/app.briefLog per owner
+// and posts one message to state/app.briefsSlack.channelId. Off unless an admin
+// ticked "Weekly summary" in Automations → Briefs to Slack.
+const TRACKER_URL = 'https://tiltcreativetracker.github.io/tilt-manager/';
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function ukToday() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+}
+// Mon–Fri ISO dates of the week `offset` weeks from the one containing `iso`.
+function workdaysAround(iso, offset) {
+  const d = new Date(iso + 'T12:00:00Z');
+  const dow = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() + (dow === 0 ? -6 : 1 - dow) + offset * 7);
+  const out = [];
+  for (let i = 0; i < 5; i++) {
+    const x = new Date(d);
+    x.setUTCDate(d.getUTCDate() + i);
+    out.push(x.toISOString().slice(0, 10));
+  }
+  return out;
+}
+function shortDay(iso) {
+  const d = new Date(iso + 'T12:00:00Z');
+  return d.getUTCDate() + ' ' + MONTHS_SHORT[d.getUTCMonth()];
+}
+
+async function weeklyBriefsSummaryCore(opts) {
+  const force = !!(opts && opts.force);
+  const snap = await db.collection('state').doc('app').get();
+  if (!snap.exists) return { ok: false, error: 'state/app not found' };
+  const data = snap.data() || {};
+  const cfg = data.briefsSlack || {};
+  const channel = String(cfg.channelId || '').trim();
+  if (!channel) return { ok: false, error: 'no channel set' };
+  if (!force && !cfg.weekly) return { ok: true, skipped: 'weekly summary is off' };
+  const briefs = Array.isArray(data.briefLog) ? data.briefLog : [];
+  const today = ukToday();
+  const days = workdaysAround(today, -1);
+  const prevDays = workdaysAround(today, -2);
+  const byOwner = {};
+  let total = 0, prevTotal = 0;
+  briefs.forEach(function (b) {
+    const d = String((b && b.date) || '').slice(0, 10);
+    if (days.indexOf(d) >= 0) {
+      const o = String(b.owner || '').trim() || 'No owner';
+      byOwner[o] = (byOwner[o] || 0) + 1;
+      total++;
+    } else if (prevDays.indexOf(d) >= 0) {
+      prevTotal++;
+    }
+  });
+  const lines = Object.keys(byOwner)
+    .sort(function (a, b) { return byOwner[b] - byOwner[a] || a.localeCompare(b); })
+    .map(function (o) { return o + ': ' + byOwner[o]; });
+  const diff = total - prevTotal;
+  const trend = diff === 0 ? 'same as the week before' : (diff > 0 ? 'up ' + diff : 'down ' + (-diff)) + (diff === 0 ? '' : ' on the week before');
+  const text = [
+    ':memo: *Briefs last week (' + shortDay(days[0]) + ' – ' + shortDay(days[4]) + '): ' + total + '*',
+    lines.length ? lines.join('\n') : '_No briefs logged._',
+    '_' + (Math.round(total / 5 * 10) / 10) + ' a day · ' + trend + '_',
+    '<' + TRACKER_URL + '#briefs|Open the Briefs tab>',
+  ].join('\n');
+  const res = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Bearer ' + SLACK_BOT_TOKEN.value() },
+    body: new URLSearchParams({ channel: channel, text: text, unfurl_links: 'false', unfurl_media: 'false' }).toString(),
+  });
+  const json = await res.json();
+  console.log('[weeklyBriefsSummary]', JSON.stringify({ ok: !!json.ok, error: json.error || null, total: total, owners: lines.length }));
+  return json.ok ? { ok: true, total: total } : { ok: false, error: json.error || 'slack error' };
+}
+
+exports.weeklyBriefsSummaryScheduled = onSchedule(
+  { schedule: '0 9 * * 1', timeZone: 'Europe/London', secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 120 },
+  async () => { await weeklyBriefsSummaryCore({ force: false }); }
+);
+
+// "Send summary now" in Automations. Admin-only, same check as runBiWeeklyKpiNow.
+exports.runWeeklyBriefsSummaryNow = onCall(
+  { secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 120 },
+  async (request) => {
+    requireTiltUser(request);
+    const email = (request.auth && request.auth.token && request.auth.token.email) || '';
+    try {
+      const userDoc = await db.collection('users').doc(email).get();
+      const role = userDoc.exists ? (userDoc.data().role || '') : '';
+      if (role !== 'admin') throw new HttpsError('permission-denied', 'admin role required to send the briefs summary');
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('permission-denied', 'unable to verify admin role');
+    }
+    return await weeklyBriefsSummaryCore({ force: true });
+  }
+);
+
 // ── Daily editor threads: post the parent Slack message from the server ──
 // A test-only callable that mirrors what the future scheduler will do for
 // one editor: post the parent message into the editor's channel and write

@@ -371,6 +371,49 @@
       });
     });
 
+    describe('Briefs tab: countBriefsByOwner', function() {
+      // Copy of countBriefsByOwner from app.js (Briefs tab).
+      function countBriefsByOwner(briefs, days) {
+        var out = {};
+        (briefs || []).forEach(function(b) {
+          var i = days.indexOf(String(b.date || '').slice(0, 10));
+          if (i < 0) return;
+          var o = (b.owner || '').trim() || 'No owner';
+          if (!out[o]) out[o] = days.map(function() { return 0; });
+          out[o][i]++;
+        });
+        return out;
+      }
+      var days = ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09'];
+
+      it('counts briefs per owner per day', function() {
+        var r = countBriefsByOwner([
+          { owner: 'Priya Shah', date: '2026-10-05' },
+          { owner: 'Priya Shah', date: '2026-10-05' },
+          { owner: 'Tom Walsh', date: '2026-10-07' }
+        ], days);
+        expect(r['Priya Shah']).toEqual([2, 0, 0, 0, 0]);
+        expect(r['Tom Walsh']).toEqual([0, 0, 1, 0, 0]);
+      });
+      it('ignores briefs outside the week', function() {
+        var r = countBriefsByOwner([{ owner: 'Nina Ford', date: '2026-10-12' }, { owner: 'Nina Ford', date: '2026-10-04' }], days);
+        expect(Object.keys(r).length).toBe(0);
+      });
+      it('groups a blank owner under "No owner" and trims names', function() {
+        var r = countBriefsByOwner([{ owner: '  ', date: '2026-10-09' }, { owner: ' Tom Walsh ', date: '2026-10-09' }], days);
+        expect(r['No owner']).toEqual([0, 0, 0, 0, 1]);
+        expect(r['Tom Walsh']).toEqual([0, 0, 0, 0, 1]);
+      });
+      it('accepts full ISO timestamps as the date', function() {
+        var r = countBriefsByOwner([{ owner: 'Priya Shah', date: '2026-10-06T10:00:00Z' }], days);
+        expect(r['Priya Shah']).toEqual([0, 1, 0, 0, 0]);
+      });
+      it('handles an empty or missing list', function() {
+        expect(countBriefsByOwner([], days)).toEqual({});
+        expect(countBriefsByOwner(null, days)).toEqual({});
+      });
+    });
+
     describe('Add Campaign / Import Campaign button placement', function() {
       // These tests verify the HTML rendered for the sidebar country action buttons
 

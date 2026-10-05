@@ -173,6 +173,10 @@ Two orthogonal lists gate the Editor Stats tab, on top of role visibility:
 
 Both lookups require the `@tilt.app` domain (see `EDITOR_EMAIL_DOMAIN` guard); a same-prefix email from another domain won't slip through the impersonation gate.
 
+### 3.5 Briefs access (special-cased)
+
+The Briefs tab is gated by email, not role: only `elsa@tilt.app` sees or can open it (`isBriefsUser()`), including while she uses View as. Its Slack settings card in Automations is gated by real role (`_realRole === 'admin'`), and the manual summary callable re-checks the admin role server-side.
+
 ---
 
 ## 4. Data Model
@@ -249,21 +253,21 @@ All entities live as arrays/objects on the global `STATE`. Identifiers are local
 
 Each value: `{ items: [...], firstQueuedAt: timestamp | null }`.
 
-### 4.6 Brief entry
-`STATE.briefs[]`
+### 4.6 Brief log entry *(added 2026-10-06)*
+`STATE.briefLog[]` (Briefs tab, Elsa only). A fresh key: the old intake form's `briefs` array may still sit in Firestore in a different shape and is never read or written.
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Prefixed string `b{n}` |
-| `notionUrl` | string (URL) | Notion brief link (required) |
-| `rawFileUrl` | string (URL) | Drive / Dropbox raw file link (optional) |
-| `notes` | string | Free-text context (optional) |
-| `submittedBy` | string | Display name or email of submitter |
-| `submittedAt` | timestamp | `Date.now()` at submission |
-| `acknowledged` | boolean | Set by admin via "Mark seen" |
+| `id` | string | `newLocalId('br')` |
+| `title` | string | Required |
+| `notionUrl` | string (URL) | Optional; must be http(s) |
+| `owner` | string | Whoever wrote the brief (free text, suggestions from past owners) |
+| `date` | ISO date | Date written (UK), defaults to today |
+| `campaignId` | id \| null | Optional link to a campaign |
+| `category` | string | Optional; filled from the campaign when left blank |
+| `createdAt` / `createdBy` / `updatedAt` / `updatedBy` | ISO / email | Audit fields |
 
-`STATE.nextBriefId` — integer counter for generating `b{n}` IDs.
-`STATE.briefsWebhookUrl` — Slack webhook for brief-ready alerts (falls back to global `webhookUrl`).
+`STATE.briefsSlack` — `{ channelId, postEach, weekly }`, admin-only settings for the Briefs → Slack posts.
 
 ### 4.7 Other state
 - `STATE.trainingModules[]` — one entry per module: `{ id, title, brief, notionUrl, gdriveUrl (or legacy loomUrl), footageUrl, requiredSubmissions, createdAt, createdBy }`. Persisted in the main snapshot doc.
@@ -276,7 +280,6 @@ Each value: `{ items: [...], firstQueuedAt: timestamp | null }`.
 - `STATE.sentNotifications[]` — history, capped at **20**.
 - `STATE.activityLog[]` — actor / tag / message / timestamp, capped at **200**.
 - `STATE.editorSlackIds`, `STATE.categoryHeadSlackIds`, `STATE.pmSlackIds` — `{ name: 'U…' }` maps for @-mentions.
-- `STATE.briefsWebhookUrl` — Slack webhook for brief-ready alerts; falls back to `webhookUrl`. Configured in the Automations tab.
 - `STATE.webhookUrl` — global fallback Slack webhook.
 - `STATE.countryWebhooks` — per-country editor/PM routing.
 - `STATE.categoryHeadWebhook` — single unified CHQ route.
@@ -347,15 +350,16 @@ The Scheduler tab has been removed. Editor and ETA assignment is done inline in 
 - Each webhook input: status dot (green = valid, red = invalid format, dim = empty), Test button.
 - **Live Activity Log** — every mutation/notification, with timestamp, actor, tag, message.
 
-### 5.6 Briefs
-A lightweight brief-intake form for content leads to hand off work to the creative team.
+### 5.6 Briefs *(rebuilt 2026-10-06, Elsa only)*
+A log of every brief written and who wrote it, counted per owner by day and week like the Weekly Log does for editors. The old Content Lead intake form (removed in d37f692) is gone.
 
-- **Submit a Brief** form (visible to pm + admin): two fields — **Notion Brief URL** (required) and **Raw File Link** (Drive, Dropbox, etc., optional) — plus an optional **Notes** textarea with placeholder `Seller Name - Categories`. On submit, the entry is saved to `STATE.briefs[]` and a Slack message is posted to `STATE.briefsWebhookUrl` (falling back to the global webhook). The webhook is validated with `webhookValid()` before firing; the toast reads "Brief submitted — Slack notified!" on success or shows an error with the HTTP status on failure.
-- **Submitted briefs list** (visible to pm + admin): briefs sorted newest-first. Each card shows submitter name, timestamp, Brief link pill (with a ⎘ copy-URL button), Raw files link pill (with a ⎘ copy-URL button), and notes. Admin sees a **Mark seen** button (on unacknowledged briefs) and a **Clear** button (on all briefs); clicking Clear removes the entry from `STATE.briefs` permanently and shows a "Brief cleared" toast. Acknowledged briefs show a grey "seen" chip; unacknowledged show an amber "new" chip.
-- **Copy link button**: a `🔗 Copy link` button in the Briefs tab header copies a direct deep link (`#tab=briefs`) to the app. Opening that URL navigates straight to the Briefs tab. Boot logic in `attachAuthListener` checks for `#tab=briefs` on first load and sets `STATE.tab = 'briefs'` before rendering.
-- **Badge**: the Briefs tab shows a count badge equal to the number of unacknowledged entries.
-- **Slack message format**: `:memo: *Campaign ready*\nSubmitted by <name>\nBrief: <url|Open in Notion>  ·  Raw files: <url|Open files>\n<notes>`
-- **Webhook config**: Automations tab → "Slack Webhook — Brief Alerts". Falls back to global webhook if blank. Uses `webhookValid()` (same validation as all other webhooks) — the `hooks.slack.com` inline check has been removed.
+- **Access**: only `elsa@tilt.app` (email check `isBriefsUser()`, so it stays visible under View as). Topbar filter, router bounce and a guard inside `renderBriefsView`. Sits directly before Board; a topbar migration keeps it there for stored tab orders.
+- **Controls**: Add brief, search (title, owner, campaign — searches every week, newest first), owner picker, week picker (this week + 8 back), Daily / Weekly toggle, and summary chips (briefs, owners, per day).
+- **Daily view**: one card per workday; inside, a section per owner ("Owner · date" + count) listing each brief with campaign/category, a Notion link and delete. Click a row to edit. Empty days say "No briefs logged on Mon."
+- **Weekly view**: owners × Mon–Fri grid with row totals and an All owners row.
+- **Add / edit modal**: title (required), Notion link (validated), owner (datalist of past owners), date written, optional campaign (fills category), category. Inline error line; double-submit guarded by `openModal`.
+- **Deep link**: `#briefs` opens the tab (used by the Slack posts).
+- **Slack (admins only)**: Automations → "Briefs to Slack" holds the channel ID and two toggles. *Post each new brief* calls `sendSlackChatPostMessage` after a new brief is saved (never on edit/delete; a Slack failure shows a toast and the brief stays saved). *Weekly summary* is the `weeklyBriefsSummaryScheduled` Cloud Function (Mondays 9am UK): last week's count per owner, total, per day and change on the week before. *Send summary now* calls the admin-checked `runWeeklyBriefsSummaryNow` callable.
 
 ### 5.7 Config
 - Editor cards: difficulty matrix, daily mix rule, country priority, current asset count.
@@ -730,6 +734,8 @@ A separate import modal handles Italy-specific CSV files, which use a different 
 ---
 
 ## 9.5 Bug Fixes Log
+
+- **Briefs tab (2026-10-06)**: Elsa wanted to log briefs and count them per owner the way the Weekly Log counts editors' videos. Added an Elsa-only Briefs tab before Board, stored in a new `briefLog` key so the leftover `briefs` array from the old intake form can't load into it, plus admin-only Slack posts (each new brief, and a Monday 9am summary via two new Cloud Functions). `countBriefsByOwner` is covered in tests.html.
 
 - **Training tab: Campaigns layout, then one row per video + admin editing (2026-09-22 → 2026-09-23)**: Elsa asked for Training to "look like the campaigns". The 2026-09-22 pass (2ec8eca) rebuilt the tab as a Campaigns-style sidebar + main pane, but kept one row per editor with all their Frame.io links crammed into a single Submissions cell. That misread what she wanted: the layout was fine, but she needed **an entry per video**. The 2026-09-23 pass (c84c0be) kept the layout and made each submitted video its own table row (Editor · Status · Video · Submitted · Actions, grouped by editor via `rowspan`), with an always-present **"+ Add video"** row so editors can hand in more than `requiredSubmissions`. Added the `submissionAt[]` parallel timestamp array (Start / Complete / Undo carry it forward). Then made **every admin row editable** — links, dates and status for any editor — via an optional `targetEmail` arg on the training handlers. Bugs caught in review before deploy: (1) editors pass `roleAtLeast('admin')` (rank 3), so the first version let Patty edit Zidni's row — fixed with a strict `role === 'admin'` check in `trainingTargetEmail()` and `trainingSetSubmissionDate`; (2) editing a link overwrote its submitted date — now kept; (3) dates showed the UTC day (a 00:30 BST submission read as the previous day) — now rendered in `BIZ_TZ`; (4) a row with videos but no `startedAt` showed "In progress" next to a ▶ Start button — now shows ✓ Mark complete. Admin edits on an editor's behalf skip the Slack "submitted" ping. Known, left as-is: a video URL containing an apostrophe breaks the inline Escape handler in the edit input (pre-existing pattern; Frame.io and Drive links never contain one).
 

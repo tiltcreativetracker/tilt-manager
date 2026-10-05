@@ -486,6 +486,8 @@ var Fb = {
       trainingCompletions: (STATE.trainingCompletions && typeof STATE.trainingCompletions === 'object') ? STATE.trainingCompletions : {},
       deletedTrainingModuleIds: (STATE.deletedTrainingModuleIds && typeof STATE.deletedTrainingModuleIds === 'object') ? STATE.deletedTrainingModuleIds : {},
       weeklyLog: (STATE.weeklyLog && typeof STATE.weeklyLog === 'object') ? STATE.weeklyLog : {},
+      briefLog: Array.isArray(STATE.briefLog) ? STATE.briefLog : [],
+      briefsSlack: (STATE.briefsSlack && typeof STATE.briefsSlack === 'object') ? STATE.briefsSlack : {},
       _lastEditedBy: Auth.user ? Auth.user.uid : null,
       _lastEditedByName: Auth.user ? Auth.user.displayName : null,
       _lastEditedByTab: Fb._tabId,
@@ -572,6 +574,10 @@ var Fb = {
         search: true,
         logEditor: true,
         logWeekOffset: true,
+        briefsOwner: true,
+        briefsWeekOffset: true,
+        briefsView: true,
+        briefsSearch: true,
         // qcDismissed is now persisted — intentionally excluded from PER_USER_UI_FIELDS
         noSplit: true,
         reportingPeriod: true,
@@ -2946,6 +2952,16 @@ var STATE = {
   // data — synced via Firestore, union-merged by (date, id) so a stale write can
   // never wipe a fresh entry.
   weeklyLog: {},
+  // Briefs tab (Elsa only): { id, title, notionUrl, owner, date, campaignId, category,
+  // createdAt, createdBy }. Shared data, synced via Firestore and merged by id.
+  briefLog: [],
+  // Briefs to Slack settings (admin only): { channelId, postEach, weekly }.
+  briefsSlack: {},
+  // Briefs tab per-user UI.
+  briefsOwner: '',
+  briefsWeekOffset: 0,
+  briefsView: 'daily',
+  briefsSearch: '',
 
   // Editor EOD submissions, keyed by editor then date (YYYY-MM-DD):
   //   { [editor]: { [dateISO]: {
@@ -5894,6 +5910,7 @@ function totalPending() {
 // renderTopbar iterates STATE.tabOrder and looks up defs from here.
 var TAB_DEFS = {
   campaigns:        { label: 'Campaigns' },
+  briefs:           { label: 'Briefs' },
   today:            { label: 'Board' },
   catReview:        { label: 'Cat Heads Review', badge: true },
   editingCalendar:  { label: 'Editing Calendar' },
@@ -5910,7 +5927,7 @@ var TAB_DEFS = {
   clips:            { label: 'Clips' },
   config:           { label: 'Config' }
 };
-var DEFAULT_TAB_ORDER = ['campaigns', 'editorHome', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var DEFAULT_TAB_ORDER = ['campaigns', 'editorHome', 'notifications', 'briefs', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 
 // Role-based tab visibility. Editors and PMs share the same day-to-day set
 // (Campaigns → Reporting, plus Notifications). Cat Head and Content Lead can open
@@ -5927,7 +5944,7 @@ var ALL_TABS = ['campaigns', 'today', 'catReview', 'training', 'editingCalendar'
 var VIEWER_TABS = ['campaigns', 'today', 'catReview', 'editingCalendar', 'log', 'editingStyle', 'notifications', 'reporting', 'content'];
 // Master list of every tab id the app renders. Individual role sets pick from
 // here; new tabs get added here + explicitly to whichever roles should see them.
-var ALL_TABS_INTERNAL = ['editorHome', 'campaigns', 'notifications', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
+var ALL_TABS_INTERNAL = ['editorHome', 'campaigns', 'notifications', 'briefs', 'today', 'catReview', 'training', 'log', 'editingCalendar', 'grading', 'editingStyle', 'editorStats', 'automations', 'reporting', 'content', 'clips', 'config'];
 // Back-compat alias — some older comments still reference ALL_TABS.
 var ALL_TABS = ALL_TABS_INTERNAL.slice();
 var ROLE_TAB_VISIBILITY = {
@@ -6032,11 +6049,21 @@ function renderTopbar() {
       STATE.tabOrder = order.slice();
     }
   })();
+  // Migration: Briefs sits directly before Board, for stored orders too.
+  (function() {
+    var br = order.indexOf('briefs'), td = order.indexOf('today');
+    if (br >= 0 && td >= 0 && br !== td - 1) {
+      order.splice(br, 1);
+      td = order.indexOf('today');
+      order.splice(td, 0, 'briefs');
+      STATE.tabOrder = order.slice();
+    }
+  })();
   // Role gate: keep only the tabs the current user's role is allowed to see.
   // (See ROLE_TAB_VISIBILITY for the matrix.)
   var role = (Auth && Auth.user && Auth.user.role) ? Auth.user.role : 'visitor';
   var allowedTabs = tabsForRole(role);
-  order = order.filter(function(k) { return allowedTabs.indexOf(k) >= 0; });
+  order = order.filter(function(k) { return allowedTabs.indexOf(k) >= 0 || (k === 'briefs' && isBriefsUser()); });
   // Extra gate for editorStats: role alone isn't enough. Access is granted to
   // (a) editors whose sign-in email maps to one of the three (own personal view),
   // or (b) named viewers (EDITOR_STATS_VIEWERS — Elsa) who get a peer picker.
@@ -6049,6 +6076,8 @@ function renderTopbar() {
     var isViewer = (typeof isEditorStatsViewer === 'function') && isEditorStatsViewer();
     return isEditor || isViewer;
   });
+  // Briefs is Elsa's only, by email (so it stays while she uses View as).
+  order = order.filter(function(k) { return k !== 'briefs' || isBriefsUser(); });
   // If the active tab got hidden by the role filter (e.g. an editor whose last
   // active tab was Config), bounce them to the first visible tab so the page
   // doesn't render an empty body.
@@ -8182,6 +8211,301 @@ function renderDailyLogView() {
       summaryHtml +
     '</div>' +
     '<div class="log-day-cards">' + dayCardsHtml + '</div>' +
+  '</div>';
+}
+
+// ===================== BRIEFS (Elsa only) =====================
+// A log of every brief written and who wrote it, counted per owner by day and by
+// week like the Weekly Log does for editors. Records live in STATE.briefLog (a
+// fresh key: Firestore may still hold the old `briefs` array from the intake form
+// removed in d37f692, in a different shape). Visible to Elsa's email only, so it
+// stays visible while she uses View as.
+function isBriefsUser() {
+  if (typeof Auth === 'undefined' || !Auth.user || !Auth.user.email) return false;
+  return String(Auth.user.email).toLowerCase() === ELSA_EMAIL;
+}
+
+function briefLogList() {
+  return Array.isArray(STATE.briefLog) ? STATE.briefLog : [];
+}
+
+// Owners seen so far, A–Z. Feeds the owner picker and the modal's datalist.
+function briefOwners() {
+  var seen = {};
+  briefLogList().forEach(function(b) { var o = (b.owner || '').trim(); if (o) seen[o] = true; });
+  return Object.keys(seen).sort(function(a, b) { return a.localeCompare(b); });
+}
+
+// Pure: { owner: [count per day] } for the given ISO days. Mirrored in tests.html.
+function countBriefsByOwner(briefs, days) {
+  var out = {};
+  (briefs || []).forEach(function(b) {
+    var i = days.indexOf(String(b.date || '').slice(0, 10));
+    if (i < 0) return;
+    var o = (b.owner || '').trim() || 'No owner';
+    if (!out[o]) out[o] = days.map(function() { return 0; });
+    out[o][i]++;
+  });
+  return out;
+}
+
+function briefCampaignLabel(b) {
+  var c = b.campaignId != null ? findCampaignById(b.campaignId) : null;
+  var parts = [];
+  if (c) {
+    if (c.country) parts.push(c.country);
+    parts.push(c.type || 'Paid Ads');
+    parts.push(c.name);
+  }
+  if (b.category) parts.push(b.category);
+  return parts.join(' · ');
+}
+
+function briefMatchesSearch(b, q) {
+  if (!q) return true;
+  var hay = [b.title, b.owner, b.category, briefCampaignLabel(b)].join(' ').toLowerCase();
+  return hay.indexOf(q) >= 0;
+}
+
+function renderBriefRow(b) {
+  var label = briefCampaignLabel(b);
+  var url = extractSingleUrl(b.notionUrl || '');
+  return '<div class="log-day-vid-row brief-row" onclick="App.editBrief(\'' + escapeAttr(b.id) + '\')" title="Click to edit">' +
+    '<div class="log-day-vid-name">' +
+      '<div class="log-day-vid-title">' + escapeHtml(b.title || 'Untitled brief') + '</div>' +
+      (label ? '<div class="log-day-vid-camp">' + escapeHtml(label) + '</div>' : '') +
+    '</div>' +
+    (url ? '<a class="brief-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">Notion ↗</a>' : '<span class="brief-link brief-link-none">no link</span>') +
+    '<button class="wlog-entry-del" title="Delete brief" onclick="event.stopPropagation(); App.deleteBrief(\'' + escapeAttr(b.id) + '\')">×</button>' +
+  '</div>';
+}
+
+function renderBriefsView() {
+  if (!isBriefsUser()) {
+    return '<div class="log-wrap"><div class="log-day-empty">The Briefs tab isn\'t available for your account.</div></div>';
+  }
+  var weekOffset = (typeof STATE.briefsWeekOffset === 'number') ? STATE.briefsWeekOffset : 0;
+  var days = getWorkdaysForOffset(weekOffset);
+  var view = STATE.briefsView === 'weekly' ? 'weekly' : 'daily';
+  var owners = briefOwners();
+  var ownerSel = STATE.briefsOwner && owners.indexOf(STATE.briefsOwner) >= 0 ? STATE.briefsOwner : '';
+  var q = (STATE.briefsSearch || '').trim().toLowerCase();
+  var all = briefLogList();
+  var inWeek = all.filter(function(b) {
+    return days.indexOf(String(b.date || '').slice(0, 10)) >= 0 && (!ownerSel || b.owner === ownerSel);
+  });
+  var counts = countBriefsByOwner(inWeek, days);
+  var ownerKeys = Object.keys(counts).sort(function(a, b) { return a.localeCompare(b); });
+  if (ownerSel && ownerKeys.indexOf(ownerSel) < 0) { ownerKeys = [ownerSel]; counts[ownerSel] = days.map(function() { return 0; }); }
+  var weekTotal = inWeek.length;
+  var today = todayISO();
+  var daysSoFar = days.filter(function(d) { return d <= today; }).length || days.length;
+
+  var weekOpts = '';
+  for (var wo = 0; wo >= -8; wo--) {
+    var wDays = getWorkdaysForOffset(wo);
+    var wLabel = wo === 0 ? 'This week' : (wo === -1 ? 'Last week' : Math.abs(wo) + ' weeks ago');
+    weekOpts += '<option value="' + wo + '"' + (wo === weekOffset ? ' selected' : '') + '>' + wLabel + ' (' + formatDate(wDays[0]) + ' – ' + formatDate(wDays[4]) + ')</option>';
+  }
+  var ownerOpts = '<option value="">Everyone</option>' + owners.map(function(o) {
+    return '<option value="' + escapeHtml(o) + '"' + (o === ownerSel ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
+  }).join('');
+
+  var controls =
+    '<div class="log-editor-bar brief-bar">' +
+      '<div class="log-editor-bar-left brief-bar-left">' +
+        '<input id="briefs-search" class="form-input brief-search" placeholder="Search title, owner, campaign" value="' + escapeHtml(STATE.briefsSearch || '') + '" oninput="App.setBriefsFilter(\'search\', this.value)">' +
+        '<div class="log-editor-picker"><label class="log-editor-picker-label">Owner</label>' +
+          '<select class="log-editor-select brief-select" onchange="App.setBriefsFilter(\'owner\', this.value)">' + ownerOpts + '</select></div>' +
+        '<div class="log-editor-picker"><label class="log-editor-picker-label">Week</label>' +
+          '<select class="log-editor-select brief-select" onchange="App.setBriefsFilter(\'week\', this.value)">' + weekOpts + '</select></div>' +
+        '<div class="brief-toggle">' +
+          '<button class="' + (view === 'daily' ? 'on' : '') + '" onclick="App.setBriefsFilter(\'view\', \'daily\')">Daily</button>' +
+          '<button class="' + (view === 'weekly' ? 'on' : '') + '" onclick="App.setBriefsFilter(\'view\', \'weekly\')">Weekly</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="log-editor-summary">' +
+        '<span class="log-editor-stat"><b>' + weekTotal + '</b> brief' + (weekTotal === 1 ? '' : 's') + '</span>' +
+        '<span class="log-editor-stat"><b>' + ownerKeys.filter(function(o) { return counts[o].some(Boolean); }).length + '</b> owners</span>' +
+        '<span class="log-editor-stat"><b>' + (Math.round(weekTotal / daysSoFar * 10) / 10) + '</b> a day</span>' +
+      '</div>' +
+    '</div>';
+
+  var body;
+  if (q) {
+    // Search looks across every week, newest first, and respects the owner picker.
+    var hits = all.filter(function(b) { return (!ownerSel || b.owner === ownerSel) && briefMatchesSearch(b, q); })
+      .sort(function(a, b) { return String(b.date || '').localeCompare(String(a.date || '')); });
+    body = '<div class="log-day-card"><div class="log-day-card-header"><div class="log-day-card-date">' +
+        '<span class="log-day-card-dow">Search</span><span class="log-day-card-num">' + hits.length + ' result' + (hits.length === 1 ? '' : 's') + '</span></div></div>' +
+      '<div class="log-day-card-body">' +
+        (hits.length ? hits.map(function(b) {
+          return '<div class="brief-search-hit"><div class="brief-search-meta">' + escapeHtml(b.owner || 'No owner') + ' · ' + escapeHtml(formatDate(b.date)) + '</div>' + renderBriefRow(b) + '</div>';
+        }).join('') : '<div class="log-day-empty">No briefs match “' + escapeHtml(STATE.briefsSearch.trim()) + '”.</div>') +
+      '</div></div>';
+  } else if (view === 'weekly') {
+    var dows = days.map(function(d) { return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(d + 'T00:00:00').getDay()]; });
+    var dayTotals = days.map(function(_, i) { return ownerKeys.reduce(function(s, o) { return s + counts[o][i]; }, 0); });
+    body = '<div class="log-day-card"><div class="brief-week-wrap"><table class="brief-week">' +
+      '<thead><tr><th class="brief-week-owner">Owner</th>' + days.map(function(d, i) {
+        return '<th' + (d === today ? ' class="is-today"' : '') + '>' + dows[i] + '<span>' + escapeHtml(formatDate(d).replace(/ \d{4}$/, '')) + '</span></th>';
+      }).join('') + '<th>Total</th></tr></thead><tbody>' +
+      (ownerKeys.length ? ownerKeys.map(function(o) {
+        var row = counts[o];
+        return '<tr><td class="brief-week-owner">' + escapeHtml(o) + '</td>' + row.map(function(n) {
+          return '<td><span class="brief-n' + (n ? '' : ' is-zero') + '">' + n + '</span></td>';
+        }).join('') + '<td class="brief-week-total">' + row.reduce(function(s, n) { return s + n; }, 0) + '</td></tr>';
+      }).join('') : '<tr><td colspan="7" class="log-day-empty">No briefs logged this week.</td></tr>') +
+      '</tbody>' + (ownerKeys.length > 1 ? '<tfoot><tr><td class="brief-week-owner">All owners</td>' + dayTotals.map(function(n) { return '<td>' + n + '</td>'; }).join('') + '<td class="brief-week-total">' + weekTotal + '</td></tr></tfoot>' : '') +
+      '</table></div></div>';
+  } else {
+    body = days.map(function(d) {
+      var dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(d + 'T00:00:00').getDay()];
+      var dayBriefs = inWeek.filter(function(b) { return String(b.date).slice(0, 10) === d; });
+      var byOwner = {};
+      dayBriefs.forEach(function(b) { var o = (b.owner || '').trim() || 'No owner'; (byOwner[o] = byOwner[o] || []).push(b); });
+      var oKeys = Object.keys(byOwner).sort(function(a, b) { return a.localeCompare(b); });
+      var sections = oKeys.length ? oKeys.map(function(o) {
+        return '<div class="wlog-section"><div class="wlog-section-label brief-owner-label">' + escapeHtml(o) + ' · ' + escapeHtml(formatDate(d)) +
+          '<span class="brief-count">' + byOwner[o].length + '</span></div>' +
+          '<div class="log-day-card-body">' + byOwner[o].map(renderBriefRow).join('') + '</div></div>';
+      }).join('') : '<div class="log-day-empty">No briefs logged on ' + dow + '.</div>';
+      return '<div class="log-day-card' + (d === today ? ' is-today' : '') + '">' +
+        '<div class="log-day-card-header"><div class="log-day-card-date">' +
+          '<span class="log-day-card-dow">' + dow + '</span><span class="log-day-card-num">' + escapeHtml(formatDate(d)) + '</span>' +
+          (d === today ? '<span class="log-day-today-pill">TODAY</span>' : '') + '</div>' +
+          '<div class="log-day-card-stats ' + (dayBriefs.length ? 'log-day-hit' : 'log-day-miss') + '"><span class="log-day-card-num-big">' + dayBriefs.length + '</span>' +
+          '<span class="log-day-card-stats-label">brief' + (dayBriefs.length === 1 ? '' : 's') + '</span></div>' +
+        '</div>' + sections + '</div>';
+    }).join('');
+  }
+
+  return '<div class="log-wrap">' +
+    '<div class="log-top">' +
+      '<div class="log-top-left">' +
+        '<h2 class="log-title">Briefs</h2>' +
+        '<div class="log-sub">Every brief written, and who wrote it · only you can see this tab</div>' +
+      '</div>' +
+      '<button class="run-btn" style="white-space:nowrap;" onclick="App.addBrief()">+ Add brief</button>' +
+    '</div>' +
+    controls +
+    '<div class="log-day-cards">' + body + '</div>' +
+  '</div>';
+}
+
+function showBriefModal(briefId) {
+  if (!isBriefsUser()) { toast('Briefs are only available to Elsa', 'error'); return; }
+  var isEdit = !!briefId;
+  var b = isEdit ? briefLogList().filter(function(x) { return x.id === briefId; })[0] : null;
+  if (isEdit && !b) { toast('Brief not found', 'error'); return; }
+  var campOpts = '<option value="">No campaign</option>' + STATE.campaigns.slice()
+    .sort(function(x, y) { return String(y.monthYear || '').localeCompare(String(x.monthYear || '')) || String(x.name).localeCompare(String(y.name)); })
+    .map(function(c) {
+      return '<option value="' + escapeHtml(String(c.id)) + '"' + (b && String(b.campaignId) === String(c.id) ? ' selected' : '') + '>' +
+        escapeHtml((c.country ? c.country + ' · ' : '') + c.name + (c.monthYear ? ' (' + c.monthYear + ')' : '')) + '</option>';
+    }).join('');
+  var html =
+    '<div class="modal-title">' + (isEdit ? 'Edit brief' : 'Add brief') + '</div>' +
+    '<div class="form-grid">' +
+      '<div class="form-row full"><label class="form-label">Title</label>' +
+        '<input id="f-br-title" class="form-input" placeholder="Retro Sneaker Drop — hooks" value="' + escapeHtml((b && b.title) || '') + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Notion link <span style="color:var(--text3);font-weight:400;">(optional)</span></label>' +
+        '<input id="f-br-url" type="url" class="form-input" placeholder="https://www.notion.so/..." value="' + escapeHtml((b && b.notionUrl) || '') + '"></div>' +
+      '<div class="form-row"><label class="form-label">Owner</label>' +
+        '<input id="f-br-owner" class="form-input" list="f-br-owners" placeholder="Who wrote it" value="' + escapeHtml((b && b.owner) || '') + '">' +
+        '<datalist id="f-br-owners">' + briefOwners().map(function(o) { return '<option value="' + escapeHtml(o) + '">'; }).join('') + '</datalist></div>' +
+      '<div class="form-row"><label class="form-label">Date written</label>' +
+        '<input id="f-br-date" type="date" class="form-input" value="' + escapeHtml((b && b.date) || todayISO()) + '"></div>' +
+      '<div class="form-row full"><label class="form-label">Campaign <span style="color:var(--text3);font-weight:400;">(optional)</span></label>' +
+        '<select id="f-br-camp" class="form-input">' + campOpts + '</select></div>' +
+      '<div class="form-row full"><label class="form-label">Category <span style="color:var(--text3);font-weight:400;">(optional, filled from the campaign)</span></label>' +
+        '<input id="f-br-cat" class="form-input" placeholder="Sneakers" value="' + escapeHtml((b && b.category) || '') + '"></div>' +
+      '<div id="f-br-err" class="brief-form-err"></div>' +
+    '</div>' +
+    '<div class="modal-actions"><button class="cancel-btn" id="modal-cancel">Cancel</button>' +
+      '<button class="submit-btn" id="modal-submit">' + (isEdit ? 'Save' : 'Add brief') + '</button></div>';
+
+  openModal(html, function() {
+    var err = document.getElementById('f-br-err');
+    function fail(msg) { err.textContent = msg; }
+    var title = (document.getElementById('f-br-title').value || '').trim();
+    var notionUrl = (document.getElementById('f-br-url').value || '').trim();
+    var owner = (document.getElementById('f-br-owner').value || '').trim();
+    var date = (document.getElementById('f-br-date').value || '').trim();
+    var campId = document.getElementById('f-br-camp').value;
+    var category = (document.getElementById('f-br-cat').value || '').trim();
+    if (!title) return fail('Add a title for the brief.');
+    if (notionUrl && !/^https?:\/\/\S+$/i.test(notionUrl)) return fail('The Notion link needs to be a full URL starting with https://');
+    if (!owner) return fail('Add who wrote the brief.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('Pick the date the brief was written.');
+    var camp = campId ? findCampaignById(campId) : null;
+    if (!category && camp && camp.category) category = camp.category;
+    STATE.briefLog = briefLogList();
+    var who = (Auth && Auth.user && Auth.user.email) || '';
+    if (isEdit) {
+      b.title = title; b.notionUrl = notionUrl; b.owner = owner; b.date = date;
+      b.campaignId = camp ? camp.id : null; b.category = category;
+      b.updatedAt = new Date().toISOString(); b.updatedBy = who;
+      logAction('updated', 'Brief "' + title + '" edited');
+      toast('Brief updated', 'success');
+    } else {
+      var rec = { id: newLocalId('br'), title: title, notionUrl: notionUrl, owner: owner, date: date,
+        campaignId: camp ? camp.id : null, category: category, createdAt: new Date().toISOString(), createdBy: who };
+      STATE.briefLog.push(rec);
+      logAction('created', 'Brief "' + title + '" logged for ' + owner);
+      toast('Brief added', 'success');
+      postNewBriefToSlack(rec);
+    }
+    saveState();
+    closeModal();
+    render();
+  });
+  // Fill category from the chosen campaign when the field is still empty.
+  var campSel = document.getElementById('f-br-camp');
+  if (campSel) campSel.addEventListener('change', function() {
+    var c = findCampaignById(campSel.value), cat = document.getElementById('f-br-cat');
+    if (c && c.category && cat && !cat.value.trim()) cat.value = c.category;
+  });
+}
+
+// ── Briefs → Slack (admin only) ──
+function briefsSlackConfig() {
+  var c = STATE.briefsSlack && typeof STATE.briefsSlack === 'object' ? STATE.briefsSlack : {};
+  return { channelId: String(c.channelId || '').trim(), postEach: !!c.postEach, weekly: !!c.weekly };
+}
+
+function briefSlackText(b) {
+  var base = (typeof location !== 'undefined') ? (location.origin + location.pathname) : '';
+  var label = briefCampaignLabel(b);
+  var url = extractSingleUrl(b.notionUrl || '');
+  return ':memo: New brief: *' + b.title + '*\n' +
+    'By ' + b.owner + ' · ' + formatDate(b.date) + (label ? ' · ' + label : '') + '\n' +
+    (url ? '<' + url + '|Open in Notion>' : 'No Notion link') + (base ? '  ·  <' + base + '#briefs|Briefs tab>' : '');
+}
+
+// Fire-and-forget: the brief is already saved; a Slack failure only shows a toast.
+function postNewBriefToSlack(b) {
+  var cfg = briefsSlackConfig();
+  if (!cfg.postEach || !cfg.channelId) return;
+  postToSlackThread(cfg.channelId, null, briefSlackText(b)).then(function(res) {
+    if (!res || !res.ok) toast('Brief saved, but the Slack post failed: ' + ((res && res.body) || 'unknown error'), 'error');
+  });
+}
+
+function renderBriefsSlackCard() {
+  if (!(Auth && Auth.user && Auth.user._realRole === 'admin')) return '';
+  var cfg = briefsSlackConfig();
+  return '<div class="auto-card">' +
+    '<div class="auto-header"><div class="auto-icon">📝</div><div><div class="auto-title">Briefs to Slack</div><div class="auto-sub">admins only · posts from the Briefs tab</div></div></div>' +
+    '<div class="auto-desc">Post each new brief, and a summary every Monday at 9am UK (briefs per owner last week), to one Slack channel. Use a private admin channel and invite the bot to it first.</div>' +
+    '<div class="cwh-row">' +
+      '<span class="cwh-dot ' + (cfg.channelId ? 'ok' : '') + '"></span>' +
+      '<input type="text" id="briefs-slack-channel" placeholder="Channel ID, e.g. C0123ABCD" value="' + escapeHtml(cfg.channelId) + '" onblur="App.setBriefsSlack(\'channelId\', this.value)">' +
+      '<button class="save-btn" onclick="App.setBriefsSlack(\'channelId\', document.getElementById(\'briefs-slack-channel\').value)">Save</button>' +
+    '</div>' +
+    '<label class="brief-check"><input type="checkbox"' + (cfg.postEach ? ' checked' : '') + ' onchange="App.setBriefsSlack(\'postEach\', this.checked)"> Post each new brief</label>' +
+    '<label class="brief-check"><input type="checkbox"' + (cfg.weekly ? ' checked' : '') + ' onchange="App.setBriefsSlack(\'weekly\', this.checked)"> Weekly summary, Mondays 9am UK</label>' +
+    '<button class="run-btn" style="margin-top:8px;" onclick="App.sendBriefsSummaryNow()">Send summary now</button>' +
   '</div>';
 }
 
@@ -11330,6 +11654,8 @@ function renderAutomationsView() {
         }).join('') +
       '</div>' +
     '</div>' +
+
+    renderBriefsSlackCard() +
 
     '<div class="auto-card">' +
       '<div class="auto-header"><div class="auto-icon">📥</div><div><div class="auto-title">Import Campaigns & Assets</div><div class="auto-sub">load data from Google Sheets CSV export</div></div></div>' +
@@ -18633,13 +18959,14 @@ function render() {
   // would only fix this on the next render, leaving one frame of wrong body.
   var roleNow = (Auth && Auth.user && Auth.user.role) ? Auth.user.role : 'editor';
   var allowedNow = tabsForRole(roleNow);
-  if (allowedNow.indexOf(STATE.tab) < 0 && allowedNow.length > 0) {
+  if (allowedNow.indexOf(STATE.tab) < 0 && !(STATE.tab === 'briefs' && isBriefsUser()) && allowedNow.length > 0) {
     // Prefer the first tab in the user's stored order that's still allowed,
     // so it respects their custom tab arrangement.
     var preferred = (Array.isArray(STATE.tabOrder) ? STATE.tabOrder : DEFAULT_TAB_ORDER)
       .filter(function(k) { return allowedNow.indexOf(k) >= 0; });
     STATE.tab = preferred[0] || allowedNow[0];
   }
+  if (STATE.tab === 'briefs' && !isBriefsUser()) STATE.tab = 'campaigns';
 
   var body;
   if (STATE.tab === 'today') body = renderTodayView();
@@ -18647,6 +18974,7 @@ function render() {
   else if (STATE.tab === 'campaigns') body = renderSidebar() + renderCampaignsView();
   else if (STATE.tab === 'editingCalendar') body = renderEditingCalendarView();
   else if (STATE.tab === 'log') body = renderDailyLogView();
+  else if (STATE.tab === 'briefs') body = renderBriefsView();
   else if (STATE.tab === 'grading') body = renderGradingView();
   else if (STATE.tab === 'editingStyle') body = renderEditingStyleView();
   else if (STATE.tab === 'editorHome') body = renderEditorHomeView();
@@ -20080,6 +20408,59 @@ var App = {
     if (isNaN(n) || n > 0) return;
     STATE.logWeekOffset = n;
     render();
+  },
+  // ===== Briefs tab =====
+  setBriefsFilter: function(kind, value) {
+    if (kind === 'search') STATE.briefsSearch = value || '';
+    else if (kind === 'owner') STATE.briefsOwner = value || '';
+    else if (kind === 'week') { var n = parseInt(value, 10); if (isNaN(n) || n > 0) return; STATE.briefsWeekOffset = n; }
+    else if (kind === 'view') STATE.briefsView = value === 'weekly' ? 'weekly' : 'daily';
+    saveState();
+    render();
+  },
+  addBrief: function() { showBriefModal(null); },
+  editBrief: function(id) { showBriefModal(id); },
+  deleteBrief: function(id) {
+    if (!isBriefsUser()) return;
+    var b = briefLogList().filter(function(x) { return x.id === id; })[0];
+    if (!b) return;
+    if (!confirm('Delete the brief "' + (b.title || 'Untitled') + '"?')) return;
+    STATE.briefLog = briefLogList().filter(function(x) { return x.id !== id; });
+    logAction('deleted', 'Brief "' + (b.title || 'Untitled') + '" deleted');
+    saveState();
+    render();
+    toast('Brief deleted', 'success');
+  },
+  setBriefsSlack: function(key, value) {
+    if (!(Auth && Auth.user && Auth.user._realRole === 'admin')) { toast('Admin only', 'error'); return; }
+    var cfg = briefsSlackConfig();
+    if (key === 'channelId') {
+      var v = String(value || '').trim();
+      if (v && !/^[CGD][A-Z0-9]{6,}$/.test(v)) { toast('That doesn\'t look like a Slack channel ID (it starts with C or G)', 'error'); return; }
+      if (v === cfg.channelId) return;
+      cfg.channelId = v;
+    } else if (key === 'postEach' || key === 'weekly') {
+      cfg[key] = !!value;
+    } else return;
+    STATE.briefsSlack = cfg;
+    logAction('updated', 'Briefs to Slack: ' + key + ' changed');
+    saveState();
+    render();
+    toast('Briefs to Slack saved', 'success');
+  },
+  sendBriefsSummaryNow: function() {
+    if (!(Auth && Auth.user && Auth.user._realRole === 'admin')) { toast('Admin only', 'error'); return; }
+    if (!briefsSlackConfig().channelId) { toast('Add a channel ID first', 'error'); return; }
+    toast('Sending the briefs summary\u2026', 'info');
+    try {
+      firebase.functions().httpsCallable('runWeeklyBriefsSummaryNow')({})
+        .then(function(r) {
+          var d = (r && r.data) || {};
+          if (d.ok) toast('Briefs summary sent', 'success');
+          else toast('Summary not sent: ' + (d.error || 'unknown error'), 'error');
+        })
+        .catch(function(err) { toast('Summary not sent: ' + ((err && (err.message || err.code)) || 'network error'), 'error'); });
+    } catch (e) { toast('Summary not sent: ' + (e && e.message || 'functions unavailable'), 'error'); }
   },
   exportDailyLog: function(offset) {
     exportDailyLogCSV(parseInt(offset, 10) || 0);
@@ -24419,6 +24800,12 @@ bootApp = function() {
             setTimeout(function() { el.classList.remove('block-highlight-flash'); }, 2500);
           }
         }, 400);
+      }
+      // #briefs → the Briefs tab (linked from the briefs Slack posts). Elsa only;
+      // the router sends anyone else to Campaigns.
+      if (/^#briefs\b/.test(location.hash || '')) {
+        STATE.tab = 'briefs';
+        render();
       }
       var match = (location.hash || '').match(/^#campaign=([^&]+)(?:&asset=([^&]+))?/);
       if (match) {

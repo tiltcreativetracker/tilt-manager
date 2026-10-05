@@ -1148,6 +1148,44 @@
   .wlog-eod-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: var(--accent2); background: var(--accent-dim); border-radius: 4px; padding: 2px 6px; white-space: nowrap; text-decoration: none; }
   a.wlog-eod-tag:hover { text-decoration: underline; }
 
+  /* Briefs tab (Elsa only). Reuses the Weekly Log layout; these are the extras. */
+  .brief-bar-left { flex-wrap: wrap; flex: 1; min-width: 0; }
+  .brief-search { width: 240px; max-width: 100%; padding: 6px 10px; font-size: 13px; }
+  .brief-select { min-width: 140px; }
+  .brief-toggle { display: inline-flex; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; padding: 2px; }
+  .brief-toggle button { background: transparent; border: none; color: var(--text2); font-family: inherit; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+  .brief-toggle button.on { background: var(--accent); color: #fff; }
+  .brief-owner-label { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text1); font-family: inherit; font-weight: 600; }
+  .brief-count { font-size: 10.5px; font-weight: 700; padding: 0 7px; border-radius: 9px; background: var(--accent-dim); color: var(--accent2); font-family: 'JetBrains Mono', monospace; }
+  .brief-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .brief-link { font-size: 11.5px; color: var(--accent2); text-decoration: none; white-space: nowrap; }
+  .brief-link:hover { text-decoration: underline; }
+  .brief-link-none { color: var(--text3); }
+  .brief-search-hit { border-top: 1px solid var(--border); }
+  .brief-search-hit:first-child { border-top: none; }
+  .brief-search-meta { padding: 8px 14px 0; font-size: 10.5px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .brief-search-hit .log-day-vid-row { border-top: none; }
+  .brief-week-wrap { overflow-x: auto; }
+  .brief-week { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .brief-week th, .brief-week td { padding: 9px 10px; text-align: center; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .brief-week th { font-size: 10.5px; font-weight: 700; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; background: var(--bg3); }
+  .brief-week th span { display: block; font-weight: 500; letter-spacing: 0; text-transform: none; margin-top: 2px; }
+  .brief-week th.is-today { color: var(--accent2); }
+  .brief-week .brief-week-owner { text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--text1); }
+  .brief-week .brief-n { display: inline-block; min-width: 24px; padding: 2px 6px; border-radius: 4px; background: var(--accent-dim); color: var(--accent2); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .brief-week .brief-n.is-zero { background: transparent; color: var(--text3); font-weight: 400; }
+  .brief-week .brief-week-total { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text1); }
+  .brief-week tfoot td { color: var(--text2); font-family: 'JetBrains Mono', monospace; border-bottom: none; }
+  .brief-form-err { grid-column: 1 / -1; color: var(--red-text); font-size: 12px; min-height: 0; }
+  .brief-form-err:empty { display: none; }
+  .brief-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); padding: 6px 0; cursor: pointer; }
+  .brief-check input { width: auto; margin: 0; }
+  @media (max-width: 640px) {
+    .brief-search { width: 100%; }
+    .brief-select { min-width: 0; }
+    .log-editor-bar-left.brief-bar-left .log-editor-picker { flex: 1 1 140px; }
+  }
+
   .wlog-cat-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; border: 1px solid transparent; white-space: nowrap; }
   .wlog-cat-chip.wlog-cat-tagging   { background: var(--blue-bg);   color: var(--blue-text);   border-color: rgba(133,183,235,0.35); }
   .wlog-cat-chip.wlog-cat-training  { background: rgba(94,234,212,0.10); color: #5eead4; border-color: rgba(94,234,212,0.35); }
