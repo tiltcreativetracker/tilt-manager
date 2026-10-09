@@ -19,7 +19,7 @@ service cloud.firestore {
     // Non-tilt Google accounts allowed in. Keep in sync with GUEST_EMAILS in
     // app.js and functions/index.js.
     function guestEmails() {
-      return ['elsafanidiv@gmail.com', 'fuentesharm888@gmail.com', 'pttymnzn@gmail.com'];
+      return ['elsafanidiv@gmail.com', 'fuentesharm888@gmail.com', 'pttymnzn@gmail.com', 'zidninst@gmail.com'];
     }
 
     function myRole() {

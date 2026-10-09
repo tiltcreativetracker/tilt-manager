@@ -17,8 +17,8 @@ var ALLOWED_EMAIL_DOMAIN = 'tilt.app';
 var GUEST_EMAILS = {
   'elsafanidiv@gmail.com': 'elsa@tilt.app',
   'fuentesharm888@gmail.com': 'sharm@tilt.app',
-  'pttymnzn@gmail.com': 'patty@tilt.app'
-  // Zidni: add '<gmail>': 'zidni@tilt.app' once we have it
+  'pttymnzn@gmail.com': 'patty@tilt.app',
+  'zidninst@gmail.com': 'zidni@tilt.app'
 };
 
 firebase.initializeApp(firebaseConfig);

@@ -33,6 +33,7 @@ const GUEST_EMAILS = {
   'elsafanidiv@gmail.com': 'elsa@tilt.app',
   'fuentesharm888@gmail.com': 'sharm@tilt.app',
   'pttymnzn@gmail.com': 'patty@tilt.app',
+  'zidninst@gmail.com': 'zidni@tilt.app',
 };
 
 // The caller's email, with a guest Gmail swapped for its @tilt.app identity.
