@@ -27,10 +27,24 @@ const FRAMEIO_TOKEN = defineSecret('FRAMEIO_TOKEN');
 
 const ALLOWED_DOMAIN = 'tilt.app';
 
+// Non-tilt Google accounts allowed in, mapped to their owner's @tilt.app
+// identity. Keep in sync with GUEST_EMAILS in app.js and firestore.rules.
+const GUEST_EMAILS = {
+  'elsafanidiv@gmail.com': 'elsa@tilt.app',
+  'fuentesharm888@gmail.com': 'sharm@tilt.app',
+  'pttymnzn@gmail.com': 'patty@tilt.app',
+};
+
+// The caller's email, with a guest Gmail swapped for its @tilt.app identity.
+function callerEmail(request) {
+  const raw = ((request.auth && request.auth.token && request.auth.token.email) || '').toLowerCase();
+  return GUEST_EMAILS[raw] || raw;
+}
+
 // Reject any call from a user who isn't signed in with @tilt.app.
 function requireTiltUser(request) {
-  const email = request.auth && request.auth.token && request.auth.token.email;
-  if (!email || !email.toLowerCase().endsWith('@' + ALLOWED_DOMAIN)) {
+  const email = callerEmail(request);
+  if (!email || !email.endsWith('@' + ALLOWED_DOMAIN)) {
     throw new HttpsError('permission-denied', 'Only @' + ALLOWED_DOMAIN + ' users may call this function.');
   }
 }
@@ -966,7 +980,7 @@ exports.syncDriveClips = onCall(
   { secrets: [DRIVE_SERVICE_ACCOUNT_JSON], region: 'us-central1', timeoutSeconds: 540, memory: '1GiB' },
   async (request) => {
     requireTiltUser(request);
-    const email = request.auth && request.auth.token && request.auth.token.email;
+    const email = callerEmail(request);
     const stats = await runDriveSync({ trigger: 'manual', byEmail: email });
     return { ok: true, stats };
   }
@@ -1157,7 +1171,7 @@ exports.generateCaptionsForAsset = onCall(
       },
       model: CAPTION_MODEL,
       ms,
-      byEmail: (request.auth && request.auth.token && request.auth.token.email) || null,
+      byEmail: callerEmail(request) || null,
       ts: admin.firestore.FieldValue.serverTimestamp(),
     };
     try {
@@ -1194,7 +1208,7 @@ exports.getLinearTasks = onCall(
     // SECURITY: default to the caller's own email. An arbitrary `data.email`
     // would let any signed-in @tilt.app user enumerate someone else's assigned
     // Linear issues; only trust the auth token here.
-    const email = (request.auth && request.auth.token && request.auth.token.email) || '';
+    const email = callerEmail(request);
     if (!email) {
       throw new HttpsError('invalid-argument', 'auth email required');
     }
@@ -1419,7 +1433,7 @@ exports.runBiWeeklyKpiNow = onCall(
   { secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 540 },
   async (request) => {
     requireTiltUser(request);
-    const email = (request.auth && request.auth.token && request.auth.token.email) || '';
+    const email = callerEmail(request);
     // Cross-check the caller is an admin against the users doc. If the users
     // doc isn't reachable, refuse rather than fall open.
     try {
@@ -1520,7 +1534,7 @@ exports.runWeeklyBriefsSummaryNow = onCall(
   { secrets: [SLACK_BOT_TOKEN], region: 'us-central1', timeoutSeconds: 120 },
   async (request) => {
     requireTiltUser(request);
-    const email = (request.auth && request.auth.token && request.auth.token.email) || '';
+    const email = callerEmail(request);
     try {
       const userDoc = await db.collection('users').doc(email).get();
       const role = userDoc.exists ? (userDoc.data().role || '') : '';

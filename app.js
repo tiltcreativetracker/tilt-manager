@@ -11,6 +11,15 @@ if (!window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.tracker || !window.FIREBA
 }
 var firebaseConfig = window.FIREBASE_CONFIG.tracker;
 var ALLOWED_EMAIL_DOMAIN = 'tilt.app';
+// Non-tilt Google accounts allowed in, each mapped to its owner's @tilt.app
+// identity so the app treats them as that person (role, editor, training).
+// Keep in sync with GUEST_EMAILS in firestore.rules and functions/index.js.
+var GUEST_EMAILS = {
+  'elsafanidiv@gmail.com': 'elsa@tilt.app',
+  'fuentesharm888@gmail.com': 'sharm@tilt.app',
+  'pttymnzn@gmail.com': 'patty@tilt.app'
+  // Zidni: add '<gmail>': 'zidni@tilt.app' once we have it
+};
 
 firebase.initializeApp(firebaseConfig);
 firebase.setLogLevel('error'); // suppress verbose SDK info/debug logs (backoff notices etc.)
@@ -263,6 +272,7 @@ var Auth = {
       // Client-side @tilt.app domain enforcement. The Cloud Function trigger
       // (Phase D) will enforce this server-side too; for now this is the gate.
       var email = (fbUser.email || '').toLowerCase();
+      if (GUEST_EMAILS[email]) email = GUEST_EMAILS[email];
       if (!email.endsWith('@' + ALLOWED_EMAIL_DOMAIN)) {
         fbAuth.signOut().finally(function() {
           showSigninOverlay('Only @' + ALLOWED_EMAIL_DOMAIN + ' Google accounts are permitted. You signed in as ' + email + '.');
@@ -332,10 +342,9 @@ var Auth = {
     var btn = document.getElementById('signin-btn');
     if (btn) btn.disabled = true;
     var provider = new firebase.auth.GoogleAuthProvider();
-    // `hd` filters the Google account picker to tilt.app accounts as a UX hint.
-    // It is NOT a security boundary \u2014 the email check above + the Cloud
-    // Function in Phase D are what actually enforce the domain restriction.
-    provider.setCustomParameters({ hd: ALLOWED_EMAIL_DOMAIN, prompt: 'select_account' });
+    // No `hd` hint: it would hide the GUEST_EMAILS Gmail accounts from the
+    // picker. The email check above + Firestore rules enforce who gets in.
+    provider.setCustomParameters({ prompt: 'select_account' });
     fbAuth.signInWithPopup(provider).catch(function(err) {
       if (btn) btn.disabled = false;
       // popup-closed-by-user is benign \u2014 don't render an error toast for it

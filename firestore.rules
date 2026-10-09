@@ -12,7 +12,14 @@ service cloud.firestore {
       return isSignedIn()
           && request.auth.token.email != null
           && request.auth.token.email_verified == true
-          && request.auth.token.email.matches('.*@tilt[.]app$');
+          && (request.auth.token.email.matches('.*@tilt[.]app$')
+              || request.auth.token.email.lower() in guestEmails());
+    }
+
+    // Non-tilt Google accounts allowed in. Keep in sync with GUEST_EMAILS in
+    // app.js and functions/index.js.
+    function guestEmails() {
+      return ['elsafanidiv@gmail.com', 'fuentesharm888@gmail.com', 'pttymnzn@gmail.com'];
     }
 
     function myRole() {
